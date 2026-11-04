@@ -95,9 +95,7 @@ export default function Home() {
     <div className="bg-background overflow-x-hidden">
       <Hero />
 
-
-
-      <header className="bg-[#b3a8ff] py-12 lg:py-24 px-4">
+      <header id="play" className="bg-[#b3a8ff] py-12 lg:py-24 px-4 scroll-mt-4">
         <div className="mx-auto max-w-7xl flex flex-col lg:flex-row justify-center items-center gap-6">
             <div className="w-full max-w-sm lg:w-1/3">
                 <GameCard 
@@ -128,7 +126,7 @@ export default function Home() {
       </header>
 
       <main className="flex flex-col items-center mt-16 px-4 md:px-8 pb-16">
-        <div className="w-full max-w-5xl">
+        <div id="games" className="w-full max-w-5xl scroll-mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             {allGames.map((game) => (
               <GameCard key={game.slug} game={game} />

@@ -1,9 +1,21 @@
 import type { Metadata } from "next";
+import { Inter, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { FirebaseClientProvider } from "@/firebase/client-provider";
-import { Header } from "@/components/header";
 import { PwaInstaller } from "@/components/pwa-installer";
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const robotoSlab = Roboto_Slab({
+  subsets: ["latin"],
+  variable: "--font-roboto-slab",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "21 Games by SOL Theory",
@@ -16,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${robotoSlab.variable}`}>
       <head>
         <meta
           name="viewport"
@@ -26,12 +38,12 @@ export default function RootLayout({
       </head>
       <body className="font-body antialiased">
         <FirebaseClientProvider>
-          <Header />
           <PwaInstaller />
-          <div className="pt-20">{children}</div>
+          <div>{children}</div>
         </FirebaseClientProvider>
         <Toaster />
       </body>
     </html>
   );
 }
+

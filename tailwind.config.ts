@@ -10,10 +10,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        body: ['Inter', 'sans-serif'],
-        headline: ['"Roboto Slab"', 'serif'],
+        body: ['var(--font-inter)', 'Inter', 'sans-serif'],
+        headline: ['var(--font-roboto-slab)', '"Roboto Slab"', 'serif'],
         code: ['monospace'],
-        wordle: ['"Roboto Slab"', 'serif'],
+        wordle: ['var(--font-roboto-slab)', '"Roboto Slab"', 'serif'],
         connect: ['Georgia', '"Times New Roman"', 'serif'],
         merriweather: ['"Merriweather"', 'serif'],
       },

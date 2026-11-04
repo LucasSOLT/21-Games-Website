@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:solworld": "NEXT_PUBLIC_BASE_PATH=/solgames next build",
+    "deploy:solworld": "npm run build:solworld && rsync -a --delete out/ ../SOL-World/solgames/ && rsync -a --delete out/ ../SOL-World/dist/solgames/ && rsync -a --delete out/ ../SOL-World/public/solgames/"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

@@ -1,12 +1,28 @@
 import React from 'react';
+import { assetPath } from '@/lib/asset-path';
 
 export function Hero() {
   return (
     <div className="container">
+        <nav className="navbar">
+            <div className="logo">
+                <img src={assetPath('/logo.png')} alt="SOL GaMES" style={{ height: '140px', marginTop: '-40px', marginBottom: '-40px', marginLeft: '-15px' }} />
+            </div>
+            <div className="nav-links">
+                <a href="#games" className="nav-link">Games</a>
+                <a href="#challenges" className="nav-link">Challenges</a>
+                <a href="#community" className="nav-link">Community</a>
+                <a href="#about" className="nav-link">About</a>
+            </div>
+            <a href="#play" className="btn btn-primary">
+                Play Now <span style={{ color: '#FFC107', marginLeft: '6px' }}>→</span>
+            </a>
+        </nav>
+
         <main className="hero">
             <div className="hero-content">
                 <h1 className="hero-title">
-                    SOL <span className="highlight-yellow">GaMES.</span><br />
+                    Smart <span className="highlight-yellow">Games.</span><br />
                     New <span className="highlight-green">Challenges.</span><br />
                     Every <span className="highlight-purple">Day.</span>
                 </h1>
@@ -31,7 +47,9 @@ export function Hero() {
                 </p>
 
                 <div className="cta-group">
-                    <a href="#play" className="btn btn-primary btn-lg">Play Now &rarr;</a>
+                    <a href="#play" className="btn btn-primary btn-lg">
+                        Play Now <span style={{ color: '#FFC107', marginLeft: '8px' }}>→</span>
+                    </a>
                     <a href="#trailer" className="btn btn-secondary btn-lg">
                         <svg className="play-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
@@ -43,11 +61,8 @@ export function Hero() {
             </div>
 
             <div className="hero-visual">
-                <div className="bg-shape shape-purple"></div>
-                <div className="bg-shape shape-yellow"></div>
-                <div className="bg-shape shape-green"></div>
-                <div className="bg-dots"></div>
-                <img src="/hero-image.png" alt="Hands holding a smartphone" className="hero-image" />
+                <img src={assetPath('/boxes-bg.png')} alt="Background Boxes" className="hero-boxes-bg" />
+                <img src={assetPath('/hands.png')} alt="Hands holding a smartphone" className="hero-hands" />
             </div>
         </main>
 
