@@ -1,9 +1,27 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+// The site is a static export (`output: 'export'`), so anything computed during
+// prerender is frozen at build time, in the build machine's timezone. The
+// featured cards' "today" label therefore has to be computed in the browser.
+const todayFormatter = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+});
+const subscribeNoop = () => () => {};
+const getTodayLabel = () => todayFormatter.format(new Date());
+// Non-breaking space keeps the line height stable until hydration fills it in.
+const getServerTodayLabel = () => "\u00A0";
+
+function useTodayLabel(): string {
+  return useSyncExternalStore(subscribeNoop, getTodayLabel, getServerTodayLabel);
+}
 
 type GameColor = "yellow" | "green" | "purple" | "grey" | "customPurple" | "customYellow" | "customPurple2" | "customYellow2" | "customF4D621";
 
@@ -277,6 +295,8 @@ const GameLogo = ({ game, variant }: { game: Game, variant: 'default' | 'feature
 export function GameCard({ game, href, className, hideActions, variant = 'default', isCenter = false, date, author }: GameCardProps) {
   const isPlayable = game.slug === '21-things' || game.slug === '6-pics' || game.slug === 'connect-5';
   const gameHref = `/games/${game.slug}`;
+  const today = useTodayLabel();
+  const dateLabel = date ?? today;
 
   if (variant === 'featured') {
     if (isPlayable) {
@@ -285,7 +305,7 @@ export function GameCard({ game, href, className, hideActions, variant = 'defaul
           <Card className="h-full flex flex-col items-center justify-center p-6 text-center shadow-sm border-2 bg-white transition-all duration-300 group-hover:shadow-md">
               <GameLogo game={game} variant="featured" />
               <h2 className="text-3xl font-headline font-black mt-3 text-black">{game.name}</h2>
-              <p className="text-base mt-1 text-gray-500">{date}</p>
+              <p className="text-base mt-1 text-gray-500">{dateLabel}</p>
               <div className="w-16 h-px bg-gray-300 my-2"></div>
               <p className="text-base text-gray-500">by {author}</p>
           </Card>
@@ -297,7 +317,7 @@ export function GameCard({ game, href, className, hideActions, variant = 'defaul
         <Card className="h-full flex flex-col items-center justify-center p-6 text-center shadow-sm border-2 bg-white transition-all duration-300 group-hover:shadow-md">
             <GameLogo game={game} variant="featured" />
             <h2 className="text-3xl font-headline font-black mt-3 text-black">{game.name}</h2>
-            <p className="text-base mt-1 text-gray-500">{date}</p>
+            <p className="text-base mt-1 text-gray-500">{dateLabel}</p>
             <div className="w-16 h-px bg-gray-300 my-2"></div>
             <p className="text-base text-gray-500">by {author}</p>
             <p className="mt-4 font-bold text-gray-400">Coming Soon</p>

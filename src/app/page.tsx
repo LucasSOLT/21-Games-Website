@@ -80,12 +80,9 @@ const archiveData = [
 ];
 
 export default function Home() {
+    // Static export: don't compute "today" here (it would be frozen at build time).
+    // GameCard renders today's date client-side when no `date` prop is given.
     const today = new Date();
-    const formattedDate = new Intl.DateTimeFormat('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-    }).format(today);
 
     const centerGame = allGames.find(g => g.slug === '21-things');
     const leftGame = allGames.find(g => g.slug === '9-rhymes');
@@ -101,7 +98,6 @@ export default function Home() {
                 <GameCard 
                     game={leftGame!} 
                     variant="featured"
-                    date={formattedDate}
                     author={getAuthorForDate(today)}
                 />
             </div>
@@ -109,7 +105,6 @@ export default function Home() {
                 <GameCard 
                     game={centerGame!}
                     variant="featured"
-                    date={formattedDate}
                     author={getAuthorForDate(today)}
                     isCenter
                 />
@@ -118,7 +113,6 @@ export default function Home() {
                 <GameCard 
                     game={{...rightGame!, name: "4 Winning Colors"}}
                     variant="featured"
-                    date={formattedDate}
                     author="Stephen Huff"
                 />
             </div>
