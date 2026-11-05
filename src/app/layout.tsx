@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Inter, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
-import { FirebaseClientProvider } from "@/firebase/client-provider";
-import { PwaInstaller } from "@/components/pwa-installer";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -19,7 +17,7 @@ const robotoSlab = Roboto_Slab({
 
 export const metadata: Metadata = {
   title: "21 Games by SOL Theory",
-  description: "A collection of daily word, logic, and puzzle games.",
+  description: "Daily gratitude, word-chain, and logic puzzle games by SOL Theory.",
 };
 
 export default function RootLayout({
@@ -37,10 +35,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#000000" />
       </head>
       <body className="font-body antialiased">
-        <FirebaseClientProvider>
-          <PwaInstaller />
-          <div>{children}</div>
-        </FirebaseClientProvider>
+        <div>{children}</div>
         <Toaster />
       </body>
     </html>
