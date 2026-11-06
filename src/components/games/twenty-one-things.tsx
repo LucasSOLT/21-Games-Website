@@ -546,7 +546,7 @@ function TwentyOneThingsBoardView({
       reflectionNote ? `💬 "${reflectionNote}"` : "",
       typeof window !== "undefined"
         ? window.location.href
-        : "https://21games.ai/games/21-things",
+        : "https://www.solworld.ai/solgames/games/21-things",
     ]
       .filter(Boolean)
       .join("\n");
@@ -721,7 +721,7 @@ function TwentyOneThingsBoardView({
     const origin =
       typeof window !== "undefined"
         ? `${window.location.origin}${window.location.pathname}`
-        : "https://21games.ai/games/21-things";
+        : "https://www.solworld.ai/solgames/games/21-things";
     const fullUrl = `${origin}?boardId=${encodeURIComponent(
       customBoard.id
     )}&board=${encodeURIComponent(token)}`;

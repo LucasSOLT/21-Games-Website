@@ -115,7 +115,9 @@ export function buildLast7DaysStrip(
 export function buildBoardShareUrl(board: TwentyOneThingsBoard): string {
   const token = encodeShareable21Board(board);
   const origin =
-    typeof window !== "undefined" ? window.location.origin : "https://21games.ai";
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://www.solworld.ai";
   const path = assetPath("/games/21-things");
   return `${origin}${path}?boardId=${encodeURIComponent(
     board.id

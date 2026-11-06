@@ -145,26 +145,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchRemoteConnect5Override(targetDate).then((remoteC5) => {
-      if (cancelled || !remoteC5) return;
-      setC5Title(remoteC5.title);
-      setC5Author(remoteC5.author);
-      setC5Editor(remoteC5.editor);
-      setC5Words([...remoteC5.words]);
-      setC5Connections([...remoteC5.connections]);
-      setC5Hints([...remoteC5.revealedHints]);
-    });
-    void fetchRemote21ThingsOverride(targetDate).then((remote21) => {
-      if (cancelled || !remote21) return;
-      setT21Title(remote21.title);
-      setT21Creator(remote21.creatorName);
-      setT21Bio(remote21.creatorBio);
-      setT21Items(remote21.items.slice(0, 21));
+    void Promise.resolve().then(async () => {
+      if (cancelled) return;
+      await loadScheduleForDate(targetDate);
     });
     return () => {
       cancelled = true;
     };
-  }, [targetDate]);
+  }, [targetDate, loadScheduleForDate]);
 
   // Toggle whether a specific letter in Rows 2-5 (rowIdx 1..4) is pre-revealed to the player
   const toggleC5HintLetter = (rowIdx: number, colIdx: number) => {
@@ -293,24 +281,25 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black">
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto max-w-6xl px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3.5 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap shrink-0"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Homepage
+              <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">Back to Homepage</span>
+              <span className="sm:hidden">Home</span>
             </Link>
-            <h1 className="font-headline font-black text-lg sm:text-xl">
-              SOL GaMES · Admin &amp; Daily Puzzle Studio
+            <h1 className="font-headline font-black text-sm sm:text-xl truncate">
+              <span className="hidden sm:inline">SOL GaMES · </span>Admin &amp; Daily Puzzle Studio
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2 shrink-0">
             <Badge
               variant={isSupabaseConfigured ? "green" : "yellow"}
-              className="text-xs"
+              className="text-xs whitespace-nowrap"
             >
               <Database className="h-3 w-3 mr-1" />
               {isSupabaseConfigured

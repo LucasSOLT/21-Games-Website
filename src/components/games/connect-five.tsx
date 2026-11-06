@@ -852,7 +852,9 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
         hintsUsed > 0 ? ` (${hintsUsed} hint${hintsUsed > 1 ? "s" : ""})` : ""
       }`,
       ...rowEmojis,
-      "https://21games.ai/games/connect-5",
+      typeof window !== "undefined"
+        ? window.location.href
+        : "https://www.solworld.ai/solgames/games/connect-5",
     ].join("\n");
 
     try {
@@ -878,17 +880,17 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       author={puzzle.author}
       subtitle="Complete the 5-word compound chain. Each row connects with the word above it."
       headerRightSlot={
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 min-[375px]:gap-1.5">
           <div
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border-2 px-2.5 py-1 font-mono text-xs sm:text-sm font-black",
+              "inline-flex h-7 sm:h-9 items-center gap-1 sm:gap-1.5 rounded-lg border-2 px-2 min-[375px]:px-2.5 font-mono text-[11px] min-[375px]:text-xs sm:text-sm font-black",
               status === "won" || isBufferingWin
                 ? "border-[#2ECC71] bg-emerald-50 text-emerald-900"
                 : "border-black bg-white text-black"
             )}
             title="Elapsed Time"
           >
-            <Clock className="h-3.5 w-3.5" />
+            <Clock className="h-3 w-3 min-[375px]:h-3.5 min-[375px]:w-3.5" />
             <span>{formatTimerSeconds(elapsedSeconds)}</span>
           </div>
 
@@ -897,28 +899,28 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
               variant="outline"
               size="sm"
               onClick={handleRevealHint}
-              className="border-2 border-black font-bold text-xs h-9 px-2.5"
+              className="border-2 border-black font-bold text-[11px] sm:text-xs h-7 sm:h-9 px-2 min-[375px]:px-2.5"
               title="Reveal one letter hint"
             >
-              <Lightbulb className="h-3.5 w-3.5 mr-1 text-[#F9D423] fill-[#F9D423]" />
+              <Lightbulb className="h-3.5 w-3.5 sm:mr-1 text-[#F9D423] fill-[#F9D423]" />
               <span className="hidden sm:inline">Hint</span>
             </Button>
           )}
         </div>
       }
     >
-      <div className="mx-auto max-w-xl flex flex-col items-center space-y-5">
-        <div className="flex items-center justify-between w-full px-1">
-          <div className="flex items-center gap-2">
-            <Badge variant="green" className="text-xs">
-              <Link2 className="h-3 w-3 mr-1" />
-              Chain: {puzzle.title}
+      <div className="mx-auto max-w-xl flex flex-col items-center space-y-4 sm:space-y-5">
+        <div className="flex items-center justify-between w-full px-1 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Badge variant="green" className="text-xs truncate">
+              <Link2 className="h-3 w-3 mr-1 shrink-0" />
+              <span className="truncate">Chain: {puzzle.title}</span>
             </Badge>
-            <span className="text-xs text-gray-500 hidden sm:inline">
+            <span className="text-xs text-gray-500 hidden sm:inline shrink-0">
               Edited by {puzzle.editor}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {status === "won" && (
               <Button
                 size="xs"
@@ -943,7 +945,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
         <div
           className={cn(
-            "w-full rounded-2xl border-2 border-black bg-white p-4 sm:p-6 shadow-sm space-y-3 transition-all",
+            "w-full rounded-2xl border-2 border-black bg-white p-2.5 min-[375px]:p-3.5 sm:p-6 shadow-sm space-y-2.5 sm:space-y-3 transition-all",
             isBufferingWin && "ring-4 ring-[#2ECC71] bg-emerald-50/40 scale-[1.01]"
           )}
         >
@@ -962,7 +964,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                   }
                 }}
                 className={cn(
-                  "flex items-center gap-2.5 sm:gap-3 rounded-xl p-2 sm:p-2.5 border-2 transition-all cursor-pointer",
+                  "flex items-center gap-1.5 min-[375px]:gap-2.5 sm:gap-3 rounded-xl p-1.5 min-[375px]:p-2 sm:p-2.5 border-2 transition-all cursor-pointer",
                   isRow0
                     ? "bg-emerald-50/80 border-emerald-500/60 cursor-default"
                     : isRowFocused
@@ -980,7 +982,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                     }
                   }}
                   className={cn(
-                    "h-8 w-8 sm:h-9 sm:w-9 rounded-lg font-headline font-black text-sm flex items-center justify-center shrink-0 border-2 transition-colors",
+                    "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg font-headline font-black text-xs min-[375px]:text-sm flex items-center justify-center shrink-0 border-2 transition-colors",
                     isRow0
                       ? "bg-[#2ECC71] text-black border-black"
                       : isRowFocused
@@ -996,7 +998,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                   {rowIdx + 1}
                 </button>
 
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2 flex-nowrap">
                   {word.split("").map((_, colIdx) => {
                     const char = grid[rowIdx]?.[colIdx] ?? "";
                     const isCellLocked = locked[rowIdx]?.[colIdx] ?? false;
@@ -1032,7 +1034,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                           }
                         }}
                         className={cn(
-                          "relative h-11 w-10 sm:h-13 sm:w-12 rounded-xl border-2 font-headline font-black text-xl sm:text-2xl uppercase flex items-center justify-center transition-all select-none",
+                          "relative h-9 min-[375px]:h-10 sm:h-13 rounded-lg min-[375px]:rounded-xl border-2 font-headline font-black text-base min-[375px]:text-lg sm:text-2xl uppercase flex items-center justify-center transition-all select-none shrink-0",
+                          word.length >= 7
+                            ? "w-7 min-[375px]:w-8 sm:w-12"
+                            : "w-8 min-[375px]:w-9 sm:w-12",
                           isRow0
                             ? "bg-[#2ECC71] text-black border-black shadow-2xs cursor-default"
                             : status === "won" || isBufferingWin
@@ -1113,7 +1118,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
         <div className="w-full space-y-1.5 pt-1 select-none">
           {KEYBOARD_ROWS.map((rowKeys, rIdx) => (
-            <div key={rIdx} className="flex justify-center gap-1 sm:gap-1.5">
+            <div
+              key={rIdx}
+              className="flex justify-center gap-0.5 min-[375px]:gap-1 sm:gap-1.5"
+            >
               {rowKeys.map((k) => {
                 const isWide = k === "ENTER" || k === "BACKSPACE";
                 return (
@@ -1130,8 +1138,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                       }
                     }}
                     className={cn(
-                      "h-11 sm:h-12 rounded-lg border-2 border-black/15 bg-white font-headline font-bold text-xs sm:text-sm text-black shadow-2xs active:translate-y-0.5 hover:border-black hover:bg-gray-50 transition-all flex items-center justify-center",
-                      isWide ? "px-2.5 sm:px-4 text-xs" : "w-8 sm:w-10"
+                      "h-10 min-[375px]:h-11 sm:h-12 rounded-lg border-2 border-black/15 bg-white font-headline font-bold text-xs sm:text-sm text-black shadow-2xs active:translate-y-0.5 hover:border-black hover:bg-gray-50 transition-all flex items-center justify-center",
+                      isWide
+                        ? "px-2 min-[375px]:px-2.5 sm:px-4 text-[11px] min-[375px]:text-xs shrink-0"
+                        : "flex-1 max-w-8 sm:max-w-10 min-w-0"
                     )}
                   >
                     {k === "BACKSPACE" ? "⌫" : k === "ENTER" ? "NEXT" : k}

@@ -67,45 +67,48 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black">
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-3 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1.5 min-[375px]:gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <Link
               href={`/games/${gameSlug}`}
-              className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3.5 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors"
+              className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full border-2 border-black px-2 min-[375px]:px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Today&apos;s {gameTitle}
+              <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+              <span className="hidden sm:inline">
+                Back to Today&apos;s {gameTitle}
+              </span>
+              <span className="sm:hidden">Today</span>
             </Link>
             <Link
               href="/"
-              className="text-xs font-bold text-gray-500 hover:text-black hidden sm:inline"
+              className="text-xs font-bold text-gray-500 hover:text-black hidden sm:inline whitespace-nowrap"
             >
               Home
             </Link>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2 shrink-0">
             <Link
               href="/games/21-things/archive"
               className={cn(
-                "rounded-full px-3 py-1 text-xs font-bold border transition-all",
+                "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
                 gameSlug === "21-things"
                   ? "bg-[#daa8d0] text-black border-black"
                   : "bg-white text-gray-600 border-gray-200 hover:border-black"
               )}
             >
-              21 Things Archive
+              21 Things<span className="hidden md:inline"> Archive</span>
             </Link>
             <Link
               href="/games/connect-5/archive"
               className={cn(
-                "rounded-full px-3 py-1 text-xs font-bold border transition-all",
+                "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
                 gameSlug === "connect-5"
                   ? "bg-[#2ECC71] text-black border-black"
                   : "bg-white text-gray-600 border-gray-200 hover:border-black"
               )}
             >
-              Connect 5 Archive
+              Connect 5<span className="hidden md:inline"> Archive</span>
             </Link>
             <AccountNavButton variant="compact" />
           </div>

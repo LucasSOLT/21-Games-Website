@@ -15,6 +15,7 @@ import {
   setGameStats,
   type GameStats,
 } from "@/lib/game-storage";
+import { assetPath } from "@/lib/asset-path";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
@@ -913,7 +914,9 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
           email,
           options: {
             emailRedirectTo:
-              typeof window !== "undefined" ? window.location.origin : undefined,
+              typeof window !== "undefined"
+                ? `${window.location.origin}${assetPath("/")}`
+                : undefined,
           },
         });
       } catch {

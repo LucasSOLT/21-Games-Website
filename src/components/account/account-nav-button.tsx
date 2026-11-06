@@ -26,7 +26,7 @@ export function AccountNavButton({
         className={cn(
           "inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full border-2 border-black bg-white font-black text-black transition-all hover:bg-[#FFFBE6] active:translate-y-0.5 whitespace-nowrap shrink-0",
           variant === "hero"
-            ? "px-4 py-2 text-xs sm:text-sm shadow-[2px_2px_0px_#000]"
+            ? "px-2.5 min-[375px]:px-4 py-1.5 min-[375px]:py-2 text-[11px] min-[375px]:text-xs sm:text-sm shadow-[2px_2px_0px_#000]"
             : "h-7 min-[375px]:h-8 sm:h-9 px-2 min-[375px]:px-2.5 sm:px-3 text-[11px] sm:text-xs shadow-[1px_1px_0px_#000]",
           className
         )}
@@ -52,7 +52,7 @@ export function AccountNavButton({
       className={cn(
         "inline-flex items-center gap-1.5 sm:gap-2 rounded-full border-2 border-black bg-white font-black text-black transition-all hover:bg-gray-50 active:translate-y-0.5 whitespace-nowrap shrink-0",
         variant === "hero"
-          ? "pl-1.5 pr-3.5 py-1 text-xs sm:text-sm shadow-[2px_2px_0px_#000]"
+          ? "pl-1 pr-2.5 min-[375px]:pl-1.5 min-[375px]:pr-3.5 py-1 text-xs sm:text-sm shadow-[2px_2px_0px_#000]"
           : "h-7 min-[375px]:h-8 sm:h-9 pl-1 pr-2 min-[375px]:pr-2.5 text-xs shadow-[1px_1px_0px_#000]",
         className
       )}
