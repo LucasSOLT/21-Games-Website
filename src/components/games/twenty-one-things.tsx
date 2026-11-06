@@ -43,6 +43,7 @@ import {
   type TwentyOneSavedProgress,
 } from "@/lib/game-storage";
 import { GameShell } from "@/components/game-shell";
+import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -176,6 +177,7 @@ function TwentyOneThingsBoardView({
   initialMode: "play" | "create";
 }) {
   const { toast } = useToast();
+  const { profile } = useAuth();
 
   const [mode, setMode] = useState<"play" | "create">(initialMode);
 
@@ -201,7 +203,7 @@ function TwentyOneThingsBoardView({
     initialSaved?.pick1Index ?? null
   );
   const [playerName, setPlayerName] = useState<string>(
-    initialSaved?.playerName ?? ""
+    () => initialSaved?.playerName || profile?.displayName || ""
   );
   const [reflectionNote, setReflectionNote] = useState<string>(
     initialSaved?.reflectionNote ?? ""
@@ -221,7 +223,25 @@ function TwentyOneThingsBoardView({
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Creator flow state ("Create & Share Your Own 21 Things")
-  const [creatorName, setCreatorName] = useState("Lucas Huff");
+  const [creatorName, setCreatorName] = useState<string>(
+    () => profile?.displayName || ""
+  );
+  const [syncedProfileName, setSyncedProfileName] = useState<string>(
+    profile?.displayName ?? ""
+  );
+  if ((profile?.displayName ?? "") !== syncedProfileName) {
+    const prevDisplayName = syncedProfileName;
+    const nextDisplayName = profile?.displayName ?? "";
+    setSyncedProfileName(nextDisplayName);
+    if (nextDisplayName) {
+      if (playerName === "" || playerName === prevDisplayName) {
+        setPlayerName(nextDisplayName);
+      }
+      if (creatorName === "" || creatorName === prevDisplayName) {
+        setCreatorName(nextDisplayName);
+      }
+    }
+  }
   const [creatorTitle, setCreatorTitle] = useState(
     "21 Things I Appreciate Today"
   );
@@ -389,8 +409,12 @@ function TwentyOneThingsBoardView({
 
   const advanceToReflect = () => {
     if (pick1 === null) return;
+    const effectiveName = playerName || profile?.displayName || "";
+    if (!playerName && effectiveName) {
+      setPlayerName(effectiveName);
+    }
     setPhase("reflect");
-    persistState("reflect", pick6, pick3, pick1);
+    persistState("reflect", pick6, pick3, pick1, effectiveName);
   };
 
   const handleBackStep = () => {
@@ -416,6 +440,9 @@ function TwentyOneThingsBoardView({
     setPick1(null);
     setReflectionNote("");
     setVoiceNoteDataUrl(undefined);
+    if (!playerName && profile?.displayName) {
+      setPlayerName(profile.displayName);
+    }
   };
 
   const startAudioRecording = async () => {
@@ -473,7 +500,8 @@ function TwentyOneThingsBoardView({
     e.preventDefault();
     if (pick1 === null) return;
 
-    const finalName = playerName.trim() || "Friend";
+    const finalName =
+      playerName.trim() || profile?.displayName?.trim() || "Friend";
     const finalNote =
       reflectionNote.trim() ||
       `I narrowed ${board.creatorName}'s 21 Things down to "${board.items[pick1]}" as my #1 resonance!`;
@@ -665,14 +693,23 @@ function TwentyOneThingsBoardView({
     });
     setCreatorItems(sanitized);
 
+    const effectiveCreatorName =
+      creatorName.trim() || profile?.displayName?.trim() || "";
+    const resolvedCreatorName = effectiveCreatorName || "Creator";
+    const resolvedHandle =
+      profile?.handle &&
+      (!creatorName.trim() ||
+        creatorName.trim() === profile.displayName.trim())
+        ? `@${profile.handle.replace(/^@+/, "")}`
+        : `@${resolvedCreatorName.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+
     const customBoard: TwentyOneThingsBoard = {
       id: `custom-${Date.now()}`,
       puzzleNumber: 0,
-      title: creatorTitle.trim() || `${creatorName.trim() || "My"}'s 21 Things`,
-      creatorName: creatorName.trim() || "Creator",
-      creatorHandle: `@${(creatorName.trim() || "creator")
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "")}`,
+      title:
+        creatorTitle.trim() || `${effectiveCreatorName || "My"}'s 21 Things`,
+      creatorName: resolvedCreatorName,
+      creatorHandle: resolvedHandle,
       creatorBio,
       items: sanitized,
       sampleJourneys: [],
@@ -719,10 +756,16 @@ function TwentyOneThingsBoardView({
         <Button
           variant={mode === "create" ? "default" : "outline"}
           size="sm"
-          onClick={() => setMode(mode === "play" ? "create" : "play")}
-          className="font-bold border-2 border-black text-xs h-9 px-3"
+          onClick={() => {
+            const nextMode = mode === "play" ? "create" : "play";
+            if (nextMode === "create" && !creatorName && profile?.displayName) {
+              setCreatorName(profile.displayName);
+            }
+            setMode(nextMode);
+          }}
+          className="font-bold border-2 border-black text-[10px] min-[375px]:text-[11px] sm:text-xs h-7 sm:h-9 px-2 min-[375px]:px-2.5 sm:px-3"
         >
-          <Mic className="h-3.5 w-3.5 mr-1" />
+          <Mic className="h-3 w-3 min-[375px]:h-3.5 min-[375px]:w-3.5 mr-0.5 min-[375px]:mr-1" />
           {mode === "play" ? "Create Your Own" : "Back to Board"}
         </Button>
       }
@@ -744,7 +787,7 @@ function TwentyOneThingsBoardView({
                   ~30 chars each).
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   onClick={toggleVoiceBrainstorm}
@@ -803,7 +846,7 @@ function TwentyOneThingsBoardView({
             </div>
 
             <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
                 <label className="text-xs font-bold uppercase text-gray-600">
                   Stream of Consciousness Transcript (Comma or Line Separated)
                 </label>
@@ -825,7 +868,7 @@ function TwentyOneThingsBoardView({
             </div>
 
             <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-1 mb-2">
                 <span className="text-xs font-bold uppercase text-gray-700">
                   Preview &amp; Edit 3×7 Mobile Grid (Max 5 Words / 30 Chars per Tile)
                 </span>
@@ -836,7 +879,7 @@ function TwentyOneThingsBoardView({
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {creatorItems.slice(0, 21).map((item, idx) => {
                   const words = item.trim()
                     ? item.trim().split(/\s+/).length
@@ -901,7 +944,7 @@ function TwentyOneThingsBoardView({
               <Button
                 type="button"
                 onClick={handlePublishCustomBoard}
-                className="bg-black text-white hover:bg-gray-800 font-headline font-black text-sm h-11 px-6"
+                className="w-full sm:w-auto bg-black text-white hover:bg-gray-800 font-headline font-black text-xs sm:text-sm h-11 px-3 sm:px-6"
               >
                 <Share2 className="h-4 w-4 mr-2" />
                 Publish 21 Things Board &amp; Copy Friend Link
@@ -910,30 +953,32 @@ function TwentyOneThingsBoardView({
           </div>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="rounded-2xl border-2 border-black bg-white p-3.5 sm:p-4 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-[#daa8d0] border-2 border-black flex items-center justify-center font-headline font-black text-base shrink-0">
+        <div className="space-y-2 sm:space-y-4">
+          <div className="rounded-2xl border-2 border-black bg-white p-2.5 sm:p-4 shadow-2xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-full bg-[#daa8d0] border-2 border-black flex items-center justify-center font-headline font-black text-sm sm:text-base shrink-0">
                   {board.creatorName.charAt(0)}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="font-headline font-black text-base sm:text-lg leading-tight">
+                <div className="min-w-0 flex-1 sm:flex-initial">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 sm:flex-wrap">
+                    <h2 className="font-headline font-black text-sm sm:text-lg leading-tight truncate sm:whitespace-normal">
                       {board.title}
                     </h2>
-                    <span className="text-xs font-semibold text-gray-500">
+                    <span className="text-[11px] sm:text-xs font-semibold text-gray-500 shrink-0">
                       {board.creatorHandle}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-600">{board.creatorBio}</p>
+                  <p className="hidden sm:block text-xs text-gray-600">
+                    {board.creatorBio}
+                  </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 self-start sm:self-center">
+              <div className="flex items-center gap-1 sm:gap-1.5 self-start sm:self-center flex-wrap">
                 <span
                   className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-black border",
+                    "px-1.5 xs:px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] xs:text-[10.5px] sm:text-xs font-black border whitespace-nowrap",
                     phase === "pick6"
                       ? "bg-[#F9D423] text-black border-black"
                       : "bg-gray-100 text-gray-600 border-gray-300"
@@ -941,10 +986,12 @@ function TwentyOneThingsBoardView({
                 >
                   1. Pick 6 ({pick6.length}/6)
                 </span>
-                <span className="text-gray-400 font-bold text-xs">→</span>
+                <span className="text-gray-400 font-bold text-[10px] sm:text-xs">
+                  →
+                </span>
                 <span
                   className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-black border",
+                    "px-1.5 xs:px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] xs:text-[10.5px] sm:text-xs font-black border whitespace-nowrap",
                     phase === "pick3"
                       ? "bg-[#F9D423] text-black border-black"
                       : "bg-gray-100 text-gray-600 border-gray-300"
@@ -952,10 +999,12 @@ function TwentyOneThingsBoardView({
                 >
                   2. Pick 3 ({pick3.length}/3)
                 </span>
-                <span className="text-gray-400 font-bold text-xs">→</span>
+                <span className="text-gray-400 font-bold text-[10px] sm:text-xs">
+                  →
+                </span>
                 <span
                   className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-black border",
+                    "px-1.5 xs:px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] xs:text-[10.5px] sm:text-xs font-black border whitespace-nowrap",
                     phase === "pick1" ||
                       phase === "reflect" ||
                       phase === "complete"
@@ -969,7 +1018,7 @@ function TwentyOneThingsBoardView({
             </div>
 
             {shareUrl && (
-              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-purple-50 border border-purple-200 px-3 py-2 text-xs">
+              <div className="mt-2 sm:mt-3 flex items-center justify-between gap-2 rounded-xl bg-purple-50 border border-purple-200 px-3 py-2 text-xs">
                 <span className="truncate font-mono text-purple-900">
                   Share link: {shareUrl}
                 </span>
@@ -987,8 +1036,8 @@ function TwentyOneThingsBoardView({
               </div>
             )}
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-gray-900 text-white px-3.5 py-2.5">
-              <div className="text-xs sm:text-sm font-medium">
+            <div className="mt-2 sm:mt-3 flex sm:flex-wrap items-center justify-between gap-1.5 sm:gap-2 rounded-xl bg-gray-900 text-white px-2.5 py-1.5 sm:px-3.5 sm:py-2.5">
+              <div className="min-w-0 flex-1 sm:flex-initial text-[11px] leading-snug sm:text-sm font-medium">
                 {phase === "pick6" && (
                   <>
                     <strong className="text-[#F9D423]">
@@ -1035,7 +1084,16 @@ function TwentyOneThingsBoardView({
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "items-center gap-2 shrink-0",
+                  phase === "pick6"
+                    ? pick6.length === 6
+                      ? "hidden sm:flex"
+                      : "hidden"
+                    : "flex"
+                )}
+              >
                 {(phase === "pick3" ||
                   phase === "pick1" ||
                   phase === "reflect") && (
@@ -1043,9 +1101,9 @@ function TwentyOneThingsBoardView({
                     size="xs"
                     variant="secondary"
                     onClick={handleBackStep}
-                    className="font-bold text-xs"
+                    className="font-bold text-[11px] sm:text-xs h-6 sm:h-7 px-2 sm:px-2.5"
                   >
-                    ← Back Step
+                    ← Back<span className="hidden sm:inline"> Step</span>
                   </Button>
                 )}
 
@@ -1053,7 +1111,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick3}
-                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
+                    className="hidden sm:inline-flex bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
                   >
                     Continue to Top 3 →
                   </Button>
@@ -1063,7 +1121,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick1}
-                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
+                    className="hidden sm:inline-flex bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
                   >
                     Continue to #1 Pick →
                   </Button>
@@ -1073,7 +1131,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToReflect}
-                    className="bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white"
+                    className="hidden sm:inline-flex bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white"
                   >
                     Lock In #1 &amp; Reflect →
                   </Button>
@@ -1084,10 +1142,10 @@ function TwentyOneThingsBoardView({
                     size="xs"
                     variant="secondary"
                     onClick={() => handleResetFunnel()}
-                    className="font-bold text-xs"
+                    className="font-bold text-[11px] sm:text-xs h-6 sm:h-7 px-2 sm:px-2.5"
                   >
                     <RotateCcw className="h-3 w-3 mr-1" />
-                    Play Board Again
+                    Play<span className="hidden sm:inline"> Board</span> Again
                   </Button>
                 )}
               </div>
@@ -1095,7 +1153,7 @@ function TwentyOneThingsBoardView({
           </div>
 
           <div
-            className="grid grid-cols-3 gap-1.5 sm:gap-2.5 select-none"
+            className="grid grid-cols-3 gap-1 min-[375px]:gap-1.5 sm:gap-2.5 select-none"
             role="grid"
             aria-label="21 Things 3 by 7 Grid"
           >
@@ -1173,22 +1231,77 @@ function TwentyOneThingsBoardView({
                   }
                   onClick={() => handleTileTap(idx)}
                   className={cn(
-                    "relative min-h-[54px] sm:min-h-[64px] rounded-xl border-2 px-2 py-1.5 sm:px-3 sm:py-2 text-center flex flex-col items-center justify-center transition-all duration-200",
+                    "relative min-h-[45px] sm:min-h-[64px] rounded-xl border-2 px-1 py-0.5 min-[375px]:px-1.5 min-[375px]:py-1 sm:px-3 sm:py-2 text-center flex flex-col items-center justify-center transition-all duration-200",
                     tileClasses
                   )}
                 >
                   {badgeLabel && (
-                    <span className="absolute -top-2 right-1.5 rounded-full bg-black text-white px-1.5 py-0.2 text-[9px] font-black tracking-wider uppercase">
+                    <span className="absolute -top-1.5 sm:-top-2 right-1 sm:right-1.5 rounded-full bg-black text-white px-1 sm:px-1.5 py-0.2 text-[8px] sm:text-[9px] font-black tracking-wider uppercase">
                       {badgeLabel}
                     </span>
                   )}
-                  <span className="text-[11px] sm:text-sm font-bold leading-tight line-clamp-2">
+                  <span className="text-[9.5px] leading-[1.1] min-[375px]:text-[10.5px] min-[375px]:leading-[1.15] sm:text-sm sm:leading-tight font-bold sm:line-clamp-2 break-words">
                     {item}
                   </span>
                 </button>
               );
             })}
           </div>
+
+          {((phase === "pick6" && pick6.length === 6) ||
+            (phase === "pick3" && pick3.length === 3) ||
+            (phase === "pick1" && pick1 !== null)) && (
+            <div className="sm:hidden sticky bottom-2 z-20 rounded-xl border-2 border-black bg-gray-950/95 backdrop-blur-xs text-white px-3 py-2 shadow-lg flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold text-[#F9D423] truncate">
+                  {phase === "pick6" && "6/6 Favorites Selected!"}
+                  {phase === "pick3" && "Top 3 Selected!"}
+                  {phase === "pick1" &&
+                    pick1 !== null &&
+                    `#1: "${board.items[pick1]}"`}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {(phase === "pick3" || phase === "pick1") && (
+                  <Button
+                    size="xs"
+                    variant="secondary"
+                    onClick={handleBackStep}
+                    className="font-bold text-[11px] h-8 px-2.5"
+                  >
+                    ← Back
+                  </Button>
+                )}
+                {phase === "pick6" && (
+                  <Button
+                    size="sm"
+                    onClick={advanceToPick3}
+                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs h-8 px-3 border border-white"
+                  >
+                    Continue to Top 3 →
+                  </Button>
+                )}
+                {phase === "pick3" && (
+                  <Button
+                    size="sm"
+                    onClick={advanceToPick1}
+                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs h-8 px-3 border border-white"
+                  >
+                    Continue to #1 Pick →
+                  </Button>
+                )}
+                {phase === "pick1" && (
+                  <Button
+                    size="sm"
+                    onClick={advanceToReflect}
+                    className="bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs h-8 px-3 border border-white"
+                  >
+                    Lock In #1 &amp; Reflect →
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
 
           {phase === "reflect" && pick1 !== null && (
             <form
@@ -1226,7 +1339,7 @@ function TwentyOneThingsBoardView({
                   <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
                     Optional Voice Note
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {!isRecordingAudio ? (
                       <Button
                         type="button"
@@ -1253,7 +1366,7 @@ function TwentyOneThingsBoardView({
                       <audio
                         src={voiceNoteDataUrl}
                         controls
-                        className="h-9 max-w-[180px]"
+                        className="h-9 max-w-full sm:max-w-[180px]"
                       />
                     )}
                   </div>
@@ -1302,7 +1415,7 @@ function TwentyOneThingsBoardView({
                   {pick6.map((i) => board.items[i]).join(" · ")}
                 </p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <Button
                   onClick={handleShareJourney}
                   className="bg-black text-white hover:bg-gray-800 font-bold text-xs h-10 px-4"
@@ -1312,7 +1425,12 @@ function TwentyOneThingsBoardView({
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => setMode("create")}
+                  onClick={() => {
+                    if (!creatorName && profile?.displayName) {
+                      setCreatorName(profile.displayName);
+                    }
+                    setMode("create");
+                  }}
                   className="border-2 border-black font-bold text-xs h-10 px-3"
                 >
                   <Mic className="h-3.5 w-3.5 mr-1" />
@@ -1370,12 +1488,12 @@ function TwentyOneThingsBoardView({
                     </p>
 
                     {j.voiceNoteDataUrl && (
-                      <div className="flex items-center gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
                         <Volume2 className="h-4 w-4 text-purple-700" />
                         <audio
                           src={j.voiceNoteDataUrl}
                           controls
-                          className="h-8 max-w-xs"
+                          className="h-8 w-full max-w-[240px] sm:max-w-xs"
                         />
                       </div>
                     )}

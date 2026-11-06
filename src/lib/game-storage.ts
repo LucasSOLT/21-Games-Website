@@ -12,12 +12,65 @@ const STORAGE_PREFIX = "solgames_v1";
 export interface GameStats {
   played: number;
   won: number;
+  wins: number;
   currentStreak: number;
   maxStreak: number;
   lastCompletedDateKey: string | null;
+  lastCompletedDate: string | null;
   bestTimeSeconds: number | null;
   totalTimeSeconds: number;
   completedDates: string[];
+  distribution: Record<string, number>;
+}
+
+export type ProfileSyncEvent =
+  | {
+      type: "game_win";
+      gameSlug: PlayableGameSlug;
+      dateKey: string;
+      stats: GameStats;
+    }
+  | {
+      type: "journey_submitted";
+      journey: TwentyOneJourney;
+    }
+  | {
+      type: "board_created";
+      board: TwentyOneThingsBoard;
+    };
+
+export type ProfileSyncCallback = (
+  event: ProfileSyncEvent
+) => void | Promise<void>;
+
+const profileSyncListeners = new Set<ProfileSyncCallback>();
+
+export function registerProfileSyncCallback(
+  callback: ProfileSyncCallback
+): () => void {
+  profileSyncListeners.add(callback);
+  return () => {
+    profileSyncListeners.delete(callback);
+  };
+}
+
+function notifyProfileSyncListeners(event: ProfileSyncEvent): void {
+  for (const cb of profileSyncListeners) {
+    try {
+      void cb(event);
+    } catch {
+      // Ignore listener errors so gameplay is never interrupted
+    }
+  }
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("solgames:profile-sync", { detail: event })
+      );
+    } catch {
+      // Ignore DOM event errors
+    }
+  }
 }
 
 export interface Connect5SavedProgress {
@@ -72,25 +125,295 @@ function safeWriteJson<T>(key: string, value: T): void {
 }
 
 // ============================================================================
-// Game Stats & Streaks
+// Game Stats, Streaks & Merge Engine
 // ============================================================================
 
-const DEFAULT_STATS: GameStats = {
+export const DEFAULT_STATS: GameStats = {
   played: 0,
   won: 0,
+  wins: 0,
   currentStreak: 0,
   maxStreak: 0,
   lastCompletedDateKey: null,
+  lastCompletedDate: null,
   bestTimeSeconds: null,
   totalTimeSeconds: 0,
   completedDates: [],
+  distribution: {},
 };
 
+export function recomputeStreakFromCompletedDates(
+  completedDates: string[],
+  todayKey?: string
+): {
+  currentStreak: number;
+  maxStreak: number;
+  lastCompletedDate: string | null;
+  lastCompletedDateKey: string | null;
+} {
+  if (!Array.isArray(completedDates) || completedDates.length === 0) {
+    return {
+      currentStreak: 0,
+      maxStreak: 0,
+      lastCompletedDate: null,
+      lastCompletedDateKey: null,
+    };
+  }
+
+  const uniqueSorted = Array.from(
+    new Set(
+      completedDates
+        .filter((d): d is string => typeof d === "string")
+        .map((d) => d.trim())
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  if (uniqueSorted.length === 0) {
+    return {
+      currentStreak: 0,
+      maxStreak: 0,
+      lastCompletedDate: null,
+      lastCompletedDateKey: null,
+    };
+  }
+
+  let maxStreak = 1;
+  let run = 1;
+  for (let i = 1; i < uniqueSorted.length; i++) {
+    const diff = daysBetweenDateKeys(uniqueSorted[i - 1], uniqueSorted[i]);
+    if (diff === 1) {
+      run += 1;
+      if (run > maxStreak) {
+        maxStreak = run;
+      }
+    } else if (diff > 1) {
+      run = 1;
+    }
+  }
+
+  const lastCompletedDate = uniqueSorted[uniqueSorted.length - 1];
+  let currentStreak = run;
+
+  if (todayKey && /^\d{4}-\d{2}-\d{2}$/.test(todayKey.trim())) {
+    const normalizedToday = todayKey.trim();
+    const datesUpToToday = uniqueSorted.filter(
+      (d) => d.localeCompare(normalizedToday) <= 0
+    );
+    if (datesUpToToday.length === 0) {
+      currentStreak = 0;
+    } else {
+      const lastUpToToday = datesUpToToday[datesUpToToday.length - 1];
+      const gapFromToday = daysBetweenDateKeys(lastUpToToday, normalizedToday);
+      if (gapFromToday > 1) {
+        currentStreak = 0;
+      } else {
+        let streakUpToToday = 1;
+        for (let i = datesUpToToday.length - 1; i > 0; i--) {
+          const diff = daysBetweenDateKeys(
+            datesUpToToday[i - 1],
+            datesUpToToday[i]
+          );
+          if (diff === 1) {
+            streakUpToToday += 1;
+          } else if (diff > 1) {
+            break;
+          }
+        }
+        currentStreak = streakUpToToday;
+      }
+    }
+  }
+
+  return {
+    currentStreak,
+    maxStreak,
+    lastCompletedDate,
+    lastCompletedDateKey: lastCompletedDate,
+  };
+}
+
+export function normalizeGameStats(raw?: Partial<GameStats> | null): GameStats {
+  if (!raw || typeof raw !== "object") {
+    return {
+      ...DEFAULT_STATS,
+      completedDates: [],
+      distribution: {},
+    };
+  }
+
+  const dates = Array.isArray(raw.completedDates)
+    ? Array.from(
+        new Set(
+          raw.completedDates
+            .filter((d): d is string => typeof d === "string")
+            .map((d) => d.trim())
+            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        )
+      ).sort((a, b) => a.localeCompare(b))
+    : [];
+
+  const streakInfo =
+    dates.length > 0
+      ? recomputeStreakFromCompletedDates(dates)
+      : {
+          currentStreak: Math.max(0, Number(raw.currentStreak ?? 0) || 0),
+          maxStreak: Math.max(0, Number(raw.maxStreak ?? 0) || 0),
+          lastCompletedDate:
+            raw.lastCompletedDateKey ?? raw.lastCompletedDate ?? null,
+        };
+
+  const won = Math.max(
+    Number(raw.won ?? 0) || 0,
+    Number(raw.wins ?? 0) || 0,
+    dates.length
+  );
+  const played = Math.max(Number(raw.played ?? 0) || 0, won, dates.length);
+  const maxStreak = Math.max(
+    Number(raw.maxStreak ?? 0) || 0,
+    streakInfo.maxStreak
+  );
+  const currentStreak =
+    dates.length > 0
+      ? streakInfo.currentStreak
+      : Math.max(0, Number(raw.currentStreak ?? 0) || 0);
+  const lastDate =
+    streakInfo.lastCompletedDate ??
+    raw.lastCompletedDateKey ??
+    raw.lastCompletedDate ??
+    null;
+  const bestTimeSeconds =
+    typeof raw.bestTimeSeconds === "number" && raw.bestTimeSeconds > 0
+      ? raw.bestTimeSeconds
+      : null;
+  const totalTimeSeconds = Math.max(0, Number(raw.totalTimeSeconds ?? 0) || 0);
+
+  const distribution: Record<string, number> = {};
+  if (raw.distribution && typeof raw.distribution === "object") {
+    for (const [key, value] of Object.entries(raw.distribution)) {
+      const n = Number(value);
+      if (!Number.isNaN(n) && n >= 0) {
+        distribution[key] = n;
+      }
+    }
+  }
+
+  return {
+    played,
+    won,
+    wins: won,
+    currentStreak,
+    maxStreak,
+    lastCompletedDateKey: lastDate,
+    lastCompletedDate: lastDate,
+    bestTimeSeconds,
+    totalTimeSeconds,
+    completedDates: dates,
+    distribution,
+  };
+}
+
+export function mergeTwoGameStats(
+  a: Partial<GameStats> | GameStats,
+  b: Partial<GameStats> | GameStats
+): GameStats {
+  const normA = normalizeGameStats(a);
+  const normB = normalizeGameStats(b);
+
+  const mergedDates = Array.from(
+    new Set([...normA.completedDates, ...normB.completedDates])
+  ).sort((x, y) => x.localeCompare(y));
+
+  const streakInfo = recomputeStreakFromCompletedDates(mergedDates);
+  const mergedWins = Math.max(
+    normA.won,
+    normA.wins,
+    normB.won,
+    normB.wins,
+    mergedDates.length
+  );
+  const mergedPlayed = Math.max(
+    normA.played,
+    normB.played,
+    mergedWins,
+    mergedDates.length
+  );
+  const mergedMaxStreak = Math.max(
+    normA.maxStreak,
+    normB.maxStreak,
+    streakInfo.maxStreak
+  );
+  const mergedCurrentStreak =
+    mergedDates.length > 0
+      ? streakInfo.currentStreak
+      : Math.max(normA.currentStreak, normB.currentStreak);
+  const lastDate =
+    streakInfo.lastCompletedDate ??
+    normA.lastCompletedDateKey ??
+    normB.lastCompletedDateKey ??
+    null;
+
+  let bestTimeSeconds: number | null = null;
+  if (normA.bestTimeSeconds !== null && normB.bestTimeSeconds !== null) {
+    bestTimeSeconds = Math.min(normA.bestTimeSeconds, normB.bestTimeSeconds);
+  } else if (normA.bestTimeSeconds !== null) {
+    bestTimeSeconds = normA.bestTimeSeconds;
+  } else if (normB.bestTimeSeconds !== null) {
+    bestTimeSeconds = normB.bestTimeSeconds;
+  }
+
+  const totalTimeSeconds = Math.max(
+    normA.totalTimeSeconds,
+    normB.totalTimeSeconds
+  );
+
+  const mergedDistribution: Record<string, number> = {
+    ...normA.distribution,
+  };
+  for (const [key, val] of Object.entries(normB.distribution)) {
+    mergedDistribution[key] = Math.max(mergedDistribution[key] ?? 0, val);
+  }
+
+  return {
+    played: mergedPlayed,
+    won: mergedWins,
+    wins: mergedWins,
+    currentStreak: mergedCurrentStreak,
+    maxStreak: mergedMaxStreak,
+    lastCompletedDateKey: lastDate,
+    lastCompletedDate: lastDate,
+    bestTimeSeconds,
+    totalTimeSeconds,
+    completedDates: mergedDates,
+    distribution: mergedDistribution,
+  };
+}
+
 export function getGameStats(gameSlug: PlayableGameSlug): GameStats {
-  return safeReadJson<GameStats>(
+  const raw = safeReadJson<Partial<GameStats>>(
     `${STORAGE_PREFIX}_stats_${gameSlug}`,
     DEFAULT_STATS
   );
+  return normalizeGameStats(raw);
+}
+
+export function setGameStats(
+  gameSlug: PlayableGameSlug,
+  stats: Partial<GameStats> | GameStats
+): void {
+  const normalized = normalizeGameStats(stats);
+  safeWriteJson(`${STORAGE_PREFIX}_stats_${gameSlug}`, normalized);
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("solgames:stats-updated", {
+          detail: { gameSlug, stats: normalized },
+        })
+      );
+    } catch {
+      // Ignore event dispatch errors
+    }
+  }
 }
 
 export function recordGameWin(
@@ -103,24 +426,21 @@ export function recordGameWin(
     return current;
   }
 
-  let nextStreak = 1;
-  if (current.lastCompletedDateKey) {
-    const diff = daysBetweenDateKeys(current.lastCompletedDateKey, dateKey);
-    if (diff === 1) {
-      nextStreak = current.currentStreak + 1;
-    } else if (diff === 0) {
-      nextStreak = current.currentStreak;
-    } else {
-      nextStreak = 1;
-    }
-  }
+  const nextDates = Array.from(
+    new Set([...current.completedDates, dateKey])
+  ).sort((a, b) => a.localeCompare(b));
+  const streakInfo = recomputeStreakFromCompletedDates(nextDates);
+  const nextWon = Math.max(current.won + 1, nextDates.length);
+  const nextPlayed = Math.max(current.played + 1, nextWon);
 
   const updated: GameStats = {
-    played: current.played + 1,
-    won: current.won + 1,
-    currentStreak: nextStreak,
-    maxStreak: Math.max(current.maxStreak, nextStreak),
-    lastCompletedDateKey: dateKey,
+    played: nextPlayed,
+    won: nextWon,
+    wins: nextWon,
+    currentStreak: streakInfo.currentStreak,
+    maxStreak: Math.max(current.maxStreak, streakInfo.maxStreak),
+    lastCompletedDateKey: streakInfo.lastCompletedDate ?? dateKey,
+    lastCompletedDate: streakInfo.lastCompletedDate ?? dateKey,
     bestTimeSeconds:
       elapsedSeconds > 0
         ? current.bestTimeSeconds === null
@@ -128,10 +448,17 @@ export function recordGameWin(
           : Math.min(current.bestTimeSeconds, elapsedSeconds)
         : current.bestTimeSeconds,
     totalTimeSeconds: current.totalTimeSeconds + Math.max(0, elapsedSeconds),
-    completedDates: [...current.completedDates, dateKey],
+    completedDates: nextDates,
+    distribution: { ...current.distribution },
   };
 
-  safeWriteJson(`${STORAGE_PREFIX}_stats_${gameSlug}`, updated);
+  setGameStats(gameSlug, updated);
+  notifyProfileSyncListeners({
+    type: "game_win",
+    gameSlug,
+    dateKey,
+    stats: updated,
+  });
   return updated;
 }
 
@@ -195,6 +522,42 @@ export function getLocalBoardJourneys(boardId: string): TwentyOneJourney[] {
     `${STORAGE_PREFIX}_21t_journeys_${boardId}`,
     []
   );
+}
+
+export function getAllLocalPlayerJourneys(): TwentyOneJourney[] {
+  if (typeof window === "undefined") return [];
+  const byId = new Map<string, TwentyOneJourney>();
+
+  const mySaved = safeReadJson<TwentyOneJourney[]>(
+    `${STORAGE_PREFIX}_21t_my_journeys`,
+    []
+  );
+  for (const j of mySaved) {
+    if (j && typeof j.id === "string" && j.pick1) {
+      byId.set(j.id, j);
+    }
+  }
+
+  try {
+    const prefix = `${STORAGE_PREFIX}_21t_journeys_`;
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        const list = safeReadJson<TwentyOneJourney[]>(key, []);
+        if (Array.isArray(list)) {
+          for (const j of list) {
+            if (j && typeof j.id === "string" && j.pick1 && !byId.has(j.id)) {
+              byId.set(j.id, j);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore storage enumeration errors
+  }
+
+  return Array.from(byId.values());
 }
 
 export async function fetchBoardJourneys(
@@ -265,6 +628,15 @@ export async function submitPlayerJourney(
     ...existing,
   ]);
 
+  const myJourneys = safeReadJson<TwentyOneJourney[]>(
+    `${STORAGE_PREFIX}_21t_my_journeys`,
+    []
+  );
+  safeWriteJson(`${STORAGE_PREFIX}_21t_my_journeys`, [
+    newEntry,
+    ...myJourneys.filter((j) => j.id !== newEntry.id),
+  ]);
+
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -284,6 +656,11 @@ export async function submitPlayerJourney(
     }
   }
 
+  notifyProfileSyncListeners({
+    type: "journey_submitted",
+    journey: newEntry,
+  });
+
   return newEntry;
 }
 
@@ -296,6 +673,10 @@ export function getSavedUser21Boards(): TwentyOneThingsBoard[] {
     `${STORAGE_PREFIX}_user_21boards`,
     []
   );
+}
+
+export function getUserCreated21Boards(): TwentyOneThingsBoard[] {
+  return getSavedUser21Boards();
 }
 
 export async function fetchUserCreated21BoardById(
@@ -372,6 +753,11 @@ export async function saveUserCreated21Board(
       }
     }
   }
+
+  notifyProfileSyncListeners({
+    type: "board_created",
+    board,
+  });
 }
 
 export function getAdminConnect5Overrides(): Record<string, Connect5Puzzle> {

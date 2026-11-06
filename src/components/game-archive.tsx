@@ -21,6 +21,7 @@ import {
 import type { PlayableGameSlug } from "@/lib/games-config";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { AccountNavButton } from "@/components/account/account-nav-button";
 import { cn } from "@/lib/utils";
 
 const SSR_ANCHOR_DATE = parseDateKeyToLocalNoon("2026-11-05");
@@ -106,6 +107,7 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
             >
               Connect 5 Archive
             </Link>
+            <AccountNavButton variant="compact" />
           </div>
         </div>
       </header>

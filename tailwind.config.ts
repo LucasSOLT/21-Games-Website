@@ -10,6 +10,9 @@ export default {
   ],
   theme: {
     extend: {
+      screens: {
+        xs: '400px',
+      },
       fontFamily: {
         body: ['var(--font-inter)', 'Inter', 'sans-serif'],
         headline: ['var(--font-roboto-slab)', '"Roboto Slab"', 'serif'],

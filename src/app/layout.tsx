@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { AuthProvider } from "@/components/account/auth-provider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -35,8 +36,10 @@ export default function RootLayout({
         <meta name="theme-color" content="#000000" />
       </head>
       <body className="font-body antialiased">
-        <div>{children}</div>
-        <Toaster />
+        <AuthProvider>
+          <div>{children}</div>
+          <Toaster />
+        </AuthProvider>
       </body>
     </html>
   );

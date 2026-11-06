@@ -4,9 +4,11 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { GameLogo } from "@/components/game-logo";
 import { type GameColor, type GameConfig } from "@/lib/games-config";
 import { cn } from "@/lib/utils";
 
+export { GameLogo };
 export type Game = GameConfig;
 
 const todayFormatter = new Intl.DateTimeFormat("en-US", {
@@ -45,370 +47,15 @@ const colorVariants: Record<GameColor, string> = {
   customYellow2: "bg-[#f7da21]",
 };
 
-const INK = "#171717";
-const YELLOW = "#F9D423";
-const GREEN = "#2ECC71";
-const PURPLE = "#9D50BB";
-
-const ECHO_RING: Array<[number, number]> = [
-  [0, 0],
-  [1, 0],
-  [2, 0],
-  [2, 1],
-  [2, 2],
-  [1, 2],
-  [0, 2],
-  [0, 1],
-];
-
-const GameLogo = ({
-  game,
-  variant,
-}: {
-  game: GameConfig;
-  variant: "default" | "featured";
-}) => {
-  const isFeatured = variant === "featured";
-  const { logo } = game;
-
-  switch (logo) {
-    case "rhymes":
-      return (
-        <svg
-          width={isFeatured ? "64" : "56"}
-          height={isFeatured ? "101" : "89"}
-          viewBox="0 0 56 89"
-          fill="none"
-          role="img"
-          aria-label="9 Rhymes logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="20.5" y="1.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="39.5" y="1.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="1.5" y="19.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="20.5" y="19.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="39.5" y="19.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="1.5" y="37.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="20.5" y="37.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="39.5" y="37.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="1.5" y="55.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="20.5" y="55.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="39.5" y="55.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="1.5" y="73.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="20.5" y="73.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="39.5" y="73.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-          </g>
-        </svg>
-      );
-    case "connect":
-      return (
-        <svg
-          width={isFeatured ? "64" : "56"}
-          height={isFeatured ? "101" : "89"}
-          viewBox="0 0 56 89"
-          fill="none"
-          role="img"
-          aria-label="Connect 5 logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="20.5" y="1.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="39.5" y="1.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="1.5" y="19.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="20.5" y="19.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="39.5" y="19.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="1.5" y="37.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="20.5" y="37.5" width="15" height="15" rx="3.5" fill={YELLOW} />
-            <rect x="39.5" y="37.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="1.5" y="55.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="20.5" y="55.5" width="15" height="15" rx="3.5" fill="white" />
-            <rect x="39.5" y="55.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="1.5" y="73.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="20.5" y="73.5" width="15" height="15" rx="3.5" fill={GREEN} />
-            <rect x="39.5" y="73.5" width="15" height="15" rx="3.5" fill="white" />
-          </g>
-        </svg>
-      );
-    case "things":
-      return (
-        <svg
-          width={isFeatured ? "77" : "68"}
-          height={isFeatured ? "77" : "68"}
-          viewBox="0 0 68 68"
-          fill="none"
-          role="img"
-          aria-label="21 Things logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            <rect x="1.5" y="1.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="18.5" y="1.5" width="15" height="15" rx="1.5" fill={YELLOW} />
-            <rect x="35.5" y="1.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="52.5" y="1.5" width="15" height="15" rx="1.5" fill={YELLOW} />
-            <rect x="1.5" y="18.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="18.5" y="18.5" width="15" height="15" rx="1.5" fill={PURPLE} />
-            <rect x="35.5" y="18.5" width="15" height="15" rx="1.5" fill={PURPLE} />
-            <rect x="52.5" y="18.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="1.5" y="35.5" width="15" height="15" rx="1.5" fill={PURPLE} />
-            <rect x="18.5" y="35.5" width="15" height="15" rx="3.5" fill={PURPLE} />
-            <rect x="35.5" y="35.5" width="15" height="15" rx="1.5" fill={PURPLE} />
-            <rect x="52.5" y="35.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="1.5" y="52.5" width="15" height="15" rx="1.5" fill={YELLOW} />
-            <rect x="18.5" y="52.5" width="15" height="15" rx="1.5" fill="white" />
-            <rect x="35.5" y="52.5" width="15" height="15" rx="1.5" fill={GREEN} />
-            <rect x="52.5" y="52.5" width="15" height="15" rx="1.5" fill="white" />
-          </g>
-        </svg>
-      );
-    case "syllables":
-      return (
-        <svg
-          width="68"
-          height="68"
-          viewBox="0 0 68 68"
-          fill="none"
-          role="img"
-          aria-label="17 Syllables logo"
-        >
-          <g stroke={INK} strokeWidth="2">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <rect
-                key={`a${i}`}
-                x={12.5 + i * 9}
-                y="6"
-                width="7"
-                height="14"
-                rx="1.5"
-                fill="white"
-              />
-            ))}
-            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-              <rect
-                key={`b${i}`}
-                x={3.5 + i * 9}
-                y="27"
-                width="7"
-                height="14"
-                rx="1.5"
-                fill={PURPLE}
-              />
-            ))}
-            {[0, 1, 2, 3, 4].map((i) => (
-              <rect
-                key={`c${i}`}
-                x={12.5 + i * 9}
-                y="48"
-                width="7"
-                height="14"
-                rx="1.5"
-                fill="white"
-              />
-            ))}
-          </g>
-        </svg>
-      );
-    case "6-pics":
-      return (
-        <svg
-          width="68"
-          height="68"
-          viewBox="0 0 68 68"
-          fill="none"
-          role="img"
-          aria-label="6 Pics logo"
-        >
-          {[0, 1].map((row) =>
-            [0, 1, 2].map((col) => {
-              const x = 1.5 + col * 23;
-              const y = 13 + row * 23;
-              const filled = (row + col) % 2 === 0;
-              return (
-                <g
-                  key={`${row}-${col}`}
-                  stroke={INK}
-                  strokeWidth="3"
-                  strokeLinejoin="round"
-                >
-                  <rect
-                    x={x}
-                    y={y}
-                    width="19"
-                    height="19"
-                    rx="2"
-                    fill={filled ? PURPLE : "white"}
-                  />
-                  <path
-                    d={`M${x + 3} ${y + 15} L${x + 8} ${y + 9} L${x + 11} ${
-                      y + 12
-                    } L${x + 13} ${y + 10} L${x + 16} ${y + 15} Z`}
-                    fill={filled ? "white" : INK}
-                    strokeWidth="1.5"
-                  />
-                  <circle
-                    cx={x + 14}
-                    cy={y + 5.5}
-                    r="2"
-                    fill={YELLOW}
-                    strokeWidth="1.5"
-                  />
-                </g>
-              );
-            })
-          )}
-        </svg>
-      );
-    case "win":
-      return (
-        <svg
-          width="56"
-          height="56"
-          viewBox="0 0 52 52"
-          fill="none"
-          role="img"
-          aria-label="1 Win logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            {[0, 1, 2].map((row) =>
-              [0, 1, 2].map((col) => (
-                <rect
-                  key={`${row}-${col}`}
-                  x={1.5 + col * 17}
-                  y={1.5 + row * 17}
-                  width="15"
-                  height="15"
-                  rx="3.5"
-                  fill={row === 1 && col === 1 ? YELLOW : "white"}
-                />
-              ))
-            )}
-          </g>
-          <path
-            d="M22.5 23 L27 20.5 L27 31.5"
-            stroke={INK}
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      );
-    case "echo":
-      return (
-        <svg
-          width="56"
-          height="56"
-          viewBox="0 0 52 52"
-          fill="none"
-          role="img"
-          aria-label="Eightfold Echo logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            {ECHO_RING.map(([col, row], i) => (
-              <rect
-                key={`${col}-${row}`}
-                x={1.5 + col * 17}
-                y={1.5 + row * 17}
-                width="15"
-                height="15"
-                rx="3.5"
-                fill={PURPLE}
-                fillOpacity={1 - i * 0.12}
-              />
-            ))}
-            <circle cx="26" cy="26" r="4" fill={INK} />
-          </g>
-        </svg>
-      );
-    case "letter":
-      return (
-        <svg
-          width="68"
-          height="68"
-          viewBox="0 0 68 68"
-          fill="none"
-          role="img"
-          aria-label="The 11th Hour logo"
-        >
-          <circle
-            cx="34"
-            cy="34"
-            r="31.5"
-            fill="white"
-            stroke={INK}
-            strokeWidth="3"
-          />
-          <path
-            d="M34 34 L34 2.5 A31.5 31.5 0 0 0 18.25 6.72 Z"
-            fill={YELLOW}
-            stroke={INK}
-            strokeWidth="3"
-            strokeLinejoin="round"
-          />
-          <g stroke={INK} strokeWidth="3" strokeLinecap="round">
-            <line x1="62" y1="34" x2="57" y2="34" />
-            <line x1="34" y1="62" x2="34" y2="57" />
-            <line x1="6" y1="34" x2="11" y2="34" />
-            <line x1="34" y1="34" x2="25" y2="18.4" />
-            <line x1="34" y1="34" x2="34" y2="12" />
-          </g>
-          <circle cx="34" cy="34" r="3.5" fill={INK} />
-        </svg>
-      );
-    case "move-2":
-      return (
-        <svg
-          width="68"
-          height="68"
-          viewBox="0 0 68 68"
-          fill="none"
-          role="img"
-          aria-label="Move 2 logo"
-        >
-          <g stroke={INK} strokeWidth="3">
-            {[0, 1, 2].map((row) =>
-              [0, 1, 2].map((col) => (
-                <rect
-                  key={`${row}-${col}`}
-                  x={1.5 + col * 22.5}
-                  y={1.5 + row * 22.5}
-                  width="20"
-                  height="20"
-                  rx="3.5"
-                  fill={
-                    row === 1 && col === 0
-                      ? YELLOW
-                      : row === 1
-                      ? "white"
-                      : GREEN
-                  }
-                />
-              ))
-            )}
-          </g>
-          <g
-            stroke={INK}
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          >
-            <path d="M30 27.5 L36 34 L30 40.5" />
-            <path d="M52.5 27.5 L58.5 34 L52.5 40.5" />
-          </g>
-        </svg>
-      );
-    default:
-      return null;
-  }
-};
-
 export function GameCard({
   game,
   href,
   className,
   hideActions,
   variant = "default",
+  isCenter = false,
   date,
-  author,
+  author = "SOL Theory",
 }: GameCardProps) {
   const isPlayable = game.isPlayable;
   const gameHref = href ?? `/games/${game.slug}`;
@@ -423,15 +70,27 @@ export function GameCard({
           href={gameHref}
           className={cn("block h-full group cursor-pointer", className)}
         >
-          <Card className="h-full flex flex-col items-center justify-center p-6 text-center shadow-sm border-2 border-black bg-white transition-all duration-300 group-hover:shadow-lg group-hover:-translate-y-0.5">
+          <Card
+            className={cn(
+              "relative h-full flex flex-col gap-0 py-0 ring-0 items-center justify-center pt-9 pb-5 px-4 sm:pt-11 sm:pb-6 sm:px-6 text-center border-2 border-black bg-white transition-all duration-200 group-hover:-translate-y-0.5",
+              isCenter
+                ? "shadow-[0_6px_0_#111111] group-hover:shadow-[0_8px_0_#111111]"
+                : "shadow-[0_4px_0_#111111] group-hover:shadow-[0_6px_0_#111111]"
+            )}
+          >
+            {isCenter && (
+              <span className="absolute top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-black bg-[#F9D423] px-3 py-0.5 text-[11px] font-headline font-black uppercase tracking-wider text-black shadow-[0_2px_0_#111111]">
+                ★ Today&apos;s Spotlight
+              </span>
+            )}
             <GameLogo game={game} variant="featured" />
-            <h2 className="text-3xl font-headline font-black mt-3 text-black">
+            <h2 className="text-2xl sm:text-3xl font-headline font-black mt-3 text-black">
               {game.name}
             </h2>
             <p className="text-base mt-1 text-gray-500">{dateLabel}</p>
             <div className="w-16 h-px bg-gray-300 my-2"></div>
             <p className="text-base text-gray-500">by {author}</p>
-            <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-black text-white px-5 py-2 text-sm font-headline font-black group-hover:bg-gray-800 transition-colors">
+            <span className="mt-4 inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-black text-white px-5 py-2 text-sm font-headline font-black group-hover:bg-gray-800 transition-colors">
               Play Today&apos;s Puzzle <span className="text-[#F9D423]">→</span>
             </span>
           </Card>
@@ -440,15 +99,17 @@ export function GameCard({
     }
     return (
       <div className={cn("block h-full group cursor-default", className)}>
-        <Card className="h-full flex flex-col items-center justify-center p-6 text-center shadow-sm border-2 bg-white/95 transition-all duration-300">
+        <Card className="relative h-full flex flex-col gap-0 py-0 ring-0 items-center justify-center pt-9 pb-5 px-4 sm:pt-11 sm:pb-6 sm:px-6 text-center border-2 border-black bg-white/95 shadow-[0_4px_0_rgba(17,17,17,0.2)] transition-all duration-200">
           <GameLogo game={game} variant="featured" />
-          <h2 className="text-3xl font-headline font-black mt-3 text-black">
+          <h2 className="text-2xl sm:text-3xl font-headline font-black mt-3 text-black">
             {game.name}
           </h2>
           <p className="text-base mt-1 text-gray-500">{dateLabel}</p>
           <div className="w-16 h-px bg-gray-300 my-2"></div>
           <p className="text-base text-gray-500">by {author}</p>
-          <p className="mt-4 font-bold text-gray-400">Coming Soon</p>
+          <span className="mt-4 inline-flex items-center gap-1.5 rounded-full border-2 border-gray-300 bg-gray-100 text-gray-500 px-5 py-2 text-sm font-headline font-black">
+            Coming Soon
+          </span>
         </Card>
       </div>
     );
@@ -457,31 +118,44 @@ export function GameCard({
   return (
     <Card
       className={cn(
-        "h-full flex flex-col gap-0 py-0 overflow-hidden rounded-lg shadow-sm border-2 border-[#dcdcdc]",
+        "h-full flex flex-col gap-0 py-0 ring-0 overflow-hidden rounded-xl border-2 border-black bg-white shadow-[0_3px_0_#111111] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_0_#111111]",
         className
       )}
     >
       <CardContent
         className={cn(
-          "flex flex-col items-center justify-center p-6 h-[220px]",
+          "relative flex flex-col items-center justify-center h-[185px] sm:h-[225px] p-4 sm:p-6",
+          !hideActions && "border-b-2 border-black",
           colorVariants[game.color]
         )}
       >
+        {isPlayable ? (
+          <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full border border-black bg-white/95 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-black shadow-2xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#2ECC71]" />
+            Daily
+          </span>
+        ) : (
+          <span className="absolute top-3 right-3 inline-flex items-center rounded-full border border-black/20 bg-white/75 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black/60">
+            Soon
+          </span>
+        )}
         <GameLogo game={game} variant="default" />
-        <h2 className="font-headline font-black text-2xl mt-4 text-black">
+        <h2 className="font-headline font-black text-xl sm:text-2xl mt-3.5 text-black">
           {game.name}
         </h2>
-        <p className="text-xs font-medium text-black/70 mt-1">{game.tagline}</p>
+        <p className="text-xs font-medium text-black/75 mt-1 text-center">
+          {game.tagline}
+        </p>
       </CardContent>
       {!hideActions && (
-        <CardFooter className="flex flex-col gap-2 p-4 bg-white">
+        <CardFooter className="flex flex-col items-stretch justify-between gap-2 p-4 bg-white flex-1 border-t-0">
           {isPlayable ? (
-            <>
+            <div className="flex flex-row sm:flex-col gap-2 w-full">
               <Link
                 href={gameHref}
                 className={cn(
                   buttonVariants({ variant: "default" }),
-                  "w-full border-2 border-black bg-black text-white hover:bg-gray-800 font-headline font-black text-lg select-none min-h-[44px]"
+                  "flex-1 sm:w-full border-2 border-black bg-black text-white hover:bg-gray-800 font-headline font-black text-base sm:text-lg select-none min-h-[44px]"
                 )}
               >
                 Play
@@ -490,20 +164,25 @@ export function GameCard({
                 href={archiveHref}
                 className={cn(
                   buttonVariants({ variant: "outline" }),
-                  "w-full border-2 font-headline font-black text-lg select-none min-h-[44px]"
+                  "flex-1 sm:w-full border-2 border-black bg-white text-black hover:bg-gray-50 font-headline font-black text-base sm:text-lg select-none min-h-[44px]"
                 )}
               >
                 Archive
               </Link>
-            </>
+            </div>
           ) : (
-            <Button
-              variant="outline"
-              disabled
-              className="w-full border-2 font-headline font-black text-lg select-none min-h-[44px] opacity-60 cursor-not-allowed"
-            >
-              Coming Soon
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                disabled
+                className="w-full border-2 border-gray-300 bg-gray-50 text-gray-500 font-headline font-black text-lg select-none min-h-[44px] disabled:opacity-100 cursor-not-allowed"
+              >
+                Coming Soon
+              </Button>
+              <div className="w-full flex items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50/70 px-3 text-center text-xs leading-tight text-gray-500 min-h-[44px] line-clamp-2">
+                {game.description}
+              </div>
+            </>
           )}
         </CardFooter>
       )}

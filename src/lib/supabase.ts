@@ -19,7 +19,10 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (!clientInstance) {
     clientInstance = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
-        persistSession: false,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storageKey: "solgames_supabase_auth",
       },
     });
   }

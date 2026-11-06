@@ -8,8 +8,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## 1. Ownership & Deployment Architecture
 - **Source Repository**: `gerardrickjardin/21-Games-Website` (`origin/main`)
-- **Deploy target A — `https://21games.ai`**: its own Vercel project built from this repo with plain `npm run build` (site at the domain root, `basePath` = `""`).
-- **Deploy target B — Static Host Repository**: `gerardrickjardin/SOL-World` (`solgames/`, `dist/solgames/`, and `public/solgames/` subdirectories → `https://sol-world.vercel.app/solgames/`), built with `basePath` = `/solgames`.
+- **Live URL — `https://www.solworld.ai/solgames/`**: served from the Static Host Repository `gerardrickjardin/SOL-World` (`solgames/`, `dist/solgames/`, and `public/solgames/` subdirectories; also reachable at `https://sol-world.vercel.app/solgames/`), built with `basePath` = `/solgames`. Changes only go live after `npm run deploy:solworld` + committing and pushing **both** repos.
+- **Root build (`basePath` = `""`)**: plain `npm run build` builds the site for a domain root. It is not the live site; `21games.ai` is not attached to any Vercel project.
 - **Co-Developers**:
   - **Lucas Huff** (`@LucasSOLT`, `233151608+LucasSOLT@users.noreply.github.com`)
   - **Gerard Rick Jardin** (`@gerardrickjardin`, `gerard@soltheory.com`, `gerardrickjardin@gmail.com`)
@@ -24,7 +24,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
    ```
 2. **Source of Truth & `basePath` Configuration**:
    - `next.config.ts` uses `output: 'export'` and `basePath: process.env.NEXT_PUBLIC_BASE_PATH ?? ''`.
-   - `npm run build` → root build (what Vercel runs for 21games.ai). `npm run build:solworld` → `/solgames` build.
+   - `npm run build` → root build (`basePath` = `""`, not the live site). `npm run build:solworld` → `/solgames` build (what goes live at `https://www.solworld.ai/solgames/`).
    - Never hardcode `/solgames/...` in `src/`. For files in `public/` referenced from plain `<img>`/`<a>` tags use `assetPath('/file.png')` from `src/lib/asset-path.ts`; `next/link` hrefs get the basePath automatically.
    - Always edit Next.js source files here in `21-Games-Website/src/` (never edit compiled files inside `../SOL-World/solgames/` directly).
 3. **Syncing Static Export to `SOL-World/solgames/`**:

@@ -88,3 +88,36 @@ create policy "Public read twenty_one_responses"
 drop policy if exists "Anyone can submit twenty_one_responses" on public.twenty_one_responses;
 create policy "Anyone can submit twenty_one_responses"
   on public.twenty_one_responses for insert with check (true);
+
+-- 4. User Profiles & Synced Game Stats (NYT Games-Style Account & Profile Viewer)
+create table if not exists public.user_profiles (
+  id text primary key,
+  email text unique not null,
+  display_name text not null,
+  handle text not null,
+  avatar_color text not null default '#F9D423',
+  connect5_stats jsonb not null default '{}'::jsonb,
+  twenty_one_stats jsonb not null default '{}'::jsonb,
+  recent_picks jsonb not null default '[]'::jsonb,
+  created_board_ids jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_user_profiles_email
+  on public.user_profiles (email);
+
+alter table public.user_profiles enable row level security;
+
+drop policy if exists "Public read user_profiles" on public.user_profiles;
+create policy "Public read user_profiles"
+  on public.user_profiles for select using (true);
+
+drop policy if exists "Anyone can insert user_profiles" on public.user_profiles;
+create policy "Anyone can insert user_profiles"
+  on public.user_profiles for insert with check (true);
+
+drop policy if exists "Anyone can update user_profiles" on public.user_profiles;
+create policy "Anyone can update user_profiles"
+  on public.user_profiles for update using (true) with check (true);
+
