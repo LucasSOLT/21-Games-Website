@@ -179,91 +179,6 @@ export function Hero() {
         </div>
 
         <div className="hero-visual">
-          <div
-            className="hero-demo-container"
-            role="region"
-            aria-label="SOL GaMES Gameplay Demo Video"
-          >
-            <div className="hero-demo-surface" key={previewCycle}>
-              {DEMO_VIDEO_SRC ? (
-                <video
-                  ref={videoRef}
-                  src={assetPath(DEMO_VIDEO_SRC)}
-                  autoPlay
-                  muted={isMuted}
-                  loop
-                  playsInline
-                  className="hero-demo-video"
-                />
-              ) : (
-                <>
-                  <div className="hero-demo-topbar">
-                    <span className="hero-demo-badge">
-                      <span className="hero-demo-dot" /> GAMEPLAY PREVIEW
-                    </span>
-                    <span className="hero-demo-status">
-                      {isMuted
-                        ? "Muted · Auto-looping"
-                        : "Audio On · Rewound to 0:00"}
-                    </span>
-                  </div>
-
-                  <div className="hero-demo-center">
-                    <div className="hero-demo-tiles" aria-hidden="true">
-                      {DEMO_TILE_CLASSES.map((tileClass, idx) => (
-                        <span
-                          key={idx}
-                          className={`hero-demo-tile ${tileClass}`}
-                        />
-                      ))}
-                    </div>
-                    <p className="hero-demo-title">Demo video coming soon</p>
-                    <p className="hero-demo-caption">
-                      21 Things &amp; Connect 5 live walkthrough
-                    </p>
-                  </div>
-
-                  <div className="hero-demo-progress" aria-hidden="true">
-                    <div className="hero-demo-progress-bar" />
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleUnmuteAndRewind}
-              className="hero-video-unmute-btn"
-              aria-label="Unmute and rewind demo video"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {isMuted ? (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                  </>
-                ) : (
-                  <>
-                    <polyline points="1 4 1 10 7 10" />
-                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                  </>
-                )}
-              </svg>
-              <span>{isMuted ? "Unmute and rewind" : "Rewind & play again"}</span>
-            </button>
-          </div>
-
           <div className="hero-blocks-left" aria-hidden="true">
             <span className="hblock hblock-l-purple" />
             <span className="hblock hblock-l-yellow-lg" />
@@ -293,11 +208,101 @@ export function Hero() {
             alt="Background Boxes"
             className="hero-boxes-bg"
           />
-          <img
-            src={assetPath("/hands.png")}
-            alt="Hands holding a smartphone"
-            className="hero-hands"
-          />
+
+          <div className="hero-phone-stage">
+            <img
+              src={assetPath("/hands.png")}
+              alt="Hands holding a smartphone"
+              className="hero-hands"
+            />
+
+            <div
+              className="hero-demo-container"
+              role="region"
+              aria-label="SOL GaMES Gameplay Demo Video"
+            >
+              <div className="hero-demo-surface" key={previewCycle}>
+                {DEMO_VIDEO_SRC ? (
+                  <video
+                    ref={videoRef}
+                    src={assetPath(DEMO_VIDEO_SRC)}
+                    autoPlay
+                    muted={isMuted}
+                    loop
+                    playsInline
+                    className="hero-demo-video"
+                  />
+                ) : (
+                  <>
+                    <div className="hero-demo-topbar">
+                      <span className="hero-demo-badge">
+                        <span className="hero-demo-dot" /> GAMEPLAY PREVIEW
+                      </span>
+                      <span className="hero-demo-status">
+                        {isMuted
+                          ? "Muted · Auto-looping"
+                          : "Audio On · Rewound to 0:00"}
+                      </span>
+                    </div>
+
+                    <div className="hero-demo-center">
+                      <div className="hero-demo-tiles" aria-hidden="true">
+                        {DEMO_TILE_CLASSES.map((tileClass, idx) => (
+                          <span
+                            key={idx}
+                            className={`hero-demo-tile ${tileClass}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="hero-demo-title">Demo video coming soon</p>
+                      <p className="hero-demo-caption">
+                        21 Things &amp; Connect 5 live walkthrough
+                      </p>
+                    </div>
+
+                    <div className="hero-demo-progress" aria-hidden="true">
+                      <div className="hero-demo-progress-bar" />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleUnmuteAndRewind}
+                className="hero-video-unmute-btn"
+                aria-label="Unmute and rewind demo video"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {isMuted ? (
+                    <>
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                    </>
+                  ) : (
+                    <>
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </>
+                  )}
+                </svg>
+                <span>
+                  {isMuted ? "Unmute and rewind" : "Rewind & play again"}
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
       </main>
 
