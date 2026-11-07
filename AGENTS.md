@@ -37,3 +37,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 4. **Commit & Push Both Repositories**:
    - Commit and push your source changes to `21-Games-Website` (`origin/main`) AND commit/push the updated static export in `../SOL-World` (`origin/main`) so the source repo and live `/solgames/` deployment never drift apart.
 
+---
+
+## 3. Master Game Design Bible (`GAME_DESIGN_BIBLE.md`)
+- **Mandatory Reference**: Always read [`GAME_DESIGN_BIBLE.md`](./GAME_DESIGN_BIBLE.md) (and keep it synced with any brain artifact `game_design_bible.md`) before planning, designing, or implementing any game in SOL GaMES (`21 → 1`).
+- Whenever Lucas provides new game rules, answers to design questions, scoring formulas, or UI changes, update `GAME_DESIGN_BIBLE.md` first so no game specification is ever lost across sessions.
+
