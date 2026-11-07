@@ -179,30 +179,6 @@ export function Hero() {
         </div>
 
         <div className="hero-visual">
-          <div className="hero-blocks-left" aria-hidden="true">
-            <span className="hblock hblock-l-purple" />
-            <span className="hblock hblock-l-yellow-lg" />
-            <span className="hblock hblock-l-green" />
-            <span className="hblock hblock-l-yellow-sm" />
-            <div className="hero-dot-matrix hero-dots-left">
-              {Array.from({ length: 25 }).map((_, i) => (
-                <span key={i} className="hero-dot-cell" />
-              ))}
-            </div>
-          </div>
-
-          <div className="hero-blocks-topright" aria-hidden="true">
-            <span className="hblock hblock-tr-green" />
-            <span className="hblock hblock-tr-yellow" />
-            <span className="hblock hblock-tr-purple" />
-            <span className="hblock hblock-tr-yellow-sm" />
-            <div className="hero-dot-matrix hero-dots-topright">
-              {Array.from({ length: 25 }).map((_, i) => (
-                <span key={i} className="hero-dot-cell" />
-              ))}
-            </div>
-          </div>
-
           <img
             src={assetPath("/boxes-bg.png")}
             alt="Background Boxes"
@@ -210,6 +186,30 @@ export function Hero() {
           />
 
           <div className="hero-phone-stage">
+            <div className="hero-blocks-left" aria-hidden="true">
+              <span className="hblock hblock-l-purple" />
+              <span className="hblock hblock-l-yellow-lg" />
+              <span className="hblock hblock-l-green" />
+              <span className="hblock hblock-l-yellow-sm" />
+              <div className="hero-dot-matrix hero-dots-left">
+                {Array.from({ length: 25 }).map((_, i) => (
+                  <span key={i} className="hero-dot-cell" />
+                ))}
+              </div>
+            </div>
+
+            <div className="hero-blocks-topright" aria-hidden="true">
+              <span className="hblock hblock-tr-green" />
+              <span className="hblock hblock-tr-yellow" />
+              <span className="hblock hblock-tr-purple" />
+              <span className="hblock hblock-tr-yellow-sm" />
+              <div className="hero-dot-matrix hero-dots-topright">
+                {Array.from({ length: 25 }).map((_, i) => (
+                  <span key={i} className="hero-dot-cell" />
+                ))}
+              </div>
+            </div>
+
             <img
               src={assetPath("/hands.png")}
               alt="Hands holding a smartphone"

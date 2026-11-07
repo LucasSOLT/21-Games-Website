@@ -80,6 +80,7 @@
     font-weight: 600;
     font-size: 15px;
     text-decoration: none;
+    white-space: nowrap;
     cursor: pointer;
     transition: all 0.3s ease;
     border: none;
@@ -107,8 +108,8 @@
 }
 
 .btn-lg {
-    padding: 16px 36px;
-    font-size: 16px;
+    padding: clamp(13px, 1.15vw, 16px) clamp(24px, 2.3vw, 36px);
+    font-size: clamp(14.5px, 1.15vw, 16px);
 }
 
 /* Hero Section */
@@ -118,17 +119,17 @@
     justify-content: space-between;
     flex: 1;
     padding: 12px 0 40px;
-    gap: 48px;
+    gap: clamp(24px, 3vw, 48px);
 }
 
 .hero-content {
-    flex: 1;
-    max-width: 540px;
-    z-index: 10;
+    flex: 0 1 540px;
+    max-width: clamp(380px, 36.5vw, 540px);
+    z-index: 15;
 }
 
 .hero-title {
-    font-size: 82px;
+    font-size: clamp(56px, 5.7vw, 82px);
     font-weight: 800;
     line-height: 1.05;
     letter-spacing: -2.5px;
@@ -140,7 +141,7 @@
 .highlight-purple { color: var(--color-purple); }
 
 .hero-subtitle {
-    font-size: 20px;
+    font-size: clamp(17px, 1.4vw, 20px);
     color: var(--color-text-light);
     margin-bottom: 32px;
     line-height: 1.5;
@@ -200,30 +201,24 @@
 }
 
 .hero-boxes-bg {
-    position: absolute;
-    top: 42%;
-    right: -11vw;
-    transform: translateY(-50%);
-    width: 64vw;
-    min-width: 780px;
-    height: auto;
-    z-index: 1;
-    opacity: 0.95;
+    display: none;
     pointer-events: none;
 }
 
-/* Shared wrapper for hands.png + in-phone demo video screen */
+/* Shared wrapper for hands.png + floating blocks + in-phone demo video screen */
 .hero-phone-stage {
     position: absolute;
-    top: -64px;
-    right: -11vw;
+    top: -54px;
+    right: -10.5vw;
     z-index: 10;
-    width: clamp(880px, 69vw, 1140px);
+    width: clamp(680px, 66.5vw, 1080px);
     pointer-events: none;
     transform-origin: top right;
 }
 
 .hero-hands {
+    position: relative;
+    z-index: 5;
     display: block;
     width: 100%;
     height: auto;
@@ -238,15 +233,16 @@
 /* Hero Demo Video Container — locked inside the phone screen bezel of hands.png */
 .hero-demo-container {
     position: absolute;
-    left: 30.15%;
-    top: 20.15%;
-    width: 45.95%;
-    height: 38.65%;
+    left: 29.95%;
+    top: 19.95%;
+    width: 46.35%;
+    height: 39.05%;
     transform: rotate(-0.75deg);
     transform-origin: center center;
     z-index: 14;
-    border-radius: 7.5% / 15%;
+    border-radius: 7.8% / 15.5%;
     border: 3px solid #111111;
+    outline: 2px solid #111111;
     background: #FFFFFF;
     box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.08), 0 4px 16px rgba(17, 17, 17, 0.14);
     overflow: hidden;
@@ -263,7 +259,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 8px 12px 10px;
+    padding: clamp(6px, 0.65vw, 9px) clamp(8px, 0.9vw, 13px) clamp(8px, 0.75vw, 10px);
     background:
         radial-gradient(circle at 85% 15%, rgba(255, 192, 0, 0.16), transparent 45%),
         radial-gradient(circle at 15% 85%, rgba(200, 85, 203, 0.16), transparent 50%),
@@ -290,11 +286,11 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 8px;
+    padding: 2.5px 7px;
     border-radius: 999px;
     background: #111111;
     color: #FFFFFF;
-    font-size: clamp(8.5px, 0.7vw, 9.5px);
+    font-size: clamp(8px, 0.68vw, 9.5px);
     font-weight: 800;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -311,7 +307,7 @@
 }
 
 .hero-demo-status {
-    font-size: clamp(9px, 0.72vw, 10px);
+    font-size: clamp(8.5px, 0.7vw, 10px);
     font-weight: 600;
     color: #555555;
     background: rgba(255,255,255,0.88);
@@ -327,22 +323,22 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    gap: 3px;
+    gap: 2px;
     z-index: 2;
     margin: auto 0;
-    padding-bottom: 24px;
+    padding-bottom: clamp(18px, 1.7vw, 24px);
 }
 
 .hero-demo-tiles {
     display: grid;
-    grid-template-columns: repeat(5, 13px);
-    gap: 3px;
+    grid-template-columns: repeat(5, clamp(10px, 0.92vw, 13px));
+    gap: clamp(2px, 0.22vw, 3px);
     margin-bottom: 2px;
 }
 
 .hero-demo-tile {
-    width: 13px;
-    height: 13px;
+    width: clamp(10px, 0.92vw, 13px);
+    height: clamp(10px, 0.92vw, 13px);
     border-radius: 3px;
     border: 1.5px solid #111111;
 }
@@ -353,7 +349,7 @@
 .tile-white { background: #FFFFFF; }
 
 .hero-demo-title {
-    font-size: clamp(13px, 1.2vw, 17px);
+    font-size: clamp(11.5px, 1.15vw, 17px);
     font-weight: 800;
     color: #111111;
     letter-spacing: -0.02em;
@@ -362,7 +358,7 @@
 }
 
 .hero-demo-caption {
-    font-size: clamp(10px, 0.85vw, 11.5px);
+    font-size: clamp(9px, 0.8vw, 11.5px);
     font-weight: 500;
     color: #555555;
     margin: 0;
@@ -388,18 +384,18 @@
 
 .hero-video-unmute-btn {
     position: absolute;
-    bottom: 7px;
-    right: 9px;
+    bottom: clamp(5px, 0.55vw, 8px);
+    right: clamp(6px, 0.65vw, 10px);
     z-index: 20;
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 5px 11px;
+    padding: clamp(3.5px, 0.38vw, 5px) clamp(8px, 0.78vw, 11px);
     border-radius: 999px;
     background: rgba(17, 17, 17, 0.92);
     color: #FFFFFF;
     border: 1.5px solid rgba(255, 255, 255, 0.22);
-    font-size: clamp(10px, 0.8vw, 11.5px);
+    font-size: clamp(9px, 0.76vw, 11.5px);
     font-weight: 700;
     cursor: pointer;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
@@ -417,7 +413,7 @@
     transform: translateY(0);
 }
 
-/* Floating Geometric Color Blocks (Left & Top-Right of Hands) */
+/* Floating Geometric Color Blocks — anchored in percentages inside .hero-phone-stage */
 .hblock {
     position: absolute;
     display: block;
@@ -427,109 +423,109 @@
 
 .hero-blocks-left {
     position: absolute;
-    top: 170px;
-    left: -18px;
-    width: 220px;
-    height: 220px;
-    z-index: 3;
+    top: 32%;
+    left: 9.5%;
+    width: 22%;
+    height: 36%;
+    z-index: 2;
     pointer-events: none;
 }
 
 .hblock-l-purple {
-    width: 58px;
-    height: 92px;
+    width: 28%;
+    height: 46%;
     background: #C855CB;
-    bottom: 72px;
-    left: 12px;
+    bottom: 34%;
+    left: 6%;
 }
 
 .hblock-l-yellow-lg {
-    width: 78px;
-    height: 28px;
+    width: 36%;
+    height: 14%;
     background: #FFC000;
-    bottom: 52px;
-    left: 42px;
+    bottom: 24%;
+    left: 20%;
 }
 
 .hblock-l-green {
-    width: 96px;
-    height: 54px;
+    width: 44%;
+    height: 26%;
     background: #439C30;
-    bottom: 6px;
-    left: 26px;
+    bottom: 2%;
+    left: 13%;
 }
 
 .hblock-l-yellow-sm {
-    width: 38px;
-    height: 38px;
+    width: 18%;
+    height: 19%;
     background: #FFC000;
-    bottom: 128px;
-    left: 62px;
+    bottom: 62%;
+    left: 29%;
 }
 
 .hero-blocks-topright {
     position: absolute;
-    top: -44px;
-    right: -2vw;
-    width: 240px;
-    height: 240px;
-    z-index: 3;
+    top: 2%;
+    right: 6%;
+    width: 24%;
+    height: 40%;
+    z-index: 2;
     pointer-events: none;
 }
 
 .hblock-tr-green {
-    width: 88px;
-    height: 52px;
+    width: 37%;
+    height: 23%;
     background: #439C30;
-    top: 14px;
-    right: 44px;
+    top: 6%;
+    right: 18%;
 }
 
 .hblock-tr-yellow {
-    width: 68px;
-    height: 26px;
+    width: 29%;
+    height: 12%;
     background: #FFC000;
-    top: 54px;
-    right: 12px;
+    top: 24%;
+    right: 5%;
 }
 
 .hblock-tr-purple {
-    width: 56px;
-    height: 86px;
+    width: 24%;
+    height: 38%;
     background: #C855CB;
-    top: 72px;
-    right: 26px;
+    top: 32%;
+    right: 11%;
 }
 
 .hblock-tr-yellow-sm {
-    width: 34px;
-    height: 34px;
+    width: 14%;
+    height: 15%;
     background: #FFC000;
-    top: 4px;
-    right: 4px;
+    top: 2%;
+    right: 2%;
 }
 
 .hero-dot-matrix {
     position: absolute;
     display: grid;
-    grid-template-columns: repeat(5, 8px);
-    gap: 5px;
+    grid-template-columns: repeat(5, 7px);
+    gap: 4px;
     pointer-events: none;
 }
 
 .hero-dots-left {
-    bottom: 118px;
-    left: -6px;
+    bottom: 56%;
+    left: -2%;
 }
 
 .hero-dots-topright {
-    top: 22px;
-    right: 110px;
+    top: 9%;
+    right: 46%;
 }
 
 .hero-dot-cell {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     border: 1.5px solid rgba(178, 101, 230, 0.42);
 }
@@ -622,29 +618,46 @@
 /* Responsiveness */
 @media (max-width: 1024px) {
     .container {
-        padding: 0 32px;
+        padding: 0 28px;
+    }
+    .navbar {
+        gap: 14px;
+    }
+    .navbar-logo-img {
+        height: 112px;
+        margin-top: -30px;
+        margin-bottom: -30px;
+        margin-left: -10px;
     }
     .nav-links {
-        gap: 22px;
+        gap: 18px;
     }
     .nav-link {
-        font-size: 14px;
+        font-size: 13.5px;
         white-space: nowrap;
+    }
+    .navbar-actions {
+        gap: 8px;
     }
     .navbar-actions .btn-primary {
         white-space: nowrap;
-        padding: 10px 20px;
+        padding: 9px 18px;
+        font-size: 14px;
     }
     .hero {
         flex-direction: column;
         text-align: center;
-        gap: 32px;
+        gap: 24px;
     }
     .hero-content {
-        max-width: 100%;
+        flex: none;
+        max-width: 640px;
         display: flex;
         flex-direction: column;
         align-items: center;
+    }
+    .hero-title {
+        font-size: clamp(46px, 7.2vw, 68px);
     }
     .warning-box {
         text-align: left;
@@ -658,7 +671,8 @@
         width: 100%;
         height: auto;
         min-height: 0;
-        margin-top: 16px;
+        margin-top: 8px;
+        overflow: hidden;
         flex-direction: column;
         align-items: center;
         justify-content: flex-end;
@@ -668,8 +682,8 @@
         top: auto;
         bottom: auto;
         right: auto;
-        width: min(106%, 820px);
-        margin: 0 auto -36px;
+        width: min(100%, 780px);
+        margin: 0 auto -32px;
     }
     .hero-demo-tiles {
         grid-template-columns: repeat(5, 11px);
@@ -680,13 +694,8 @@
         height: 11px;
     }
     .hero-demo-center {
-        padding-bottom: 22px;
+        padding-bottom: 20px;
         gap: 2px;
-    }
-    .hero-boxes-bg {
-        width: 100%;
-        min-width: 0;
-        right: 0;
     }
 }
 
@@ -744,8 +753,8 @@
         transform: translateY(1px);
     }
     .hero {
-        padding: 8px 0 28px;
-        gap: 20px;
+        padding: 8px 0 20px;
+        gap: 16px;
     }
     .hero-title {
         font-size: clamp(34px, 9.2vw, 48px);
@@ -782,79 +791,84 @@
         padding: 12px 22px;
         font-size: 15px;
     }
-    .hero-hands,
-    .hero-boxes-bg,
-    .hero-blocks-left,
-    .hero-blocks-topright {
-        display: none;
-    }
     .hero-visual {
-        width: 100%;
+        width: calc(100% + 32px);
+        margin-left: -16px;
+        margin-right: -16px;
         min-height: auto;
         height: auto;
-        margin-top: 4px;
+        margin-top: 2px;
         padding: 0;
+        overflow: hidden;
+        display: block;
     }
     .hero-phone-stage {
         position: relative;
+        top: auto;
         bottom: auto;
         right: auto;
-        width: 100%;
-        max-width: 420px;
-        margin: 0 auto;
-        pointer-events: auto;
-    }
-    .hero-demo-container {
-        position: relative;
-        left: auto;
-        top: auto;
-        width: 100%;
-        height: auto;
-        min-height: 204px;
-        aspect-ratio: 16 / 9;
-        margin: 0 auto;
-        transform: none;
-        border-radius: 22px;
-        border: 3px solid #111111;
-        box-shadow: 0 14px 32px rgba(17, 17, 17, 0.12), 0 4px 0 #111111;
+        left: 50%;
+        transform: translateX(-53.1%);
+        width: clamp(540px, 168vw, 760px);
+        margin: -18px 0 -42px;
     }
     .hero-demo-surface {
-        padding: 12px 12px 16px;
+        padding: 6px 8px 8px;
     }
     .hero-demo-topbar {
-        flex-wrap: wrap;
-        gap: 6px;
+        gap: 4px;
+    }
+    .hero-demo-badge {
+        font-size: 7.5px;
+        padding: 2px 6px;
+        gap: 4px;
+    }
+    .hero-demo-dot {
+        width: 5px;
+        height: 5px;
+    }
+    .hero-demo-status {
+        font-size: 8px;
+        padding: 1.5px 5px;
     }
     .hero-demo-tiles {
-        grid-template-columns: repeat(5, 15px);
-        gap: 4px;
+        grid-template-columns: repeat(5, 9px);
+        gap: 2px;
+        margin-bottom: 1px;
     }
     .hero-demo-tile {
-        width: 15px;
-        height: 15px;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        border-width: 1.2px;
     }
     .hero-demo-center {
-        padding-bottom: 30px;
-        gap: 4px;
+        padding-bottom: 16px;
+        gap: 1.5px;
     }
     .hero-demo-title {
-        font-size: 16px;
+        font-size: 11.5px;
     }
     .hero-demo-caption {
-        font-size: 11.5px;
+        font-size: 9px;
     }
     .hero-video-unmute-btn {
-        bottom: 10px;
-        right: 10px;
-        padding: 6px 11px;
-        font-size: 11.5px;
+        bottom: 4px;
+        right: 6px;
+        padding: 3px 7px;
+        font-size: 8.5px;
+        gap: 3.5px;
+    }
+    .hero-video-unmute-btn svg {
+        width: 11px;
+        height: 11px;
     }
     .features {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px 12px;
         padding: 18px 14px;
-        margin-top: 8px;
+        margin-top: 4px;
         margin-bottom: 28px;
         border-radius: 16px;
     }
@@ -889,5 +903,48 @@
         padding: 6px 10px;
         font-size: 11.5px;
     }
+    .hero-visual {
+        width: calc(100% + 24px);
+        margin-left: -12px;
+        margin-right: -12px;
+    }
+    .hero-demo-surface {
+        padding: 5px 7px 6px;
+    }
+    .hero-demo-badge {
+        font-size: 7px;
+        padding: 1.5px 5px;
+    }
+    .hero-demo-status {
+        font-size: 7.5px;
+        padding: 1px 4px;
+    }
+    .hero-demo-tiles {
+        grid-template-columns: repeat(5, 8px);
+        gap: 1.5px;
+        margin-bottom: 1px;
+    }
+    .hero-demo-tile {
+        width: 8px;
+        height: 8px;
+    }
+    .hero-demo-center {
+        padding-bottom: 18px;
+        gap: 1px;
+    }
+    .hero-demo-title {
+        font-size: 10.5px;
+    }
+    .hero-demo-caption {
+        font-size: 8px;
+    }
+    .hero-video-unmute-btn {
+        bottom: 3px;
+        right: 5px;
+        padding: 2.5px 6px;
+        font-size: 8px;
+    }
 }
+
+
 

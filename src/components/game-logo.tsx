@@ -816,12 +816,12 @@ export function GameLogo({
           {/* 8 orbital word nodes at 45° intervals with progressive echo opacity */}
           {ECHO_ANGLES.map((deg, idx) => {
             const rad = (deg * Math.PI) / 180;
-            const cx = 40 + radius * Math.cos(rad);
-            const cy = 40 + radius * Math.sin(rad);
+            const cx = Number((40 + radius * Math.cos(rad)).toFixed(3));
+            const cy = Number((40 + radius * Math.sin(rad)).toFixed(3));
             const tileSize = 12;
-            const x = cx - tileSize / 2;
-            const y = cy - tileSize / 2;
-            const echoOpacity = Math.max(0.25, 1 - idx * 0.1);
+            const x = Number((cx - tileSize / 2).toFixed(3));
+            const y = Number((cy - tileSize / 2).toFixed(3));
+            const echoOpacity = Number(Math.max(0.25, 1 - idx * 0.1).toFixed(2));
             return (
               <g key={`echo-node-${idx}`}>
                 <rect
@@ -918,10 +918,10 @@ export function GameLogo({
             return (
               <line
                 key={`tick-${i}`}
-                x1={cx + rInner * Math.cos(angle)}
-                y1={cy + rInner * Math.sin(angle)}
-                x2={cx + rOuter * Math.cos(angle)}
-                y2={cy + rOuter * Math.sin(angle)}
+                x1={Number((cx + rInner * Math.cos(angle)).toFixed(3))}
+                y1={Number((cy + rInner * Math.sin(angle)).toFixed(3))}
+                x2={Number((cx + rOuter * Math.cos(angle)).toFixed(3))}
+                y2={Number((cy + rOuter * Math.sin(angle)).toFixed(3))}
                 stroke={INK}
                 strokeWidth={isCardinal ? "2.5" : "1.8"}
                 strokeLinecap="round"
