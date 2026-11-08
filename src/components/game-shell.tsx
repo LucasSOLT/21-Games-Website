@@ -27,6 +27,7 @@ import { useAuth } from "@/components/account/auth-provider";
 import { getAvatarTextClass } from "@/components/account/profile-viewer-modal";
 import { getInitials } from "@/lib/user-auth";
 import { cn } from "@/lib/utils";
+import { SolGamesLogo } from "@/components/solgames-logo";
 
 interface GameShellProps {
   gameSlug: PlayableGameSlug;
@@ -68,8 +69,21 @@ export function GameShell({
       {/* Top Game Navigation Bar */}
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
         <div className="mx-auto max-w-6xl px-2 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1 min-[375px]:gap-1.5 sm:gap-2">
-          {/* Left: Back Home + Game Switcher */}
-          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          {/* Left: Brand Mark + Back Home + Game Switcher */}
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <Link
+              href="/"
+              className="group flex items-center shrink-0 transition-transform hover:scale-105 active:scale-95"
+              title="SOL GaMES - Home"
+              aria-label="SOL GaMES Homepage"
+            >
+              <SolGamesLogo
+                variant="mark"
+                size={30}
+                className="h-7 w-7 sm:h-8 sm:w-8"
+              />
+            </Link>
+
             <Link
               href="/"
               className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-auto sm:w-auto items-center justify-center gap-1.5 rounded-full border-2 border-black sm:px-3 sm:py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors shrink-0"

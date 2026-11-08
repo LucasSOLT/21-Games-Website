@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <!-- Hard-offset drop shadow -->
+  <rect x="3.5" y="3.5" width="26" height="26" rx="5" fill="#171717" />
+  <!-- Main white tile with crisp ink border -->
+  <rect x="1.5" y="1.5" width="26" height="26" rx="5" fill="#FFFFFF" stroke="#171717" stroke-width="2" />
+  
+  <!-- Signature 3-game color accent dots (Solid vibrant Yellow / Green / Purple) -->
+  <circle cx="16" cy="6.8" r="1.5" fill="#F9D423" />
+  <circle cx="19.8" cy="6.8" r="1.5" fill="#2ECC71" />
+  <circle cx="23.6" cy="6.8" r="1.5" fill="#9D50BB" />
+
+  <!-- Numeral '2': Editorial Slab Serif -->
+  <path d="M 6.2 12.0 C 6.2 9.8 8.0 8.5 11.2 8.5 C 14.3 8.5 15.8 10.0 15.8 12.2 C 15.8 14.2 14.4 16.0 12.0 18.2 L 9.0 20.8 L 15.8 20.8 L 15.8 23.0 L 6.2 23.0 L 6.2 21.2 L 11.4 16.9 C 13.1 15.4 13.7 14.2 13.7 12.5 C 13.7 11.2 12.8 10.4 11.2 10.4 C 9.6 10.4 8.6 11.2 8.4 12.4 L 6.2 12.0 Z" fill="#171717" />
+
+  <!-- Numeral '1': Editorial Slab Serif with reinforced stem -->
+  <path d="M 17.5 11.4 L 20.2 9.0 L 22.2 9.0 L 22.2 20.8 L 24.2 20.8 L 24.2 23.0 L 17.5 23.0 L 17.5 20.8 L 19.8 20.8 L 19.8 11.4 L 18.3 12.5 L 17.5 11.4 Z" fill="#171717" />
+</svg>

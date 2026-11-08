@@ -45,10 +45,10 @@ import {
   type GameStats,
 } from "@/lib/game-storage";
 import {
-  encodeShareable21Board,
   getPastDateKeys,
   parseDateKeyToLocalNoon,
 } from "@/lib/daily-engine";
+import { shareCustomGame } from "@/lib/custom-game-share";
 import type { TwentyOneThingsBoard } from "@/data/puzzles/21-things";
 import { assetPath } from "@/lib/asset-path";
 import { useToast } from "@/hooks/use-toast";
@@ -113,27 +113,26 @@ export function buildLast7DaysStrip(
 }
 
 export function buildBoardShareUrl(board: TwentyOneThingsBoard): string {
-  const token = encodeShareable21Board(board);
   const origin =
-    typeof window !== "undefined"
+    typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
       : "https://www.solworld.ai";
   const path = assetPath("/games/21-things");
-  return `${origin}${path}?boardId=${encodeURIComponent(
-    board.id
-  )}&board=${encodeURIComponent(token)}`;
+  return `${origin}${path}?b=${encodeURIComponent(board.id)}`;
 }
 
 export function buildBoardPlayHref(board: TwentyOneThingsBoard): string {
-  const token = encodeShareable21Board(board);
-  return `/games/21-things?boardId=${encodeURIComponent(
-    board.id
-  )}&board=${encodeURIComponent(token)}`;
+  return `/games/21-things?b=${encodeURIComponent(board.id)}`;
 }
 
 export function buildResonancePickHref(pick: RecentResonancePick): string {
-  if (pick.boardId && pick.boardId.startsWith("custom-")) {
-    return `/games/21-things?boardId=${encodeURIComponent(pick.boardId)}`;
+  if (
+    pick.boardId &&
+    (pick.boardId.startsWith("custom-") ||
+      pick.boardId.startsWith("21t-") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(pick.boardId))
+  ) {
+    return `/games/21-things?b=${encodeURIComponent(pick.boardId)}`;
   }
   if (pick.dateKey && /^\d{4}-\d{2}-\d{2}$/.test(pick.dateKey)) {
     return `/games/21-things?date=${encodeURIComponent(pick.dateKey)}`;
@@ -474,7 +473,7 @@ export function GuestAuthPanel({
               id={`${formId}-signup-name`}
               type="text"
               autoComplete="name"
-              placeholder="e.g. Lucas Huff"
+              placeholder="e.g. Alex Morgan"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
@@ -727,22 +726,27 @@ export function LoggedInProfileDashboard({
 
   const handleCopyBoardLink = async (board: TwentyOneThingsBoard) => {
     const shareUrl = buildBoardShareUrl(board);
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopiedBoardId(board.id);
-      setTimeout(() => {
-        setCopiedBoardId((prev) => (prev === board.id ? null : prev));
-      }, 2200);
-      toast({
-        title: "Share Link Copied!",
-        description: `Copied link for "${board.title}" to clipboard.`,
-      });
-    } catch {
-      toast({
-        title: "Share Link Ready",
-        description: shareUrl,
-      });
-    }
+    const creatorHandle =
+      profile.handle ||
+      board.creatorHandle ||
+      (board.creatorName
+        ? `@${board.creatorName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`
+        : undefined);
+
+    await shareCustomGame({
+      title: board.title,
+      creatorHandle,
+      creatorName: board.creatorName || profile.displayName,
+      shareUrl,
+      gameName: "21 Things",
+      toastTitle: "Share Link & Blurb Copied!",
+      toastDescription: `Copied attributed share blurb for "${board.title}" to clipboard.`,
+    });
+
+    setCopiedBoardId(board.id);
+    setTimeout(() => {
+      setCopiedBoardId((prev) => (prev === board.id ? null : prev));
+    }, 2200);
   };
 
   const handleSignOutClick = async () => {

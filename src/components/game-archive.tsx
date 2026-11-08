@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useSyncExternalStore } from "react";
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -33,13 +33,26 @@ interface GameArchiveViewProps {
 
 export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [puzzleSyncVersion, setPuzzleSyncVersion] = useState(0);
+
   const mounted = useSyncExternalStore(
     subscribeNoop,
     () => true,
     () => false
   );
 
+  useEffect(() => {
+    const handlePuzzlesUpdated = () => {
+      setPuzzleSyncVersion((v) => v + 1);
+    };
+    window.addEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    return () => {
+      window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    };
+  }, []);
+
   const entries = useMemo(() => {
+    void puzzleSyncVersion;
     const activeDate = mounted ? new Date() : SSR_ANCHOR_DATE;
     const c5Overrides = mounted ? getAdminConnect5Overrides() : undefined;
     const t21Overrides = mounted ? getAdmin21ThingsOverrides() : undefined;
@@ -50,7 +63,7 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
       c5Overrides,
       t21Overrides
     );
-  }, [gameSlug, mounted]);
+  }, [gameSlug, mounted, puzzleSyncVersion]);
 
   const gameTitle = gameSlug === "21-things" ? "21 Things" : "Connect 5";
   const accentBg =

@@ -36,8 +36,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in PAD
       { row: 3, col: 2 }, // 'W' in DOWN
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-2",
@@ -55,8 +55,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 4 }, // 'E' in HOUSE
       { row: 3, col: 0 }, // 'W' in WORK
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-3",
@@ -73,8 +73,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 1 }, // 'A' in BALL
       { row: 3, col: 0 }, // 'W' in WAY
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-4",
@@ -92,8 +92,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 3, col: 0 }, // 'B' in BOARD
       { row: 4, col: 3 }, // 'K' in WALK
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-5",
@@ -111,8 +111,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 3, col: 0 }, // 'T' in TIME
       { row: 4, col: 2 }, // 'B' in TABLE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-6",
@@ -129,8 +129,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'M' in MARK
       { row: 3, col: 0 }, // 'T' in TOWN
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-7",
@@ -148,8 +148,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 4 }, // 'T' in LIGHT
       { row: 3, col: 0 }, // 'W' in WEIGHT
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-8",
@@ -166,8 +166,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'S' in SHELL
       { row: 2, col: 0 }, // 'F' in FISH
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-9",
@@ -184,8 +184,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 2 }, // 'S' in FISH
       { row: 3, col: 0 }, // 'G' in GAME
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-10",
@@ -203,8 +203,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 3, col: 0 }, // 'G' in GRADE
       { row: 4, col: 5 }, // 'L' in SCHOOL
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-11",
@@ -221,8 +221,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'S' in STEP
       { row: 3, col: 0 }, // 'S' in STAGE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-12",
@@ -239,8 +239,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'L' in LID
       { row: 3, col: 0 }, // 'S' in SMITH
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-13",
@@ -258,8 +258,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'H' in HOLE
       { row: 4, col: 4 }, // 'D' in BOARD
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-14",
@@ -276,8 +276,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'S' in STAR
       { row: 2, col: 0 }, // 'L' in LIGHT
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-15",
@@ -294,8 +294,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'F' in FALL
       { row: 3, col: 0 }, // 'S' in SIDE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-16",
@@ -312,8 +312,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in PORT
       { row: 3, col: 0 }, // 'P' in PUNCH
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-17",
@@ -330,8 +330,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'C' in CAKE
       { row: 2, col: 3 }, // 'K' in WALK
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-18",
@@ -348,8 +348,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in POOL
       { row: 3, col: 0 }, // 'K' in KICK
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-19",
@@ -366,8 +366,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'G' in GAME
       { row: 2, col: 0 }, // 'T' in TIME
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-20",
@@ -385,8 +385,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'C' in CLOUD
       { row: 3, col: 0 }, // 'B' in BURST
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-21",
@@ -404,8 +404,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'T' in TEAM
       { row: 4, col: 0 }, // 'B' in BENCH
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-22",
@@ -423,8 +423,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'P' in PLANT
       { row: 4, col: 4 }, // 'D' in GUARD
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-23",
@@ -441,8 +441,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'C' in CORN
       { row: 2, col: 0 }, // 'F' in FIELD
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-24",
@@ -460,8 +460,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'B' in BLOCK
       { row: 3, col: 0 }, // 'P' in PARTY
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-25",
@@ -478,8 +478,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BOOK
       { row: 3, col: 0 }, // 'W' in WORK
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-26",
@@ -496,8 +496,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BELL
       { row: 3, col: 0 }, // 'S' in SCOTCH
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-27",
@@ -515,8 +515,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'W' in WHEEL
       { row: 3, col: 0 }, // 'C' in CHAIR
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-28",
@@ -534,8 +534,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'S' in SHIFT
       { row: 3, col: 0 }, // 'K' in KEY
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-29",
@@ -552,8 +552,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BOX
       { row: 3, col: 0 }, // 'W' in WASH
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-30",
@@ -570,8 +570,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'L' in LINE
       { row: 2, col: 0 }, // 'B' in BACK
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-31",
@@ -588,8 +588,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in PIE
       { row: 2, col: 0 }, // 'C' in CHART
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-32",
@@ -607,8 +607,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'F' in FORCE
       { row: 3, col: 0 }, // 'F' in FIELD
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-33",
@@ -625,8 +625,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'Z' in ZONE
       { row: 3, col: 0 }, // 'P' in POST
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-34",
@@ -643,8 +643,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'L' in LINE
       { row: 3, col: 0 }, // 'T' in TOWN
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-35",
@@ -661,8 +661,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'M' in MINE
       { row: 2, col: 0 }, // 'F' in FIELD
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-36",
@@ -679,8 +679,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'G' in GATE
       { row: 3, col: 0 }, // 'F' in FIND
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-37",
@@ -698,8 +698,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'S' in SPEED
       { row: 3, col: 0 }, // 'B' in BOAT
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-38",
@@ -716,8 +716,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in PAPER
       { row: 3, col: 0 }, // 'B' in BONE
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-39",
@@ -734,8 +734,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WAY
       { row: 3, col: 0 }, // 'S' in SHOW
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-40",
@@ -752,8 +752,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'H' in HOUSE
       { row: 2, col: 0 }, // 'B' in BOAT
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-41",
@@ -770,8 +770,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BALL
       { row: 2, col: 0 }, // 'R' in ROOM
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-42",
@@ -789,8 +789,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'S' in STONE
       { row: 4, col: 0 }, // 'P' in PAPER
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-43",
@@ -808,8 +808,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'O' in OFFICE
       { row: 3, col: 0 }, // 'S' in SPACE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-44",
@@ -826,8 +826,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'C' in COACH
       { row: 3, col: 0 }, // 'B' in BOOK
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-45",
@@ -844,8 +844,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WARE
       { row: 2, col: 0 }, // 'H' in HOUSE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-46",
@@ -863,8 +863,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'W' in WISE
       { row: 3, col: 0 }, // 'C' in CRACK
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-47",
@@ -882,8 +882,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'P' in PLAY
       { row: 3, col: 0 }, // 'G' in GROUND
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-48",
@@ -900,8 +900,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'L' in LIFE
       { row: 2, col: 0 }, // 'T' in TIME
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-49",
@@ -919,8 +919,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 3, col: 0 }, // 'P' in PLACE
       { row: 4, col: 0 }, // 'H' in HOLDER
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-50",
@@ -937,8 +937,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WORK
       { row: 2, col: 0 }, // 'L' in LOAD
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-51",
@@ -955,8 +955,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BANK
       { row: 2, col: 0 }, // 'N' in NOTE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-52",
@@ -974,8 +974,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'C' in CLIP
       { row: 3, col: 0 }, // 'B' in BOARD
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-53",
@@ -992,8 +992,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WOODS
       { row: 3, col: 0 }, // 'P' in POWER
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-54",
@@ -1010,8 +1010,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'T' in TRACK
       { row: 3, col: 0 }, // 'P' in POUR
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-55",
@@ -1028,8 +1028,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WRECK
       { row: 3, col: 0 }, // 'G' in GROUP
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-56",
@@ -1047,8 +1047,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'F' in FRONT
       { row: 3, col: 0 }, // 'D' in DOOR
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-57",
@@ -1065,8 +1065,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'W' in WORM
       { row: 3, col: 0 }, // 'S' in SHOT
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-58",
@@ -1083,8 +1083,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'P' in POLE
       { row: 2, col: 0 }, // 'S' in STAR
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-59",
@@ -1101,8 +1101,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BIRD
       { row: 2, col: 0 }, // 'H' in HOUSE
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-60",
@@ -1119,8 +1119,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'L' in LINE
       { row: 2, col: 0 }, // 'D' in DRIVE
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Lucas Huff",
+    author: "Daily Games Team",
+    editor: "SOL Theory",
   },
   {
     id: "c5-61",
@@ -1137,8 +1137,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BREAD
       { row: 3, col: 0 }, // 'S' in SPRING
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-62",
@@ -1155,8 +1155,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BREAK
       { row: 3, col: 0 }, // 'T' in TRACK
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
   {
     id: "c5-63",
@@ -1173,8 +1173,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'Y' in YARD
       { row: 2, col: 0 }, // 'S' in STICK
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-64",
@@ -1192,8 +1192,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 2, col: 0 }, // 'W' in WHEEL
       { row: 3, col: 0 }, // 'H' in HOUSE
     ],
-    author: "Gerard Rick Jardin",
-    editor: "Stephen Huff",
+    author: "Daily Games Team",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-65",
@@ -1210,8 +1210,8 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'R' in RUN
       { row: 3, col: 0 }, // 'B' in BACK
     ],
-    author: "Lucas Huff",
-    editor: "Stephen Huff",
+    author: "SOL Theory",
+    editor: "Daily Editorial",
   },
   {
     id: "c5-66",
@@ -1228,7 +1228,7 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
       { row: 1, col: 0 }, // 'B' in BEAM
       { row: 2, col: 0 }, // 'D' in DOWN
     ],
-    author: "Stephen Huff",
-    editor: "Lucas Huff",
+    author: "Puzzle Master",
+    editor: "SOL Theory",
   },
 ];

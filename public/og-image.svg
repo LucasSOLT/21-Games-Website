@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" fill="none">
+  <!-- Background -->
+  <rect width="1200" height="630" fill="#FBFBFC" />
+  
+  <!-- Subtle decorative editorial grid pattern -->
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#EFEFEF" stroke-width="1" />
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.6" />
+
+  <!-- Outer Editorial Border Frame -->
+  <rect x="24" y="24" width="1152" height="582" rx="16" fill="none" stroke="#171717" stroke-width="3" />
+  <rect x="32" y="32" width="1136" height="566" rx="12" fill="none" stroke="#171717" stroke-width="1" opacity="0.15" />
+
+  <!-- Top Header / Masthead Bar -->
+  <g transform="translate(60, 56)">
+    <!-- Brand Logo Mark (Tile) -->
+    <rect x="5" y="5" width="64" height="64" rx="12" fill="#171717" />
+    <rect x="0" y="0" width="64" height="64" rx="12" fill="#FFFFFF" stroke="#171717" stroke-width="3.5" />
+    
+    <!-- 3 Accent Dots (Yellow / Green / Purple) -->
+    <circle cx="34" cy="14" r="3.2" fill="#F9D423" />
+    <circle cx="43" cy="14" r="3.2" fill="#2ECC71" />
+    <circle cx="52" cy="14" r="3.2" fill="#9D50BB" />
+    
+    <!-- Editorial '21' Numeral -->
+    <path d="M 12 25 C 12 20 16 17 23 17 C 30 17 33.5 20.5 33.5 25.5 C 33.5 30 30.5 34 25 39 L 18 45 L 34 45 L 34 50 L 12 50 L 12 46 L 24 36.5 C 27.5 33 29 30.5 29 26.5 C 29 23.5 27 21.5 23 21.5 C 19.5 21.5 17.5 23 17 26 Z" fill="#171717" />
+    <path d="M 37.5 24.5 L 43.5 19 L 48 19 L 48 45 L 53 45 L 53 50 L 38 50 L 38 45 L 43 45 L 43 25 L 39.5 27 Z" fill="#171717" />
+
+    <!-- Brand Text -->
+    <text x="82" y="38" font-family="Roboto Slab, Georgia, serif" font-size="34" font-weight="900" fill="#171717" letter-spacing="-0.5">SOL GaMES</text>
+    <text x="84" y="58" font-family="Inter, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#666666" letter-spacing="3.5">21 GAMES BY SOL THEORY</text>
+
+    <!-- Top-Right Live Badge -->
+    <rect x="850" y="12" width="220" height="38" rx="19" fill="#FFFFFF" stroke="#171717" stroke-width="2.5" />
+    <circle cx="872" cy="31" r="5" fill="#2ECC71" />
+    <text x="888" y="36" font-family="Inter, -apple-system, sans-serif" font-size="13" font-weight="700" fill="#171717" letter-spacing="0.5">DAILY NEW PUZZLES</text>
+  </g>
+
+  <!-- Editorial Divider Line -->
+  <line x1="60" y1="145" x2="1140" y2="145" stroke="#171717" stroke-width="2" />
+
+  <!-- Main Headline & Subtitle -->
+  <text x="60" y="205" font-family="Roboto Slab, Georgia, serif" font-size="44" font-weight="900" fill="#171717" letter-spacing="-1">
+    Smart Games. Daily Rituals.
+  </text>
+  <text x="60" y="242" font-family="Inter, -apple-system, sans-serif" font-size="20" font-weight="500" fill="#4A4A4F">
+    Word-chains, daily gratitude, and tactical puzzles designed to stimulate your mind.
+  </text>
+
+  <!-- Featured 3 Game Preview Cards -->
+  <!-- CARD 1: Connect 5 -->
+  <g transform="translate(60, 275)">
+    <!-- Shadow -->
+    <rect x="6" y="6" width="335" height="260" rx="14" fill="#171717" />
+    <!-- Card Face -->
+    <rect x="0" y="0" width="335" height="260" rx="14" fill="#FFFFFF" stroke="#171717" stroke-width="3" />
+    <!-- Header Pill -->
+    <rect x="20" y="20" width="105" height="26" rx="6" fill="#2ECC71" stroke="#171717" stroke-width="2" />
+    <text x="32" y="37" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#171717" letter-spacing="1">WORD CHAIN</text>
+    <text x="20" y="80" font-family="Roboto Slab, Georgia, serif" font-size="26" font-weight="800" fill="#171717">Connect 5</text>
+    <text x="20" y="104" font-family="Inter, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#666">Link 5 compound words end-to-end</text>
+    
+    <!-- Mini Puzzle Graphic: Stepped word chain links -->
+    <g transform="translate(20, 130)">
+      <rect x="0" y="0" width="85" height="22" rx="5" fill="#F9D423" stroke="#171717" stroke-width="2" />
+      <text x="42.5" y="15" font-family="Georgia, serif" font-size="11" font-weight="700" fill="#171717" text-anchor="middle">MOUSE</text>
+      
+      <rect x="65" y="28" width="75" height="22" rx="5" fill="#2ECC71" stroke="#171717" stroke-width="2" />
+      <text x="102.5" y="43" font-family="Georgia, serif" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">PAD</text>
+
+      <rect x="120" y="56" width="80" height="22" rx="5" fill="#FFFFFF" stroke="#171717" stroke-width="2" />
+      <text x="160" y="71" font-family="Georgia, serif" font-size="11" font-weight="700" fill="#171717" text-anchor="middle">LOCK</text>
+
+      <line x1="72" y1="22" x2="72" y2="28" stroke="#171717" stroke-width="3" stroke-linecap="round" />
+      <line x1="130" y1="50" x2="130" y2="56" stroke="#171717" stroke-width="3" stroke-linecap="round" />
+    </g>
+
+    <!-- Bottom Action Pill -->
+    <rect x="20" y="215" width="295" height="30" rx="6" fill="#F4F4F6" />
+    <text x="167.5" y="235" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">PLAY TODAY'S PUZZLE →</text>
+  </g>
+
+  <!-- CARD 2: 21 Things -->
+  <g transform="translate(432, 275)">
+    <!-- Shadow -->
+    <rect x="6" y="6" width="335" height="260" rx="14" fill="#171717" />
+    <!-- Card Face -->
+    <rect x="0" y="0" width="335" height="260" rx="14" fill="#FFFFFF" stroke="#171717" stroke-width="3" />
+    <!-- Header Pill -->
+    <rect x="20" y="20" width="135" height="26" rx="6" fill="#9D50BB" stroke="#171717" stroke-width="2" />
+    <text x="27" y="37" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#FFFFFF" letter-spacing="1">DAILY GRATITUDE</text>
+    <text x="20" y="80" font-family="Roboto Slab, Georgia, serif" font-size="26" font-weight="800" fill="#171717">21 Things</text>
+    <text x="20" y="104" font-family="Inter, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#666">Narrow 21 gratitude items down to #1</text>
+    
+    <!-- Mini Puzzle Graphic: Funnel pyramid tiers -->
+    <g transform="translate(68, 128)">
+      <!-- Tier 1 Top Crown -->
+      <rect x="58" y="0" width="60" height="20" rx="4" fill="#F9D423" stroke="#171717" stroke-width="2" />
+      <text x="88" y="14" font-family="Inter, -apple-system, sans-serif" font-size="10" font-weight="900" fill="#171717" text-anchor="middle">#1 PICK</text>
+      <!-- Tier 2 -->
+      <rect x="28" y="26" width="36" height="18" rx="3" fill="#2ECC71" stroke="#171717" stroke-width="2" />
+      <rect x="70" y="26" width="36" height="18" rx="3" fill="#2ECC71" stroke="#171717" stroke-width="2" />
+      <rect x="112" y="26" width="36" height="18" rx="3" fill="#2ECC71" stroke="#171717" stroke-width="2" />
+      <!-- Tier 3 -->
+      <rect x="10" y="50" width="34" height="16" rx="3" fill="#9D50BB" stroke="#171717" stroke-width="1.8" />
+      <rect x="50" y="50" width="34" height="16" rx="3" fill="#9D50BB" stroke="#171717" stroke-width="1.8" />
+      <rect x="90" y="50" width="34" height="16" rx="3" fill="#9D50BB" stroke="#171717" stroke-width="1.8" />
+      <rect x="130" y="50" width="34" height="16" rx="3" fill="#9D50BB" stroke="#171717" stroke-width="1.8" />
+    </g>
+
+    <!-- Bottom Action Pill -->
+    <rect x="20" y="215" width="295" height="30" rx="6" fill="#F4F4F6" />
+    <text x="167.5" y="235" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">REFLECT &amp; SHARE →</text>
+  </g>
+
+  <!-- CARD 3: 9 Rhymes -->
+  <g transform="translate(805, 275)">
+    <!-- Shadow -->
+    <rect x="6" y="6" width="335" height="260" rx="14" fill="#171717" />
+    <!-- Card Face -->
+    <rect x="0" y="0" width="335" height="260" rx="14" fill="#FFFFFF" stroke="#171717" stroke-width="3" />
+    <!-- Header Pill -->
+    <rect x="20" y="20" width="105" height="26" rx="6" fill="#F9D423" stroke="#171717" stroke-width="2" />
+    <text x="32" y="37" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#171717" letter-spacing="1">PHONETICS</text>
+    <text x="20" y="80" font-family="Roboto Slab, Georgia, serif" font-size="26" font-weight="800" fill="#171717">9 Rhymes</text>
+    <text x="20" y="104" font-family="Inter, -apple-system, sans-serif" font-size="13" font-weight="500" fill="#666">3-in-a-row rhyming diagonal hunt</text>
+    
+    <!-- Mini Puzzle Graphic: 3x3 Phonetic Grid -->
+    <g transform="translate(100, 126)">
+      <!-- 3x3 Grid with Gold Diagonal -->
+      <rect x="0" y="0" width="22" height="22" rx="4" fill="#F9D423" stroke="#171717" stroke-width="2" />
+      <rect x="28" y="0" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+      <rect x="56" y="0" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+
+      <rect x="0" y="26" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+      <rect x="28" y="26" width="22" height="22" rx="4" fill="#F9D423" stroke="#171717" stroke-width="2" />
+      <rect x="56" y="26" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+
+      <rect x="0" y="52" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+      <rect x="28" y="52" width="22" height="22" rx="4" fill="#FFFFFF" stroke="#171717" stroke-width="1.8" />
+      <rect x="56" y="52" width="22" height="22" rx="4" fill="#F9D423" stroke="#171717" stroke-width="2" />
+
+      <line x1="11" y1="11" x2="67" y2="63" stroke="#171717" stroke-width="3" stroke-linecap="round" />
+    </g>
+
+    <!-- Bottom Action Pill -->
+    <rect x="20" y="215" width="295" height="30" rx="6" fill="#F4F4F6" />
+    <text x="167.5" y="235" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">FIND THE RHYMES →</text>
+  </g>
+
+  <!-- Bottom URL Pill -->
+  <g transform="translate(930, 560)">
+    <rect x="0" y="0" width="210" height="28" rx="6" fill="#FFFFFF" stroke="#171717" stroke-width="1.5" />
+    <text x="105" y="19" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">solworld.ai/solgames</text>
+  </g>
+</svg>

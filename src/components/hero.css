@@ -34,13 +34,22 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    text-decoration: none;
+    color: inherit;
 }
 
+.navbar-logo,
 .navbar-logo-img {
-    height: 140px;
-    margin-top: -40px;
-    margin-bottom: -40px;
-    margin-left: -15px;
+    height: 42px;
+    width: auto;
+    display: block;
+    margin: 0;
+    transition: transform 0.2s ease;
+}
+
+.logo:hover .navbar-logo,
+.logo:hover .navbar-logo-img {
+    transform: translateY(-1px);
 }
 
 .mobile-quick-nav {
@@ -535,7 +544,7 @@
     width: auto;
     display: inline-block;
     vertical-align: middle;
-    margin-bottom: -10px;
+    margin-bottom: 0;
 }
 
 @keyframes float {
@@ -623,11 +632,10 @@
     .navbar {
         gap: 14px;
     }
+    .navbar-logo,
     .navbar-logo-img {
-        height: 112px;
-        margin-top: -30px;
-        margin-bottom: -30px;
-        margin-left: -10px;
+        height: 38px;
+        margin: 0;
     }
     .nav-links {
         gap: 18px;
@@ -709,11 +717,10 @@
         margin-bottom: 6px;
         gap: 8px;
     }
+    .navbar-logo,
     .navbar-logo-img {
-        height: 84px;
-        margin-top: -20px;
-        margin-bottom: -20px;
-        margin-left: -8px;
+        height: 32px;
+        margin: 0;
     }
     .nav-links {
         display: none;
@@ -890,11 +897,10 @@
     .container {
         padding: 0 12px;
     }
+    .navbar-logo,
     .navbar-logo-img {
-        height: 64px;
-        margin-top: -14px;
-        margin-bottom: -14px;
-        margin-left: -6px;
+        height: 28px;
+        margin: 0;
     }
     .navbar-actions {
         gap: 6px;

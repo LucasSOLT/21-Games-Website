@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AccountNavButton } from "@/components/account/account-nav-button";
+import { SolGamesLogo } from "@/components/solgames-logo";
 
 const DEMO_VIDEO_SRC: string | null = null;
 
@@ -62,13 +63,9 @@ export function Hero() {
   return (
     <div className="container">
       <nav className="navbar">
-        <div className="logo">
-          <img
-            src={assetPath("/logo.png")}
-            alt="SOL GaMES"
-            className="navbar-logo-img"
-          />
-        </div>
+        <Link href="/" className="logo group" aria-label="SOL GaMES Home">
+          <SolGamesLogo variant="full" className="navbar-logo" />
+        </Link>
         <div className="nav-links">
           <a href="#play" className="nav-link">
             Daily Featured

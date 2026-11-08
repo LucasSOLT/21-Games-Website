@@ -12,10 +12,10 @@ const LAUNCH_EPOCH = "2026-09-01";
 const ROTATION_ANCHOR = "2026-11-05";
 
 const AUTHORS_ROTATION = [
-  { author: "Lucas Huff", editor: "Stephen Huff" },
-  { author: "Stephen Huff", editor: "Lucas Huff" },
-  { author: "Gerard Rick Jardin", editor: "Lucas Huff" },
-  { author: "Lucas Huff", editor: "Gerard Rick Jardin" },
+  { author: "SOL Theory", editor: "Daily Editorial" },
+  { author: "Puzzle Master", editor: "SOL Theory" },
+  { author: "Daily Games Team", editor: "SOL Theory" },
+  { author: "SOL Theory", editor: "Words & Logic Desk" },
 ];
 
 /**
@@ -212,7 +212,7 @@ export function getArchiveEntriesForGame(
         gameSlug,
         title: b.title,
         author: b.creatorName,
-        editor: "Stephen Huff",
+        editor: "Daily Editorial",
       };
     }
   });

@@ -33,18 +33,11 @@ const BASE_BOARDS: Array<{
     string, string, string, string, string, string, string,
     string, string, string, string, string, string, string
   ];
-  journeys: Array<{
-    playerName: string;
-    pick6Indices: [number, number, number, number, number, number];
-    pick3Indices: [number, number, number];
-    pick1Index: number;
-    reflectionNote: string;
-  }>;
 }> = [
   {
     title: "Everyday Magic & Small Joys",
-    creatorName: "Lucas Huff",
-    creatorHandle: "@LucasSOLT",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "21 little things that make ordinary days feel extraordinary.",
     items: [
       "Two-colored dog eyes",
@@ -69,29 +62,11 @@ const BASE_BOARDS: Array<{
       "Campfire woodsmoke on hoodie",
       "Unexpected text from a friend",
     ],
-    journeys: [
-      {
-        playerName: "Gerard Rick",
-        pick6Indices: [0, 1, 2, 8, 12, 19],
-        pick3Indices: [1, 2, 19],
-        pick1Index: 2,
-        reflectionNote:
-          "Nothing beats the quiet 6am ritual of grinding beans before the rest of the house wakes up.",
-      },
-      {
-        playerName: "Stephen Huff",
-        pick6Indices: [2, 4, 5, 10, 12, 17],
-        pick3Indices: [4, 10, 12],
-        pick1Index: 12,
-        reflectionNote:
-          "Those rare moments around the dinner table where everyone is crying laughing stay with you forever.",
-      },
-    ],
   },
   {
     title: "Coastal Mornings & Slow Weekends",
-    creatorName: "Stephen Huff",
-    creatorHandle: "@StephenHuff",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Slowing down by the water and appreciating simple rhythms.",
     items: [
       "Salt air at sunrise",
@@ -116,29 +91,11 @@ const BASE_BOARDS: Array<{
       "Stargazing from a dock",
       "Waves crashing at midnight",
     ],
-    journeys: [
-      {
-        playerName: "Lucas Huff",
-        pick6Indices: [0, 1, 8, 9, 17, 19],
-        pick3Indices: [0, 9, 19],
-        pick1Index: 19,
-        reflectionNote:
-          "Lying back on a wooden dock looking at Orion with zero city light pollution is pure peace.",
-      },
-      {
-        playerName: "Maya Lin",
-        pick6Indices: [3, 6, 13, 14, 17, 18],
-        pick3Indices: [6, 13, 14],
-        pick1Index: 13,
-        reflectionNote:
-          "Sun-warmed berries from a local stand taste completely different from grocery store ones!",
-      },
-    ],
   },
   {
     title: "Creative Flow & Studio Vibes",
-    creatorName: "Gerard Rick Jardin",
-    creatorHandle: "@gerardrickjardin",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
     creatorBio: "Things that spark creative momentum when building something new.",
     items: [
       "Fresh dot-grid notebook",
@@ -163,21 +120,11 @@ const BASE_BOARDS: Array<{
       "Shipping before midnight",
       "High-five after launch",
     ],
-    journeys: [
-      {
-        playerName: "Lucas Huff",
-        pick6Indices: [1, 3, 4, 8, 9, 19],
-        pick3Indices: [4, 8, 9],
-        pick1Index: 9,
-        reflectionNote:
-          "When a late-night jam session turns a wild idea into a real playable prototype—best feeling ever.",
-      },
-    ],
   },
   {
     title: "Childhood Nostalgia & Summer Nights",
-    creatorName: "Lucas Huff",
-    creatorHandle: "@LucasSOLT",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Throwback memories that still bring an instant smile.",
     items: [
       "Fireflies in a mason jar",
@@ -202,21 +149,11 @@ const BASE_BOARDS: Array<{
       "Watermelon seed contests",
       "Falling asleep in backseat",
     ],
-    journeys: [
-      {
-        playerName: "Stephen Huff",
-        pick6Indices: [0, 2, 4, 6, 11, 20],
-        pick3Indices: [0, 4, 20],
-        pick1Index: 20,
-        reflectionNote:
-          "Waking up as a kid on a long road trip just enough to feel the car turn into the driveway.",
-      },
-    ],
   },
   {
     title: "Cozy Autumn & Cabin Retreats",
-    creatorName: "Stephen Huff",
-    creatorHandle: "@StephenHuff",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Crisp mountain air, wool blankets, and slow evenings.",
     items: [
       "Hot apple cider with clove",
@@ -241,21 +178,11 @@ const BASE_BOARDS: Array<{
       "Acoustic folk playlist",
       "Reading under a quilt",
     ],
-    journeys: [
-      {
-        playerName: "Gerard Rick",
-        pick6Indices: [0, 1, 3, 8, 9, 20],
-        pick3Indices: [1, 3, 8],
-        pick1Index: 3,
-        reflectionNote:
-          "Watching mist lift off calm water at 7am makes the whole world feel still.",
-      },
-    ],
   },
   {
     title: "Foodie Heaven & Kitchen Rituals",
-    creatorName: "Gerard Rick Jardin",
-    creatorHandle: "@gerardrickjardin",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
     creatorBio: "21 flavors, sounds, and textures that make cooking an art.",
     items: [
       "Garlic sizzling in olive oil",
@@ -280,21 +207,11 @@ const BASE_BOARDS: Array<{
       "Sharing tapas with friends",
       "Grandma's handwritten recipe",
     ],
-    journeys: [
-      {
-        playerName: "Lucas Huff",
-        pick6Indices: [0, 3, 5, 8, 14, 20],
-        pick3Indices: [0, 8, 20],
-        pick1Index: 0,
-        reflectionNote:
-          "As soon as garlic hits warm olive oil, everyone in the house walks into the kitchen asking what's cooking.",
-      },
-    ],
   },
   {
     title: "Road Trip & Open Horizons",
-    creatorName: "Lucas Huff",
-    creatorHandle: "@LucasSOLT",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Windows down, great playlists, and nowhere to rush.",
     items: [
       "Windows down on Highway 1",
@@ -319,21 +236,11 @@ const BASE_BOARDS: Array<{
       "Motel neon sign at dusk",
       "Pulling into home driveway",
     ],
-    journeys: [
-      {
-        playerName: "Stephen Huff",
-        pick6Indices: [0, 1, 2, 7, 8, 10],
-        pick3Indices: [0, 1, 7],
-        pick1Index: 1,
-        reflectionNote:
-          "When everyone in the car knows every word to a song and belts the bridge together.",
-      },
-    ],
   },
   {
     title: "Mindful Reset & Inner Calm",
-    creatorName: "Stephen Huff",
-    creatorHandle: "@StephenHuff",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Grounding habits that clear mental clutter and restore energy.",
     items: [
       "Ten deep belly breaths",
@@ -358,21 +265,11 @@ const BASE_BOARDS: Array<{
       "Genuine compliment to stranger",
       "Waking up before the alarm",
     ],
-    journeys: [
-      {
-        playerName: "Lucas Huff",
-        pick6Indices: [1, 2, 4, 5, 8, 19],
-        pick3Indices: [2, 5, 19],
-        pick1Index: 5,
-        reflectionNote:
-          "Leaving earbuds at home on an afternoon walk lets your best ideas surface naturally.",
-      },
-    ],
   },
   {
     title: "City Lights & Culture Nights",
-    creatorName: "Gerard Rick Jardin",
-    creatorHandle: "@gerardrickjardin",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
     creatorBio: "The electric energy of a great evening out in the city.",
     items: [
       "Rooftop view of skyline",
@@ -397,21 +294,11 @@ const BASE_BOARDS: Array<{
       "Theater curtain rising",
       "Quiet cab ride home",
     ],
-    journeys: [
-      {
-        playerName: "Stephen Huff",
-        pick6Indices: [0, 1, 5, 6, 7, 19],
-        pick3Indices: [1, 5, 6],
-        pick1Index: 1,
-        reflectionNote:
-          "Live brass and upright bass in a small brick room hits your soul like nothing else.",
-      },
-    ],
   },
   {
     title: "Winter Wonder & Holiday Warmth",
-    creatorName: "Lucas Huff",
-    creatorHandle: "@LucasSOLT",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
     creatorBio: "Quiet snowfalls, warm lights, and gathering with loved ones.",
     items: [
       "First snowfall at midnight",
@@ -436,16 +323,6 @@ const BASE_BOARDS: Array<{
       "Handwritten holiday cards",
       "Toasting to the year ahead",
     ],
-    journeys: [
-      {
-        playerName: "Gerard Rick",
-        pick6Indices: [0, 1, 6, 9, 11, 20],
-        pick3Indices: [0, 6, 9],
-        pick1Index: 6,
-        reflectionNote:
-          "That muffled, peaceful silence right after six inches of snow blankets the street.",
-      },
-    ],
   },
 ];
 
@@ -456,12 +333,12 @@ const EXTRA_THEMES: Array<{
   creatorBio: string;
   rotateOffset: number;
 }> = [
-  { title: "Sunday Morning Sanctuary", creatorName: "Lucas Huff", creatorHandle: "@LucasSOLT", creatorBio: "Unrushed hours that recharge the whole week.", rotateOffset: 3 },
-  { title: "Nature's Quiet Masterpieces", creatorName: "Stephen Huff", creatorHandle: "@StephenHuff", creatorBio: "Wild landscapes and small outdoor wonders.", rotateOffset: 5 },
-  { title: "Friendship & Good Company", creatorName: "Gerard Rick Jardin", creatorHandle: "@gerardrickjardin", creatorBio: "Moments that turn acquaintances into lifelong friends.", rotateOffset: 7 },
-  { title: "Music Lover's Gratitude", creatorName: "Lucas Huff", creatorHandle: "@LucasSOLT", creatorBio: "Sounds, stages, and songs that move us.", rotateOffset: 2 },
-  { title: "Traveler's Notebook", creatorName: "Stephen Huff", creatorHandle: "@StephenHuff", creatorBio: "Passport stamps, train windows, and new horizons.", rotateOffset: 4 },
-  { title: "Garden & Green Thumb Joys", creatorName: "Gerard Rick Jardin", creatorHandle: "@gerardrickjardin", creatorBio: "Watching seeds, blossoms, and seasons unfold.", rotateOffset: 6 },
+  { title: "Sunday Morning Sanctuary", creatorName: "SOL Theory", creatorHandle: "@SOLTheory", creatorBio: "Unrushed hours that recharge the whole week.", rotateOffset: 3 },
+  { title: "Nature's Quiet Masterpieces", creatorName: "Daily Curator", creatorHandle: "@curator", creatorBio: "Wild landscapes and small outdoor wonders.", rotateOffset: 5 },
+  { title: "Friendship & Good Company", creatorName: "SOL Theory", creatorHandle: "@SOLTheory", creatorBio: "Moments that turn acquaintances into lifelong friends.", rotateOffset: 7 },
+  { title: "Music Lover's Gratitude", creatorName: "Daily Curator", creatorHandle: "@curator", creatorBio: "Sounds, stages, and songs that move us.", rotateOffset: 2 },
+  { title: "Traveler's Notebook", creatorName: "SOL Theory", creatorHandle: "@SOLTheory", creatorBio: "Passport stamps, train windows, and new horizons.", rotateOffset: 4 },
+  { title: "Garden & Green Thumb Joys", creatorName: "Daily Curator", creatorHandle: "@curator", creatorBio: "Watching seeds, blossoms, and seasons unfold.", rotateOffset: 6 },
 ];
 
 export const TWENTY_ONE_THINGS_BOARDS: TwentyOneThingsBoard[] = Array.from(
@@ -484,23 +361,10 @@ export const TWENTY_ONE_THINGS_BOARDS: TwentyOneThingsBoard[] = Array.from(
       creatorHandle = theme.creatorHandle;
       creatorBio = theme.creatorBio;
 
-      // Preserve indices referenced by sampleJourneys so pick1/pick3/pick6 always match reflection notes
-      const protectedIndices = new Set<number>(
-        base.journeys.flatMap((j) => [
-          ...j.pick6Indices,
-          ...j.pick3Indices,
-          j.pick1Index,
-        ])
-      );
       const secondary = BASE_BOARDS[(index + cycle) % BASE_BOARDS.length].items;
-      const usedItems = new Set<string>(
-        items.filter((_, idx) => protectedIndices.has(idx))
-      );
+      const usedItems = new Set<string>();
 
       items = items.map((item, idx) => {
-        if (protectedIndices.has(idx)) {
-          return item;
-        }
         const candidate =
           idx % 2 === cycle % 2 ? secondary[idx] : item;
         if (!usedItems.has(candidate)) {
@@ -536,16 +400,6 @@ export const TWENTY_ONE_THINGS_BOARDS: TwentyOneThingsBoard[] = Array.from(
     }
 
     const boardId = `21t-${puzzleNumber}`;
-    const sampleJourneys: TwentyOneJourney[] = base.journeys.map((j, jIdx) => ({
-      id: `${boardId}-sample-${jIdx + 1}`,
-      boardId,
-      playerName: j.playerName,
-      pick6: j.pick6Indices.map((i) => items[i]),
-      pick3: j.pick3Indices.map((i) => items[i]),
-      pick1: items[j.pick1Index],
-      reflectionNote: j.reflectionNote,
-      createdAt: "Today",
-    }));
 
     return {
       id: boardId,
@@ -555,7 +409,7 @@ export const TWENTY_ONE_THINGS_BOARDS: TwentyOneThingsBoard[] = Array.from(
       creatorHandle,
       creatorBio,
       items,
-      sampleJourneys,
+      sampleJourneys: [],
     };
   }
 );

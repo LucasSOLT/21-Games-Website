@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 212 48" width="212" height="48" fill="none" role="img" aria-label="SOL GaMES by SOL Theory">
+  <title>SOL GaMES by SOL Theory</title>
+  <style>
+    .brand-title {
+      font-family: 'Roboto Slab', Georgia, 'Times New Roman', serif;
+      font-weight: 900;
+      font-size: 22px;
+      fill: #171717;
+      letter-spacing: -0.4px;
+    }
+    .brand-sub {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-weight: 700;
+      font-size: 8.5px;
+      fill: #71717A;
+      letter-spacing: 1.8px;
+    }
+  </style>
+
+  <!-- Brand Icon Mark: Square Editorial "21" Tile -->
+  <g class="solgames-mark">
+    <!-- Hard Drop Shadow -->
+    <rect x="7" y="7" width="37" height="37" rx="7" fill="#171717" />
+    <!-- White Tile Face with Crisp 2.5px Border -->
+    <rect x="4" y="4" width="37" height="37" rx="7" fill="#FFFFFF" stroke="#171717" stroke-width="2.5" />
+    
+    <!-- 3 Signature Game Accent Dots (Yellow: 9 Rhymes, Green: Connect 5, Purple: 21 Things) -->
+    <circle cx="15" cy="12" r="2.3" fill="#F9D423" stroke="#171717" stroke-width="1.4" />
+    <circle cx="22.5" cy="12" r="2.3" fill="#2ECC71" stroke="#171717" stroke-width="1.4" />
+    <circle cx="30" cy="12" r="2.3" fill="#9D50BB" stroke="#171717" stroke-width="1.4" />
+
+    <!-- "21" Numeral in Editorial Slab-Serif (Vector Paths) -->
+    <!-- Digit 2 -->
+    <path d="M 12 21.5 C 12 18.2 14.5 16.5 18 16.5 C 21.6 16.5 24 18.3 24 21 C 24 23.6 22 26 19 28.8 L 14.5 32.8 L 24.5 32.8 L 24.5 36 L 11.5 36 L 11.5 33 L 17 28 C 20.2 25 21.2 23.5 21.2 21.2 C 21.2 19.5 19.8 18.5 18 18.5 C 15.8 18.5 14.6 19.8 14.5 21.5 Z" fill="#171717" />
+    <!-- Digit 1 -->
+    <path d="M 28 19.5 L 25.5 21 V 18.8 L 28.5 16.8 L 30.5 16.8 L 30.5 32.8 L 33.5 32.8 L 33.5 36 L 25.5 36 L 25.5 32.8 L 28 32.8 Z" fill="#171717" />
+  </g>
+
+  <!-- Editorial Wordmark -->
+  <g class="solgames-wordmark">
+    <!-- Primary Title: SOL GaMES -->
+    <text x="54" y="26.5" class="brand-title">SOL GaMES</text>
+    <!-- Subtitle: BY SOL THEORY -->
+    <text x="54.5" y="38" class="brand-sub">BY SOL THEORY</text>
+  </g>
+</svg>

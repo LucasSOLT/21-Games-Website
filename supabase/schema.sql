@@ -13,8 +13,8 @@ create table if not exists public.daily_puzzles (
   puzzle_date date not null,
   puzzle_number integer not null,
   title text not null,
-  author text not null default 'Lucas Huff',
-  editor text not null default 'Stephen Huff',
+  author text not null default 'SOL Theory',
+  editor text not null default 'Daily Editorial',
   payload jsonb not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -96,6 +96,10 @@ create table if not exists public.user_profiles (
   display_name text not null,
   handle text not null,
   avatar_color text not null default '#F9D423',
+  role text not null default 'user' check (role in ('game_master', 'admin', 'user')),
+  is_banned boolean not null default false,
+  banned_at timestamptz,
+  banned_reason text,
   connect5_stats jsonb not null default '{}'::jsonb,
   twenty_one_stats jsonb not null default '{}'::jsonb,
   recent_picks jsonb not null default '[]'::jsonb,
@@ -104,8 +108,27 @@ create table if not exists public.user_profiles (
   updated_at timestamptz not null default now()
 );
 
+-- Idempotent column additions for existing installations
+alter table public.user_profiles
+  add column if not exists role text not null default 'user'
+    check (role in ('game_master', 'admin', 'user')),
+  add column if not exists is_banned boolean not null default false,
+  add column if not exists banned_at timestamptz,
+  add column if not exists banned_reason text;
+
 create index if not exists idx_user_profiles_email
   on public.user_profiles (email);
+
+create index if not exists idx_user_profiles_role
+  on public.user_profiles (role);
+
+create index if not exists idx_user_profiles_is_banned
+  on public.user_profiles (is_banned);
+
+-- Seed / enforce initial Game Masters
+update public.user_profiles
+  set role = 'game_master', is_banned = false, banned_at = null, banned_reason = null
+  where lower(email) in ('lucas@soltheory.com', 'steve@soltheory.com');
 
 alter table public.user_profiles enable row level security;
 

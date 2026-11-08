@@ -600,17 +600,16 @@ export async function fetchBoardJourneys(
           const combined = [
             ...remoteJourneys,
             ...localJourneys.filter((j) => !mergedIds.has(j.id)),
-            ...board.sampleJourneys.filter((j) => !mergedIds.has(j.id)),
           ];
           return combined;
         }
       } catch {
-        // Fallback cleanly to local + sample journeys
+        // Fallback cleanly to local journeys
       }
     }
   }
 
-  return [...localJourneys, ...board.sampleJourneys];
+  return localJourneys;
 }
 
 export async function submitPlayerJourney(
@@ -797,20 +796,116 @@ export async function fetchRemoteConnect5Override(
   return null;
 }
 
+export interface SaveAdminOverrideResult {
+  ok: boolean;
+  remotePersisted: boolean;
+  error?: string;
+}
+
+let puzzlesStoreRevision = 0;
+
+export function getPuzzlesStoreSnapshot(): number {
+  return puzzlesStoreRevision;
+}
+
+export function subscribeToPuzzlesUpdated(callback: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  const handler = () => {
+    puzzlesStoreRevision += 1;
+    callback();
+  };
+  window.addEventListener("solgames:puzzles-updated", handler);
+  return () => {
+    window.removeEventListener("solgames:puzzles-updated", handler);
+  };
+}
+
+/**
+ * Fetches all daily puzzles from Supabase `public.daily_puzzles` (Connect 5 & 21 Things),
+ * updates local storage override caches, and dispatches "solgames:puzzles-updated".
+ * This ensures that puzzle edits made by Game Masters on any device immediately
+ * synchronize across all browser sessions upon page load or refresh.
+ */
+export async function syncAllRemoteDailyPuzzles(): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  try {
+    const { data, error } = await supabase
+      .from("daily_puzzles")
+      .select("game_slug, puzzle_date, payload, updated_at")
+      .order("puzzle_date", { ascending: false })
+      .limit(200);
+
+    if (error || !Array.isArray(data)) return;
+
+    const c5Overrides = getAdminConnect5Overrides();
+    const t21Overrides = getAdmin21ThingsOverrides();
+    let c5Changed = false;
+    let t21Changed = false;
+
+    for (const row of data) {
+      const dateKey = String(row.puzzle_date);
+      if (!dateKey) continue;
+
+      if (row.game_slug === "connect-5" && row.payload) {
+        const puzzle = row.payload as Connect5Puzzle;
+        if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
+          c5Overrides[dateKey] = puzzle;
+          c5Changed = true;
+        }
+      } else if (row.game_slug === "21-things" && row.payload) {
+        const board = row.payload as TwentyOneThingsBoard;
+        if (Array.isArray(board.items) && board.items.length === 21) {
+          t21Overrides[dateKey] = board;
+          t21Changed = true;
+        }
+      }
+    }
+
+    if (c5Changed) {
+      safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, c5Overrides);
+    }
+    if (t21Changed) {
+      safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, t21Overrides);
+    }
+
+    if ((c5Changed || t21Changed) && typeof window !== "undefined") {
+      try {
+        window.dispatchEvent(
+          new CustomEvent("solgames:puzzles-updated", {
+            detail: { source: "syncAllRemoteDailyPuzzles" },
+          })
+        );
+      } catch {
+        // Ignore DOM event errors
+      }
+    }
+  } catch {
+    // Non-fatal sync fallback
+  }
+}
+
 export async function saveAdminConnect5Override(
   dateKey: string,
   puzzle: Connect5Puzzle
-): Promise<void> {
+): Promise<SaveAdminOverrideResult> {
   const current = getAdminConnect5Overrides();
   current[dateKey] = puzzle;
   safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
   clearConnect5Progress(dateKey);
 
+  let remotePersisted = false;
+  let remoteError: string | undefined;
+
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from("daily_puzzles").upsert(
+        const { error } = await supabase.from("daily_puzzles").upsert(
           {
             game_slug: "connect-5",
             puzzle_date: dateKey,
@@ -819,14 +914,38 @@ export async function saveAdminConnect5Override(
             author: puzzle.author,
             editor: puzzle.editor,
             payload: puzzle,
+            updated_at: new Date().toISOString(),
           },
           { onConflict: "game_slug,puzzle_date" }
         );
-      } catch {
-        // Saved locally
+        if (error) {
+          remoteError = error.message;
+        } else {
+          remotePersisted = true;
+        }
+      } catch (err: unknown) {
+        remoteError = err instanceof Error ? err.message : "Failed to persist puzzle to Supabase.";
       }
     }
   }
+
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("solgames:puzzles-updated", {
+          detail: { gameSlug: "connect-5", dateKey },
+        })
+      );
+    } catch {
+      // Ignore DOM event errors
+    }
+  }
+
+  return {
+    ok: true,
+    remotePersisted,
+    error: remoteError,
+  };
 }
 
 export function getAdmin21ThingsOverrides(): Record<
@@ -872,31 +991,58 @@ export async function fetchRemote21ThingsOverride(
 export async function saveAdmin21ThingsOverride(
   dateKey: string,
   board: TwentyOneThingsBoard
-): Promise<void> {
+): Promise<SaveAdminOverrideResult> {
   const current = getAdmin21ThingsOverrides();
   current[dateKey] = board;
   safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
   clear21ThingsProgress(board.id);
 
+  let remotePersisted = false;
+  let remoteError: string | undefined;
+
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from("daily_puzzles").upsert(
+        const { error } = await supabase.from("daily_puzzles").upsert(
           {
             game_slug: "21-things",
             puzzle_date: dateKey,
             puzzle_number: board.puzzleNumber,
             title: board.title,
             author: board.creatorName,
-            editor: "Stephen Huff",
+            editor: "Daily Editorial",
             payload: board,
+            updated_at: new Date().toISOString(),
           },
           { onConflict: "game_slug,puzzle_date" }
         );
-      } catch {
-        // Saved locally
+        if (error) {
+          remoteError = error.message;
+        } else {
+          remotePersisted = true;
+        }
+      } catch (err: unknown) {
+        remoteError = err instanceof Error ? err.message : "Failed to persist board to Supabase.";
       }
     }
   }
+
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("solgames:puzzles-updated", {
+          detail: { gameSlug: "21-things", dateKey },
+        })
+      );
+    } catch {
+      // Ignore DOM event errors
+    }
+  }
+
+  return {
+    ok: true,
+    remotePersisted,
+    error: remoteError,
+  };
 }

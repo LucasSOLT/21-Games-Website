@@ -1,11 +1,16 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  AlertCircle,
+  ArrowRight,
   Check,
   Copy,
   Crown,
+  Loader2,
+  Lock,
   Mic,
   MicOff,
   RotateCcw,
@@ -17,10 +22,14 @@ import {
 } from "lucide-react";
 import {
   decodeShareable21Board,
-  encodeShareable21Board,
   get21ThingsBoardForDate,
   getLocalDateKey,
 } from "@/lib/daily-engine";
+import {
+  buildBoardShareUrl,
+  generateShortGameId,
+  shareCustomGame,
+} from "@/lib/custom-game-share";
 import {
   enforceTileConstraints,
   parseTranscriptTo21Items,
@@ -76,15 +85,35 @@ interface SpeechRecognitionLike {
 function resolveInitial21Board(
   activeDateKey: string,
   boardTokenParam: string | null,
-  boardIdParam: string | null
-): TwentyOneThingsBoard {
+  boardIdParam: string | null,
+  hasCustomParam = false
+): TwentyOneThingsBoard | null {
+  if (hasCustomParam) {
+    if (boardTokenParam) {
+      const decoded = decodeShareable21Board(boardTokenParam);
+      if (decoded) return decoded;
+      return null;
+    }
+    if (boardIdParam && boardIdParam.trim()) {
+      const localSaved = getSavedUser21Boards().find(
+        (b) => b.id === boardIdParam.trim()
+      );
+      if (localSaved) return localSaved;
+      return null;
+    }
+    return null;
+  }
   if (boardTokenParam) {
     const decoded = decodeShareable21Board(boardTokenParam);
     if (decoded) return decoded;
+    return null;
   }
-  if (boardIdParam) {
-    const localSaved = getSavedUser21Boards().find((b) => b.id === boardIdParam);
+  if (boardIdParam && boardIdParam.trim()) {
+    const localSaved = getSavedUser21Boards().find(
+      (b) => b.id === boardIdParam.trim()
+    );
     if (localSaved) return localSaved;
+    return null;
   }
   const overrides = getAdmin21ThingsOverrides();
   return get21ThingsBoardForDate(activeDateKey, overrides);
@@ -129,16 +158,22 @@ function sanitizeSaved21Progress(
 export function TwentyOneThingsGame() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
+  const bParam = searchParams.get("b");
+  const legacyBoardId = searchParams.get("boardId");
+  const boardIdParam = bParam || legacyBoardId;
   const boardTokenParam = searchParams.get("board");
-  const boardIdParam = searchParams.get("boardId");
   const modeParam = searchParams.get("mode");
+  const hasCustomParam =
+    searchParams.has("b") ||
+    searchParams.has("boardId") ||
+    searchParams.has("board");
 
   const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
     getLocalDateKey()
   );
 
   useEffect(() => {
-    if (dateParam || boardTokenParam || boardIdParam) return;
+    if (dateParam || hasCustomParam) return;
     const checkDate = () => {
       const current = getLocalDateKey();
       setLiveTodayKey((prev) => (prev !== current ? current : prev));
@@ -149,10 +184,10 @@ export function TwentyOneThingsGame() {
       clearInterval(interval);
       window.removeEventListener("focus", checkDate);
     };
-  }, [dateParam, boardTokenParam, boardIdParam]);
+  }, [dateParam, hasCustomParam]);
 
   const activeDateKey = dateParam || liveTodayKey;
-  const instanceKey = `${activeDateKey}::${boardTokenParam ?? ""}::${boardIdParam ?? ""}::${modeParam ?? ""}`;
+  const instanceKey = `${activeDateKey}::${boardTokenParam ?? ""}::${boardIdParam ?? ""}::${hasCustomParam ? "custom" : "daily"}::${modeParam ?? ""}`;
 
   return (
     <TwentyOneThingsBoardView
@@ -160,6 +195,7 @@ export function TwentyOneThingsGame() {
       activeDateKey={activeDateKey}
       boardTokenParam={boardTokenParam}
       boardIdParam={boardIdParam}
+      hasCustomParam={hasCustomParam}
       initialMode={modeParam === "create" ? "create" : "play"}
     />
   );
@@ -169,24 +205,52 @@ function TwentyOneThingsBoardView({
   activeDateKey,
   boardTokenParam,
   boardIdParam,
+  hasCustomParam = false,
   initialMode,
 }: {
   activeDateKey: string;
   boardTokenParam: string | null;
   boardIdParam: string | null;
+  hasCustomParam?: boolean;
   initialMode: "play" | "create";
 }) {
   const { toast } = useToast();
-  const { profile } = useAuth();
+  const { profile, isAuthenticated, isLoading: authLoading, openAccountModal } = useAuth();
 
   const [mode, setMode] = useState<"play" | "create">(initialMode);
 
-  const [board, setBoard] = useState<TwentyOneThingsBoard>(() =>
-    resolveInitial21Board(activeDateKey, boardTokenParam, boardIdParam)
+  const initialCustomBoard = resolveInitial21Board(
+    activeDateKey,
+    boardTokenParam,
+    boardIdParam,
+    hasCustomParam
+  );
+
+  const hasEmptyOrBlankId =
+    hasCustomParam && !boardTokenParam && (!boardIdParam || !boardIdParam.trim());
+
+  const [isLoadingCustomBoard, setIsLoadingCustomBoard] = useState<boolean>(
+    () => {
+      if (hasEmptyOrBlankId) return false;
+      return Boolean(boardIdParam && boardIdParam.trim() && !initialCustomBoard);
+    }
+  );
+
+  const [customBoardNotFound, setCustomBoardNotFound] = useState<boolean>(
+    () => {
+      if (hasEmptyOrBlankId) return true;
+      return Boolean(boardTokenParam && !initialCustomBoard);
+    }
+  );
+
+  const [board, setBoard] = useState<TwentyOneThingsBoard | null>(
+    () => initialCustomBoard
   );
 
   const [initialSaved] = useState(() =>
-    sanitizeSaved21Progress(get21ThingsProgress(board.id))
+    initialCustomBoard
+      ? sanitizeSaved21Progress(get21ThingsProgress(initialCustomBoard.id))
+      : null
   );
 
   // Funnel state: 21 -> 6 -> 3 -> 1 -> reflect -> complete
@@ -211,9 +275,7 @@ function TwentyOneThingsBoardView({
   const [voiceNoteDataUrl, setVoiceNoteDataUrl] = useState<string | undefined>(
     initialSaved?.voiceNoteDataUrl
   );
-  const [journeys, setJourneys] = useState<TwentyOneJourney[]>(
-    board.sampleJourneys
-  );
+  const [journeys, setJourneys] = useState<TwentyOneJourney[]>([]);
 
   // Voice recording state for player reflection
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
@@ -250,7 +312,7 @@ function TwentyOneThingsBoardView({
   const [rawTranscript, setRawTranscript] = useState("");
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [creatorItems, setCreatorItems] = useState<string[]>(() =>
-    board.items.slice(0, 21)
+    initialCustomBoard ? initialCustomBoard.items.slice(0, 21) : []
   );
   const [autoShortenedCount, setAutoShortenedCount] = useState(0);
   const [shareUrl, setShareUrl] = useState<string>("");
@@ -286,37 +348,66 @@ function TwentyOneThingsBoardView({
   // Load remote Supabase custom board (twenty_one_boards) or daily override (daily_puzzles)
   useEffect(() => {
     let active = true;
-    if (boardIdParam && !boardTokenParam) {
-      fetchUserCreated21BoardById(boardIdParam).then((remoteBoard) => {
-        if (active && remoteBoard) {
-          setBoard(remoteBoard);
-          setCreatorItems(remoteBoard.items.slice(0, 21));
-        }
-      });
-    } else if (!boardTokenParam && !boardIdParam) {
+    if (boardIdParam && boardIdParam.trim() && !boardTokenParam) {
+      fetchUserCreated21BoardById(boardIdParam.trim())
+        .then((remoteBoard) => {
+          if (!active) return;
+          if (remoteBoard) {
+            setBoard(remoteBoard);
+            setCreatorItems(remoteBoard.items.slice(0, 21));
+            // Initialize game state specifically for this custom board
+            const saved = sanitizeSaved21Progress(
+              get21ThingsProgress(remoteBoard.id)
+            );
+            setPhase(saved?.phase ?? "pick6");
+            setPick6(saved?.pick6Indices ?? []);
+            setPick3(saved?.pick3Indices ?? []);
+            setPick1(saved?.pick1Index ?? null);
+            setPlayerName(saved?.playerName || profile?.displayName || "");
+            setReflectionNote(saved?.reflectionNote ?? "");
+            setVoiceNoteDataUrl(saved?.voiceNoteDataUrl);
+            setIsLoadingCustomBoard(false);
+          } else {
+            setIsLoadingCustomBoard(false);
+            setCustomBoardNotFound(true);
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setIsLoadingCustomBoard(false);
+            setCustomBoardNotFound(true);
+          }
+        });
+    } else if (!hasCustomParam && !boardTokenParam && !boardIdParam) {
       fetchRemote21ThingsOverride(activeDateKey).then((remoteOverride) => {
-        if (
-          active &&
-          remoteOverride &&
-          (remoteOverride.id !== board.id ||
-            remoteOverride.items.join("|") !== board.items.join("|"))
-        ) {
-          setBoard(remoteOverride);
-          setCreatorItems(remoteOverride.items.slice(0, 21));
+        if (active && remoteOverride) {
+          setBoard((prev) => {
+            if (
+              !prev ||
+              prev.id !== remoteOverride.id ||
+              prev.items.join("|") !== remoteOverride.items.join("|")
+            ) {
+              setCreatorItems(remoteOverride.items.slice(0, 21));
+              return remoteOverride;
+            }
+            return prev;
+          });
         }
       });
     }
     return () => {
       active = false;
     };
-  }, [activeDateKey, boardIdParam, boardTokenParam, board.id, board.items]);
+  }, [activeDateKey, boardIdParam, boardTokenParam, hasCustomParam, profile?.displayName]);
 
   // Async fetch journeys (remote Supabase + localStorage + sampleJourneys)
   useEffect(() => {
     let active = true;
-    fetchBoardJourneys(board).then((list) => {
-      if (active) setJourneys(list);
-    });
+    if (board) {
+      fetchBoardJourneys(board).then((list) => {
+        if (active) setJourneys(list);
+      });
+    }
     return () => {
       active = false;
     };
@@ -331,6 +422,7 @@ function TwentyOneThingsBoardView({
     nextNote = reflectionNote,
     nextVoice = voiceNoteDataUrl
   ) => {
+    if (!board) return;
     save21ThingsProgress({
       boardId: board.id,
       phase: nextPhase,
@@ -432,8 +524,10 @@ function TwentyOneThingsBoardView({
     }
   };
 
-  const handleResetFunnel = (targetBoardId = board.id) => {
-    clear21ThingsProgress(targetBoardId);
+  const handleResetFunnel = (targetBoardId = board?.id ?? "") => {
+    if (targetBoardId) {
+      clear21ThingsProgress(targetBoardId);
+    }
     setPhase("pick6");
     setPick6([]);
     setPick3([]);
@@ -498,7 +592,7 @@ function TwentyOneThingsBoardView({
 
   const handleSubmitReflection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pick1 === null) return;
+    if (pick1 === null || !board) return;
 
     const finalName =
       playerName.trim() || profile?.displayName?.trim() || "Friend";
@@ -536,7 +630,7 @@ function TwentyOneThingsBoardView({
   };
 
   const handleShareJourney = async () => {
-    if (pick1 === null) return;
+    if (pick1 === null || !board) return;
     const text = [
       `✨ 21 Things (${board.title} by ${board.creatorName})`,
       `21 → 6 → 3 → 1 Funnel:`,
@@ -687,6 +781,25 @@ function TwentyOneThingsBoardView({
   };
 
   const handlePublishCustomBoard = async () => {
+    if (!isAuthenticated && !profile) {
+      toast({
+        title: "Sign In Required",
+        description: "You must be signed in to publish your custom 21 Things board.",
+        variant: "destructive",
+      });
+      openAccountModal("signin");
+      return;
+    }
+
+    if (profile?.isBanned) {
+      toast({
+        title: "Account Suspended",
+        description: "Your account has been suspended from publishing custom boards.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const sanitized = creatorItems.map((it, idx) => {
       const { text } = enforceTileConstraints(it);
       return text || `Gratitude #${idx + 1}`;
@@ -704,7 +817,7 @@ function TwentyOneThingsBoardView({
         : `@${resolvedCreatorName.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 
     const customBoard: TwentyOneThingsBoard = {
-      id: `custom-${Date.now()}`,
+      id: generateShortGameId(),
       puzzleNumber: 0,
       title:
         creatorTitle.trim() || `${effectiveCreatorName || "My"}'s 21 Things`,
@@ -717,33 +830,103 @@ function TwentyOneThingsBoardView({
 
     await saveUserCreated21Board(customBoard, rawTranscript);
 
-    const token = encodeShareable21Board(customBoard);
-    const origin =
-      typeof window !== "undefined"
-        ? `${window.location.origin}${window.location.pathname}`
-        : "https://www.solworld.ai/solgames/games/21-things";
-    const fullUrl = `${origin}?boardId=${encodeURIComponent(
-      customBoard.id
-    )}&board=${encodeURIComponent(token)}`;
+    const fullUrl = buildBoardShareUrl(customBoard);
     setShareUrl(fullUrl);
     setBoard(customBoard);
     setMode("play");
     handleResetFunnel(customBoard.id);
 
-    try {
-      await navigator.clipboard.writeText(fullUrl);
-      toast({
-        title: "Board Live & Share Link Copied!",
-        description:
-          "Send the link to friends so they can play your 21 → 6 → 3 → 1 board.",
-      });
-    } catch {
-      toast({
-        title: "Your 21 Things Board is Live!",
-        description: "Copy your shareable link above to send to friends.",
-      });
-    }
+    await shareCustomGame({
+      title: customBoard.title,
+      creatorHandle: customBoard.creatorHandle || resolvedHandle,
+      creatorName: customBoard.creatorName,
+      shareUrl: fullUrl,
+      gameName: "21 Things",
+      toastTitle: "Board Live & Link Copied!",
+      toastDescription:
+        "Native share sheet opened and blurb copied with your @username attribution.",
+    });
   };
+
+  if (customBoardNotFound) {
+    return (
+      <GameShell
+        gameSlug="21-things"
+        gameTitle="21 Things"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="SOL GaMES"
+      >
+        <div className="mx-auto max-w-md my-12 p-6 sm:p-10 text-center bg-white border-2 border-black rounded-2xl shadow-2xs">
+          <div className="inline-flex items-center justify-center h-14 w-14 rounded-full bg-red-100 border-2 border-black mb-4">
+            <AlertCircle className="h-7 w-7 text-red-600" />
+          </div>
+          <div className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700 border border-gray-300 mb-3">
+            Custom Game Routing
+          </div>
+          <h2 className="font-headline font-black text-xl sm:text-2xl text-black mb-2">
+            Custom Board Not Found
+          </h2>
+          <p className="text-xs sm:text-sm text-gray-600 mb-6 leading-relaxed">
+            We couldn&apos;t find a custom 21 Things board matching{" "}
+            <span
+              className="font-mono font-bold text-black bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200"
+              data-board-id={boardIdParam}
+            >
+              {boardIdParam?.trim() || "(empty)"}
+            </span>
+            {/* {boardIdParam || "this link"} */}
+            . The board may have been removed, or the link may be incomplete.
+          </p>
+          <div className="space-y-2.5">
+            <Link
+              href="/games/21-things"
+              className="w-full inline-flex items-center justify-center bg-black text-white hover:bg-gray-800 font-headline font-black text-xs sm:text-sm h-11 rounded-xl border-2 border-black shadow-2xs transition-colors"
+            >
+              Play Today&apos;s Daily Puzzle
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Link>
+            <Link
+              href="/"
+              className="w-full inline-flex items-center justify-center border-2 border-black bg-white text-black hover:bg-gray-100 font-headline font-bold text-xs sm:text-sm h-11 rounded-xl transition-colors"
+            >
+              Return to SOL GaMES Home
+            </Link>
+          </div>
+        </div>
+      </GameShell>
+    );
+  }
+
+  if (isLoadingCustomBoard || !board) {
+    return (
+      <GameShell
+        gameSlug="21-things"
+        gameTitle="21 Things"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="Creator"
+      >
+        <div className="mx-auto max-w-lg my-12 p-8 sm:p-12 text-center bg-white border-2 border-black rounded-2xl shadow-2xs">
+          <div className="inline-flex items-center justify-center h-14 w-14 rounded-full bg-[#daa8d0] border-2 border-black mb-4">
+            <Loader2 className="h-7 w-7 text-black animate-spin" />
+          </div>
+          <h2 className="font-headline font-black text-xl sm:text-2xl text-black mb-2">
+            Loading Custom Board
+          </h2>
+          <p className="text-sm text-gray-600 mb-4 max-w-sm mx-auto">
+            Fetching the creator&apos;s custom 21 Things list from SOL GaMES...
+          </p>
+          {boardIdParam && (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100 border border-gray-300 text-xs font-mono text-gray-600">
+              <span>Board ID:</span>
+              <span className="font-bold text-black">{boardIdParam}</span>
+            </div>
+          )}
+        </div>
+      </GameShell>
+    );
+  }
 
   return (
     <GameShell
@@ -757,11 +940,23 @@ function TwentyOneThingsBoardView({
           variant={mode === "create" ? "default" : "outline"}
           size="sm"
           onClick={() => {
-            const nextMode = mode === "play" ? "create" : "play";
-            if (nextMode === "create" && !creatorName && profile?.displayName) {
-              setCreatorName(profile.displayName);
+            if (mode === "play") {
+              if (!isAuthenticated && !profile) {
+                toast({
+                  title: "Sign In Required",
+                  description:
+                    "Please sign in or create a free account to build and share custom 21 Things boards.",
+                });
+                openAccountModal("signin");
+                return;
+              }
+              if (!creatorName && profile?.displayName) {
+                setCreatorName(profile.displayName);
+              }
+              setMode("create");
+            } else {
+              setMode("play");
             }
-            setMode(nextMode);
           }}
           className="font-bold border-2 border-black text-[10px] min-[375px]:text-[11px] sm:text-xs h-7 sm:h-9 px-2 min-[375px]:px-2.5 sm:px-3"
         >
@@ -771,7 +966,35 @@ function TwentyOneThingsBoardView({
       }
     >
       {mode === "create" ? (
-        <div className="space-y-5">
+        !authLoading && !isAuthenticated && !profile ? (
+          <div className="rounded-2xl border-2 border-black bg-white p-6 sm:p-8 text-center space-y-4 max-w-lg mx-auto shadow-[0_4px_0_#111111] my-8">
+            <div className="h-14 w-14 rounded-full bg-purple-50 border-2 border-black flex items-center justify-center mx-auto text-black">
+              <Lock className="h-7 w-7" />
+            </div>
+            <h2 className="font-headline font-black text-2xl text-black">
+              Sign In to Build Custom Boards
+            </h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Creating and publishing custom 21 Things boards requires an account. Sign in or register for free to craft personal gratitude or favorite-things boards and share them with friends.
+            </p>
+            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+              <Button
+                onClick={() => openAccountModal("signin")}
+                className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
+              >
+                Sign In or Register
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setMode("play")}
+                className="border-2 border-black font-bold"
+              >
+                Back to Today&apos;s Board
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-5">
           <div className="rounded-2xl border-2 border-black bg-white p-4 sm:p-6 shadow-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
               <div>
@@ -830,7 +1053,7 @@ function TwentyOneThingsBoardView({
                 <Input
                   value={creatorName}
                   onChange={(e) => setCreatorName(e.target.value)}
-                  placeholder="e.g. Lucas Huff"
+                  placeholder="e.g. Alex Morgan"
                 />
               </div>
               <div>
@@ -952,6 +1175,7 @@ function TwentyOneThingsBoardView({
             </div>
           </div>
         </div>
+        )
       ) : (
         <div className="space-y-2 sm:space-y-4">
           <div className="rounded-2xl border-2 border-black bg-white p-2.5 sm:p-4 shadow-2xs">
@@ -1022,17 +1246,47 @@ function TwentyOneThingsBoardView({
                 <span className="truncate font-mono text-purple-900">
                   Share link: {shareUrl}
                 </span>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => {
-                    navigator.clipboard.writeText(shareUrl);
-                    toast({ title: "Friend Link Copied!" });
-                  }}
-                >
-                  <Copy className="h-3 w-3 mr-1" />
-                  Copy
-                </Button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={async () => {
+                      await shareCustomGame({
+                        title: board.title,
+                        creatorHandle:
+                          board.creatorHandle ||
+                          (profile?.handle ? profile.handle : undefined),
+                        creatorName: board.creatorName,
+                        shareUrl,
+                        gameName: "21 Things",
+                      });
+                    }}
+                    className="border border-black font-bold"
+                  >
+                    <Share2 className="h-3 w-3 mr-1" />
+                    Share
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={async () => {
+                      await shareCustomGame({
+                        title: board.title,
+                        creatorHandle:
+                          board.creatorHandle ||
+                          (profile?.handle ? profile.handle : undefined),
+                        creatorName: board.creatorName,
+                        shareUrl,
+                        gameName: "21 Things",
+                        toastTitle: "Friend Link Copied!",
+                      });
+                    }}
+                    className="border border-black font-bold"
+                  >
+                    <Copy className="h-3 w-3 mr-1" />
+                    Copy
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -1380,7 +1634,7 @@ function TwentyOneThingsBoardView({
                 <Textarea
                   value={reflectionNote}
                   onChange={(e) => setReflectionNote(e.target.value)}
-                  placeholder={`Tell ${board.creatorName} why "${board.items[pick1]}" stood out above the other 20...`}
+                  placeholder={`Tell the creator why "${board.items[pick1]}" stood out above the other 20...`}
                   className="min-h-[80px]"
                 />
               </div>
@@ -1426,6 +1680,15 @@ function TwentyOneThingsBoardView({
                 <Button
                   variant="outline"
                   onClick={() => {
+                    if (!isAuthenticated && !profile) {
+                      toast({
+                        title: "Sign In Required",
+                        description:
+                          "Please sign in or create a free account to build and share custom 21 Things boards.",
+                      });
+                      openAccountModal("signin");
+                      return;
+                    }
                     if (!creatorName && profile?.displayName) {
                       setCreatorName(profile.displayName);
                     }

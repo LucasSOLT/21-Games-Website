@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useSyncExternalStore } from "react";
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { GameCard } from "@/components/game-card";
 import { GameLogo } from "@/components/game-logo";
@@ -10,6 +10,7 @@ import {
   formatShortArchiveDate,
   get21ThingsBoardForDate,
   getConnect5PuzzleForDate,
+  getLocalDateKey,
   getPastDateKeys,
   parseDateKeyToLocalNoon,
 } from "@/lib/daily-engine";
@@ -40,13 +41,40 @@ export default function Home() {
     () => false
   );
 
+  const [puzzleSyncVersion, setPuzzleSyncVersion] = useState(0);
+
+  useEffect(() => {
+    const handlePuzzlesUpdated = () => {
+      setPuzzleSyncVersion((v) => v + 1);
+    };
+    window.addEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    return () => {
+      window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    };
+  }, []);
+
   const todayBannerLabel = useMemo(() => {
     const activeDate = mounted ? new Date() : SSR_ANCHOR_DATE;
     return featuredDateFormatter.format(activeDate);
   }, [mounted]);
 
+  const { todayC5Author, today21Author } = useMemo(() => {
+    void puzzleSyncVersion;
+    if (!mounted) return { todayC5Author: "SOL Theory", today21Author: "SOL Theory" };
+    const todayKey = getLocalDateKey();
+    const c5Overrides = getAdminConnect5Overrides();
+    const t21Overrides = getAdmin21ThingsOverrides();
+    const c5 = getConnect5PuzzleForDate(todayKey, c5Overrides);
+    const t21 = get21ThingsBoardForDate(todayKey, t21Overrides);
+    return {
+      todayC5Author: c5.author || "SOL Theory",
+      today21Author: t21.creatorName || "SOL Theory",
+    };
+  }, [mounted, puzzleSyncVersion]);
+
   // Compute past 4 days dynamically on client without hydration mismatch
   const recentArchiveItems = useMemo(() => {
+    void puzzleSyncVersion;
     const activeDate = mounted ? new Date() : SSR_ANCHOR_DATE;
     const c5Overrides = mounted ? getAdminConnect5Overrides() : undefined;
     const t21Overrides = mounted ? getAdmin21ThingsOverrides() : undefined;
@@ -77,12 +105,12 @@ export default function Home() {
           gameSlug: "21-things" as const,
           subtitle: `${b.title} (#${b.puzzleNumber})`,
           author: b.creatorName,
-          editor: "Stephen Huff",
+          editor: "Daily Editorial",
           badgeBg: "bg-[#daa8d0]",
         };
       }
     });
-  }, [mounted]);
+  }, [mounted, puzzleSyncVersion]);
 
   return (
     <div className="bg-background overflow-x-hidden">
@@ -110,14 +138,14 @@ export default function Home() {
             <GameCard
               game={leftGame}
               variant="featured"
-              author="Lucas Huff"
+              author="SOL Theory"
             />
           </div>
           <div className="w-full max-w-sm lg:w-1/2 mx-auto order-1 lg:order-2">
             <GameCard
               game={centerGame}
               variant="featured"
-              author="Lucas Huff"
+              author={today21Author}
               isCenter
             />
           </div>
@@ -125,7 +153,7 @@ export default function Home() {
             <GameCard
               game={rightGame}
               variant="featured"
-              author="Stephen Huff"
+              author={todayC5Author}
             />
           </div>
         </div>
@@ -240,7 +268,7 @@ export default function Home() {
             About 21 Games by SOL Theory
           </h3>
           <p className="text-sm text-gray-600 max-w-2xl mx-auto">
-            Built by Lucas Huff, Stephen Huff, and the SOL Theory team. Our
+            Built by the SOL Theory team. Our
             daily games combine gratitude-driven social curation (
             <strong>21 Things</strong>) and crisp word-chain deduction (
             <strong>Connect 5</strong>)—refreshed automatically every midnight

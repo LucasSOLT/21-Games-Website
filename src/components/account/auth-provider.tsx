@@ -9,7 +9,10 @@ import React, {
   useState,
 } from "react";
 import {
+  canAccessPuzzleStudio,
   initializeAuthSession,
+  isAdmin,
+  isGameMaster,
   sendMagicLink,
   signInWithEmail,
   signOutUser,
@@ -22,6 +25,7 @@ import {
   type UpdateProfileInput,
   type UserProfile,
 } from "@/lib/user-auth";
+import { syncAllRemoteDailyPuzzles } from "@/lib/game-storage";
 import { ProfileViewerModal } from "@/components/account/profile-viewer-modal";
 
 export type AccountModalTab = "signin" | "signup" | "profile";
@@ -29,6 +33,9 @@ export type AccountModalTab = "signin" | "signup" | "profile";
 export interface AuthContextValue {
   profile: UserProfile | null;
   isAuthenticated: boolean;
+  isGameMaster: boolean;
+  isAdmin: boolean;
+  canAccessStudio: boolean;
   isLoading: boolean;
   isModalOpen: boolean;
   modalInitialTab: AccountModalTab;
@@ -55,6 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+
+    // Bootstrap global daily puzzles from Supabase
+    void syncAllRemoteDailyPuzzles();
 
     void initializeAuthSession()
       .then((restored) => {
@@ -168,7 +178,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       profile,
-      isAuthenticated: profile !== null,
+      isAuthenticated: profile !== null && !profile.isBanned,
+      isGameMaster: isGameMaster(profile),
+      isAdmin: isAdmin(profile),
+      canAccessStudio: canAccessPuzzleStudio(profile),
       isLoading,
       isModalOpen,
       modalInitialTab,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -11,7 +11,11 @@ import {
   Database,
   Eye,
   Lightbulb,
+  Lock,
   Play,
+  RefreshCw,
+  Search,
+  ShieldCheck,
   Wand2,
 } from "lucide-react";
 import {
@@ -40,6 +44,18 @@ import {
   saveAdminConnect5Override,
 } from "@/lib/game-storage";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { useAuth } from "@/components/account/auth-provider";
+import {
+  canAccessPuzzleStudio,
+  checkDateEditPermission,
+  fetchAllUserProfiles,
+  isGameMaster,
+  isInitialGameMaster,
+  setUserBannedStatus,
+  updateUserRole,
+  type UserProfile,
+  type UserRole,
+} from "@/lib/user-auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -54,6 +70,7 @@ const subscribeNoop = () => () => {};
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { profile, isLoading: authLoading, openAccountModal } = useAuth();
 
   const mounted = useSyncExternalStore(
     subscribeNoop,
@@ -61,15 +78,22 @@ export default function AdminPage() {
     () => false
   );
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const targetDate = selectedDate ?? (mounted ? getLocalDateKey() : SSR_ANCHOR_DATE);
+  const todayDateKey = mounted ? getLocalDateKey() : SSR_ANCHOR_DATE;
+  const targetDate = selectedDate ?? todayDateKey;
   const [activeTab, setActiveTab] = useState<string>("connect-5");
+
+  // Authorization and permission calculations
+  const isGM = isGameMaster(profile);
+  const editPerm = useMemo(() => {
+    return checkDateEditPermission(profile, targetDate, todayDateKey);
+  }, [profile, targetDate, todayDateKey]);
 
   // ==========================================================================
   // Connect 5 Creator State
   // ==========================================================================
   const [c5Title, setC5Title] = useState("Desk to Breeze");
-  const [c5Author, setC5Author] = useState("Lucas Huff");
-  const [c5Editor, setC5Editor] = useState("Stephen Huff");
+  const [c5Author, setC5Author] = useState("");
+  const [c5Editor, setC5Editor] = useState("");
   const [c5Words, setC5Words] = useState<[string, string, string, string, string]>([
     "MOUSE",
     "PAD",
@@ -94,7 +118,7 @@ export default function AdminPage() {
   // 21 Things Creator State
   // ==========================================================================
   const [t21Title, setT21Title] = useState("Everyday Magic & Small Joys");
-  const [t21Creator, setT21Creator] = useState("Lucas Huff");
+  const [t21Creator, setT21Creator] = useState("");
   const [t21Bio, setT21Bio] = useState(
     "21 little things that make ordinary days feel extraordinary."
   );
@@ -103,60 +127,88 @@ export default function AdminPage() {
     TWENTY_ONE_THINGS_BOARDS[0].items.slice(0, 21)
   );
 
-  const loadScheduleForDate = useCallback(async (dateKey: string) => {
-    const localC5 = getAdminConnect5Overrides()[dateKey];
-    const scheduledC5 = localC5 ?? getConnect5PuzzleForDate(dateKey);
-    setC5Title(scheduledC5.title);
-    setC5Author(scheduledC5.author);
-    setC5Editor(scheduledC5.editor);
-    setC5Words([...scheduledC5.words]);
-    setC5Connections([...scheduledC5.connections]);
-    setC5Hints([...scheduledC5.revealedHints]);
+  // ==========================================================================
+  // User Management State (Game Masters Only)
+  // ==========================================================================
+  const [userList, setUserList] = useState<UserProfile[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [actionInProgressEmail, setActionInProgressEmail] = useState<string | null>(null);
 
-    const local21 = getAdmin21ThingsOverrides()[dateKey];
-    const scheduled21 = local21 ?? get21ThingsBoardForDate(dateKey);
-    setT21Title(scheduled21.title);
-    setT21Creator(scheduled21.creatorName);
-    setT21Bio(scheduled21.creatorBio);
-    setT21Items(scheduled21.items.slice(0, 21));
-
-    // Also check remote Supabase overrides if not locally overridden
-    if (!localC5) {
-      const remoteC5 = await fetchRemoteConnect5Override(dateKey);
-      if (remoteC5) {
-        setC5Title(remoteC5.title);
-        setC5Author(remoteC5.author);
-        setC5Editor(remoteC5.editor);
-        setC5Words([...remoteC5.words]);
-        setC5Connections([...remoteC5.connections]);
-        setC5Hints([...remoteC5.revealedHints]);
-      }
-    }
-    if (!local21) {
-      const remote21 = await fetchRemote21ThingsOverride(dateKey);
-      if (remote21) {
-        setT21Title(remote21.title);
-        setT21Creator(remote21.creatorName);
-        setT21Bio(remote21.creatorBio);
-        setT21Items(remote21.items.slice(0, 21));
-      }
+  const handleRefreshUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const list = await fetchAllUserProfiles();
+      setUserList(list);
+    } catch (err) {
+      console.error("Failed to load user list:", err);
+    } finally {
+      setUsersLoading(false);
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.resolve().then(async () => {
+    async function fetchSchedule(dateKey: string) {
+      const localC5 = getAdminConnect5Overrides()[dateKey];
+      const scheduledC5 = localC5 ?? getConnect5PuzzleForDate(dateKey);
       if (cancelled) return;
-      await loadScheduleForDate(targetDate);
+      setC5Title(scheduledC5.title);
+      setC5Author(scheduledC5.author);
+      setC5Editor(scheduledC5.editor);
+      setC5Words([...scheduledC5.words]);
+      setC5Connections([...scheduledC5.connections]);
+      setC5Hints([...scheduledC5.revealedHints]);
+
+      const local21 = getAdmin21ThingsOverrides()[dateKey];
+      const scheduled21 = local21 ?? get21ThingsBoardForDate(dateKey);
+      setT21Title(scheduled21.title);
+      setT21Creator(scheduled21.creatorName);
+      setT21Bio(scheduled21.creatorBio);
+      setT21Items(scheduled21.items.slice(0, 21));
+
+      if (!localC5) {
+        const remoteC5 = await fetchRemoteConnect5Override(dateKey);
+        if (remoteC5 && !cancelled) {
+          setC5Title(remoteC5.title);
+          setC5Author(remoteC5.author);
+          setC5Editor(remoteC5.editor);
+          setC5Words([...remoteC5.words]);
+          setC5Connections([...remoteC5.connections]);
+          setC5Hints([...remoteC5.revealedHints]);
+        }
+      }
+      if (!local21) {
+        const remote21 = await fetchRemote21ThingsOverride(dateKey);
+        if (remote21 && !cancelled) {
+          setT21Title(remote21.title);
+          setT21Creator(remote21.creatorName);
+          setT21Bio(remote21.creatorBio);
+          setT21Items(remote21.items.slice(0, 21));
+        }
+      }
+    }
+
+    void fetchSchedule(targetDate);
+    return () => {
+      cancelled = true;
+    };
+  }, [targetDate]);
+
+  useEffect(() => {
+    if (!isGM || activeTab !== "users") return;
+    let cancelled = false;
+    void fetchAllUserProfiles().then((list) => {
+      if (cancelled) return;
+      setUserList(list);
     });
     return () => {
       cancelled = true;
     };
-  }, [targetDate, loadScheduleForDate]);
+  }, [isGM, activeTab]);
 
-  // Toggle whether a specific letter in Rows 2-5 (rowIdx 1..4) is pre-revealed to the player
   const toggleC5HintLetter = (rowIdx: number, colIdx: number) => {
-    if (rowIdx < 1 || rowIdx > 4) return;
+    if (rowIdx < 1 || rowIdx > 4 || !editPerm.canEdit) return;
     setC5Hints((prev) => {
       const exists = prev.some((h) => h.row === rowIdx && h.col === colIdx);
       if (exists) {
@@ -167,11 +219,11 @@ export default function AdminPage() {
   };
 
   const handleC5WordChange = (rowIdx: number, rawVal: string) => {
+    if (!editPerm.canEdit) return;
     const clean = rawVal.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
     const nextWords = [...c5Words] as [string, string, string, string, string];
     nextWords[rowIdx] = clean;
     setC5Words(nextWords);
-    // Prune any hint coordinates that exceed new word length
     setC5Hints((prev) =>
       prev.filter((h) => h.row !== rowIdx || h.col < clean.length)
     );
@@ -189,13 +241,22 @@ export default function AdminPage() {
       words: sanitizedWords,
       connections: c5Connections,
       revealedHints: c5Hints,
-      author: c5Author.trim() || "Lucas Huff",
-      editor: c5Editor.trim() || "Stephen Huff",
+      author: c5Author.trim() || "Puzzle Master",
+      editor: c5Editor.trim() || "Daily Editor",
       customDate: targetDate,
     };
   };
 
   const handleSaveConnect5 = async (playImmediately = false) => {
+    if (!editPerm.canEdit) {
+      toast({
+        title: "Permission Denied",
+        description: editPerm.reason || "You cannot edit today's live or past puzzles.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (c5Words.some((w) => w.length < 2)) {
       toast({
         title: "Invalid Word Length",
@@ -206,14 +267,21 @@ export default function AdminPage() {
     }
 
     const puzzleObj = buildC5PuzzleObject();
-    await saveAdminConnect5Override(targetDate, puzzleObj);
+    const res = await saveAdminConnect5Override(targetDate, puzzleObj);
 
-    toast({
-      title: `Connect 5 Saved for ${targetDate}!`,
-      description: `${puzzleObj.words.join(" → ")} (${
-        puzzleObj.revealedHints.length
-      } pre-revealed hint letters).`,
-    });
+    if (res.remotePersisted) {
+      toast({
+        title: `Connect 5 Saved Globally for ${targetDate}!`,
+        description: `Persisted to Supabase and browser cache: ${puzzleObj.words.join(" → ")}.`,
+      });
+    } else {
+      toast({
+        title: `Connect 5 Saved for ${targetDate}!`,
+        description: res.error
+          ? `Saved locally in browser (Supabase notice: ${res.error}).`
+          : `${puzzleObj.words.join(" → ")} (${puzzleObj.revealedHints.length} hints).`,
+      });
+    }
 
     if (playImmediately) {
       router.push(`/games/connect-5?date=${targetDate}`);
@@ -230,7 +298,7 @@ export default function AdminPage() {
   };
 
   const handleParse21Stream = () => {
-    if (!t21Stream.trim()) return;
+    if (!editPerm.canEdit || !t21Stream.trim()) return;
     const { items, autoShortenedCount } = parseTranscriptTo21Items(t21Stream);
     const next = [...t21Items];
     items.forEach((it, idx) => {
@@ -247,6 +315,15 @@ export default function AdminPage() {
   };
 
   const handleSave21Board = async (playImmediately = false) => {
+    if (!editPerm.canEdit) {
+      toast({
+        title: "Permission Denied",
+        description: editPerm.reason || "You cannot edit today's live or past puzzles.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const sanitized = t21Items.map((it, idx) => {
       const { text } = enforceTileConstraints(it);
       return text || `Item #${idx + 1}`;
@@ -257,27 +334,211 @@ export default function AdminPage() {
       id: `21t-custom-${targetDate}-${Date.now()}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: t21Title.trim() || "Daily 21 Things",
-      creatorName: t21Creator.trim() || "Lucas Huff",
-      creatorHandle: `@${(t21Creator.trim() || "LucasSOLT")
-        .replace(/[^a-zA-Z0-9]/g, "")}`,
+      creatorName: t21Creator.trim() || "Daily Curator",
+      creatorHandle: `@${(t21Creator.trim() || "curator")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toLowerCase()}`,
       creatorBio: t21Bio.trim(),
       items: sanitized,
       sampleJourneys: [],
       customDate: targetDate,
     };
 
-    await saveAdmin21ThingsOverride(targetDate, boardObj);
+    const res = await saveAdmin21ThingsOverride(targetDate, boardObj);
 
-    toast({
-      title: `21 Things Board Saved for ${targetDate}!`,
-      description: `"${boardObj.title}" by ${boardObj.creatorName} is now live.`,
-    });
+    if (res.remotePersisted) {
+      toast({
+        title: `21 Things Saved Globally for ${targetDate}!`,
+        description: `Persisted to Supabase: "${boardObj.title}" by ${boardObj.creatorName} is now live across all sessions.`,
+      });
+    } else {
+      toast({
+        title: `21 Things Board Saved for ${targetDate}!`,
+        description: res.error
+          ? `Saved locally in browser (Supabase notice: ${res.error}).`
+          : `"${boardObj.title}" by ${boardObj.creatorName} is now live.`,
+      });
+    }
 
     if (playImmediately) {
       router.push(`/games/21-things?date=${targetDate}`);
     }
   };
 
+  const handleUpdateRole = async (targetUser: UserProfile, newRole: UserRole) => {
+    if (!profile) return;
+    if (isInitialGameMaster(targetUser.email)) {
+      toast({
+        title: "Action Forbidden",
+        description: "Root Game Masters cannot have their roles modified.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setActionInProgressEmail(targetUser.email);
+    try {
+      const res = await updateUserRole(profile, targetUser.email, newRole);
+      if (res.ok) {
+        toast({
+          title: "User Role Updated",
+          description: `${targetUser.displayName || targetUser.email} is now ${
+            newRole === "game_master"
+              ? "a Game Master"
+              : newRole === "admin"
+              ? "an Admin (Editor)"
+              : "a Standard Player"
+          }.`,
+        });
+        await handleRefreshUsers();
+      } else {
+        toast({
+          title: "Failed to Update Role",
+          description: res.error || "An error occurred updating user role.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setActionInProgressEmail(null);
+    }
+  };
+
+  const handleToggleBan = async (targetUser: UserProfile) => {
+    if (!profile) return;
+    if (isInitialGameMaster(targetUser.email)) {
+      toast({
+        title: "Action Forbidden",
+        description: "Root Game Masters cannot be banned.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const nextBanStatus = !targetUser.isBanned;
+    if (nextBanStatus) {
+      const confirmed = window.confirm(
+        `Are you sure you want to suspend account ${targetUser.email}? They will be barred from curating and custom board creation.`
+      );
+      if (!confirmed) return;
+    }
+
+    setActionInProgressEmail(targetUser.email);
+    try {
+      const res = await setUserBannedStatus(
+        profile,
+        targetUser.email,
+        nextBanStatus,
+        nextBanStatus
+          ? `Suspended by Game Master ${profile.displayName || profile.handle}`
+          : undefined
+      );
+      if (res.ok) {
+        toast({
+          title: nextBanStatus ? "Account Suspended" : "Account Reactivated",
+          description: `${targetUser.displayName || targetUser.email} is now ${
+            nextBanStatus ? "suspended" : "active"
+          }.`,
+        });
+        await handleRefreshUsers();
+      } else {
+        toast({
+          title: "Action Failed",
+          description: res.error || "Failed to update ban status.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setActionInProgressEmail(null);
+    }
+  };
+
+  // ==========================================================================
+  // Auth Guarding: Loading State
+  // ==========================================================================
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#FCFCFD] flex items-center justify-center p-4">
+        <div className="text-center space-y-3">
+          <div className="h-8 w-8 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="font-headline font-black text-xs uppercase tracking-widest text-black">
+            Verifying Editorial Credentials...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================================================
+  // Auth Guarding: Access Denied (Unauthenticated, Player, or Banned)
+  // ==========================================================================
+  if (!canAccessPuzzleStudio(profile)) {
+    const isPlayer = Boolean(profile && profile.role === "user");
+    const isBannedUser = Boolean(profile?.isBanned);
+
+    return (
+      <div className="min-h-screen bg-[#FCFCFD] flex flex-col text-black">
+        <header className="border-b-2 border-black/10 bg-white px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3 py-1 text-xs font-bold text-black hover:bg-gray-100 transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to SOL GaMES
+          </Link>
+          <span className="font-headline font-black text-xs uppercase tracking-widest text-gray-500">
+            Admin Puzzle Studio
+          </span>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white border-2 border-black rounded-2xl p-6 sm:p-8 text-center shadow-[0_4px_0_#111111] space-y-4">
+            <div className="h-14 w-14 rounded-full bg-amber-50 border-2 border-black flex items-center justify-center mx-auto text-black">
+              <Lock className="h-7 w-7" />
+            </div>
+
+            <h2 className="font-headline font-black text-2xl text-black">
+              Restricted Access
+            </h2>
+
+            <p className="text-sm text-gray-600 leading-relaxed">
+              {isBannedUser
+                ? `Your account (${profile?.email}) has been suspended. Access to the Puzzle Studio is prohibited.`
+                : isPlayer
+                ? `Your account (${profile?.handle || profile?.email}) is registered as a Standard Player. Access to the Puzzle Studio is reserved for Editors (Admins) and Game Masters.`
+                : "Sign in with an authorized Editor or Game Master account to curate daily puzzles."}
+            </p>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+              {profile ? (
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center h-8 px-4 rounded-lg bg-black text-white hover:bg-gray-800 font-bold border-2 border-black text-sm"
+                >
+                  Return to Homepage
+                </Link>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => openAccountModal("signin")}
+                    className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
+                  >
+                    Sign In to Studio
+                  </Button>
+                  <Link
+                    href="/"
+                    className="inline-flex items-center justify-center h-8 px-4 rounded-lg border-2 border-black font-bold text-sm hover:bg-gray-100"
+                  >
+                    Return Home
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ==========================================================================
+  // Authorized Studio View (Admins and Game Masters)
+  // ==========================================================================
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black">
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
@@ -296,16 +557,29 @@ export default function AdminPage() {
             </h1>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 shrink-0">
-            <Badge
-              variant={isSupabaseConfigured ? "green" : "yellow"}
-              className="text-xs whitespace-nowrap"
-            >
-              <Database className="h-3 w-3 mr-1" />
-              {isSupabaseConfigured
-                ? "Supabase Connected"
-                : "66-Day Bank + Local/URL Mode"}
-            </Badge>
+          <div className="flex items-center gap-2 shrink-0">
+            {profile && (
+              <Badge
+                variant={isGM ? "default" : "outline"}
+                className={cn(
+                  "text-xs whitespace-nowrap border-2 border-black",
+                  isGM && "bg-black text-amber-300 font-headline font-black"
+                )}
+              >
+                {isGM ? "👑 Game Master" : "Editor (Admin)"}
+              </Badge>
+            )}
+            <div className="hidden md:flex items-center gap-2">
+              <Badge
+                variant={isSupabaseConfigured ? "green" : "yellow"}
+                className="text-xs whitespace-nowrap"
+              >
+                <Database className="h-3 w-3 mr-1" />
+                {isSupabaseConfigured
+                  ? "Supabase Connected"
+                  : "66-Day Bank + Local/URL Mode"}
+              </Badge>
+            </div>
           </div>
         </div>
       </header>
@@ -327,33 +601,59 @@ export default function AdminPage() {
             <Input
               type="date"
               value={targetDate}
-              onChange={(e) => {
-                const nextDate = e.target.value;
-                setSelectedDate(nextDate);
-                if (nextDate) {
-                  void loadScheduleForDate(nextDate);
-                }
-              }}
+              onChange={(e) => setSelectedDate(e.target.value)}
               className="w-44 font-mono font-bold border-2 border-black"
             />
           </div>
         </div>
 
+        {/* Date Guarding Banner (for Admins on Today or Past Dates) */}
+        {!editPerm.canEdit && (
+          <div className="rounded-2xl border-2 border-black bg-amber-50 p-4 sm:p-5 flex items-start gap-3.5 shadow-xs">
+            <div className="h-9 w-9 rounded-xl bg-amber-100 border-2 border-black flex items-center justify-center shrink-0 text-black">
+              <Lock className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-headline font-black text-sm uppercase tracking-wide text-black">
+                  Read-Only Mode: {editPerm.isToday ? "Today's Live Game" : "Past Archive Game"}
+                </h3>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] uppercase font-mono border-black bg-white"
+                >
+                  Locked for Admins
+                </Badge>
+              </div>
+              <p className="text-xs text-gray-700 mt-1 leading-relaxed">
+                {editPerm.reason ||
+                  "Admins can only curate upcoming future puzzles. Only Game Masters can edit today's live game or past archives."}{" "}
+                Select tomorrow or a future date to edit or schedule puzzles.
+              </p>
+            </div>
+          </div>
+        )}
+
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full sm:w-auto">
             <TabsTrigger value="connect-5">
-              🔗 Connect 5 Creator (Hint Letter Selector)
+              🔗 Connect 5 Creator
             </TabsTrigger>
             <TabsTrigger value="21-things">
-              ✨ 21 Things Creator &amp; AI Formatter
+              ✨ 21 Things Creator
             </TabsTrigger>
             <TabsTrigger value="bank">
-              📚 Pre-Seeded 66-Day Bank ({CONNECT_5_PUZZLES.length} Days)
+              📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
             </TabsTrigger>
+            {isGM && (
+              <TabsTrigger value="users">
+                👥 User Management
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* ================================================================
-           * TAB 1: CONNECT 5 PUZZLE CREATOR + INTERACTIVE HINT LETTER PICKER
+           * TAB 1: CONNECT 5 PUZZLE CREATOR
            * ================================================================ */}
           <TabsContent value="connect-5">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -378,6 +678,7 @@ export default function AdminPage() {
                       Chain Title
                     </label>
                     <Input
+                      disabled={!editPerm.canEdit}
                       value={c5Title}
                       onChange={(e) => setC5Title(e.target.value)}
                     />
@@ -387,8 +688,10 @@ export default function AdminPage() {
                       Author
                     </label>
                     <Input
+                      disabled={!editPerm.canEdit}
                       value={c5Author}
                       onChange={(e) => setC5Author(e.target.value)}
+                      placeholder="e.g. Puzzle Master"
                     />
                   </div>
                   <div>
@@ -396,8 +699,10 @@ export default function AdminPage() {
                       Editor
                     </label>
                     <Input
+                      disabled={!editPerm.canEdit}
                       value={c5Editor}
                       onChange={(e) => setC5Editor(e.target.value)}
+                      placeholder="e.g. Daily Editor"
                     />
                   </div>
                 </div>
@@ -416,6 +721,7 @@ export default function AdminPage() {
                         {idx + 1}
                       </span>
                       <Input
+                        disabled={!editPerm.canEdit}
                         value={w}
                         onChange={(e) => handleC5WordChange(idx, e.target.value)}
                         placeholder={`Row ${idx + 1} Word`}
@@ -435,6 +741,7 @@ export default function AdminPage() {
                   {c5Connections.map((conn, idx) => (
                     <Input
                       key={idx}
+                      disabled={!editPerm.canEdit}
                       value={conn}
                       onChange={(e) => {
                         const next = [...c5Connections] as [
@@ -474,8 +781,9 @@ export default function AdminPage() {
                     <Button
                       size="xs"
                       variant="outline"
+                      disabled={!editPerm.canEdit}
                       onClick={() => setC5Hints([])}
-                      className="font-bold border border-black shrink-0"
+                      className="font-bold border border-black shrink-0 disabled:opacity-50"
                     >
                       Clear Hints (0)
                     </Button>
@@ -501,7 +809,7 @@ export default function AdminPage() {
                                 <button
                                   key={colIdx}
                                   type="button"
-                                  disabled={isRow0}
+                                  disabled={isRow0 || !editPerm.canEdit}
                                   onClick={() =>
                                     toggleC5HintLetter(rowIdx, colIdx)
                                   }
@@ -511,11 +819,14 @@ export default function AdminPage() {
                                       ? "bg-[#2ECC71] text-black border-black cursor-default"
                                       : isHinted
                                       ? "bg-[#F9D423] text-black border-black ring-2 ring-black scale-105 shadow-xs"
-                                      : "bg-white text-gray-400 border-gray-300 hover:border-black hover:text-black"
+                                      : "bg-white text-gray-400 border-gray-300 hover:border-black hover:text-black",
+                                    !editPerm.canEdit && !isRow0 && "cursor-not-allowed opacity-75"
                                   )}
                                   title={
                                     isRow0
                                       ? "Row 1 is always shown"
+                                      : !editPerm.canEdit
+                                      ? "Editing locked for Admins"
                                       : isHinted
                                       ? "Pre-revealed to player (Click to hide)"
                                       : "Hidden from player (Click to pre-reveal as hint)"
@@ -564,19 +875,29 @@ export default function AdminPage() {
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
+                      disabled={!editPerm.canEdit}
                       variant="outline"
                       onClick={() => handleSaveConnect5(false)}
-                      className="border-2 border-black font-bold text-xs"
+                      className="border-2 border-black font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Check className="h-3.5 w-3.5 mr-1.5" />
+                      {!editPerm.canEdit ? (
+                        <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-500" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5 mr-1.5" />
+                      )}
                       Save for {targetDate}
                     </Button>
                     <Button
                       type="button"
+                      disabled={!editPerm.canEdit}
                       onClick={() => handleSaveConnect5(true)}
-                      className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4"
+                      className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Play className="h-3.5 w-3.5 mr-1.5" />
+                      {!editPerm.canEdit ? (
+                        <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5 mr-1.5" />
+                      )}
                       Save &amp; Test Play Now
                     </Button>
                   </div>
@@ -586,7 +907,7 @@ export default function AdminPage() {
           </TabsContent>
 
           {/* ================================================================
-           * TAB 2: 21 THINGS CREATOR & BATCH FORMATTING STUDIO
+           * TAB 2: 21 THINGS CREATOR
            * ================================================================ */}
           <TabsContent value="21-things">
             <div className="rounded-2xl border-2 border-black bg-white p-5 space-y-4">
@@ -611,6 +932,7 @@ export default function AdminPage() {
                     Board Theme Title
                   </label>
                   <Input
+                    disabled={!editPerm.canEdit}
                     value={t21Title}
                     onChange={(e) => setT21Title(e.target.value)}
                   />
@@ -620,8 +942,10 @@ export default function AdminPage() {
                     Creator Name
                   </label>
                   <Input
+                    disabled={!editPerm.canEdit}
                     value={t21Creator}
                     onChange={(e) => setT21Creator(e.target.value)}
+                    placeholder="e.g. Daily Curator"
                   />
                 </div>
                 <div>
@@ -629,6 +953,7 @@ export default function AdminPage() {
                     Creator Subtitle / Bio
                   </label>
                   <Input
+                    disabled={!editPerm.canEdit}
                     value={t21Bio}
                     onChange={(e) => setT21Bio(e.target.value)}
                   />
@@ -644,14 +969,16 @@ export default function AdminPage() {
                     type="button"
                     size="xs"
                     variant="outline"
+                    disabled={!editPerm.canEdit}
                     onClick={handleParse21Stream}
-                    className="font-bold border border-black"
+                    className="font-bold border border-black disabled:opacity-50"
                   >
                     <Wand2 className="h-3 w-3 mr-1" />
                     Auto-Split into 21 Tiles
                   </Button>
                 </div>
                 <Textarea
+                  disabled={!editPerm.canEdit}
                   value={t21Stream}
                   onChange={(e) => setT21Stream(e.target.value)}
                   placeholder="Paste comma-separated items to auto-format into the 21 tiles below..."
@@ -684,6 +1011,7 @@ export default function AdminPage() {
                       </div>
                       <input
                         type="text"
+                        disabled={!editPerm.canEdit}
                         value={item}
                         onChange={(e) => {
                           const next = [...t21Items];
@@ -700,9 +1028,9 @@ export default function AdminPage() {
                             setT21Items(next);
                           }
                         }}
-                        className="w-full rounded bg-white border border-black/15 px-2 py-1 text-xs font-bold"
+                        className="w-full rounded bg-white border border-black/15 px-2 py-1 text-xs font-bold disabled:opacity-75 disabled:cursor-not-allowed"
                       />
-                      {isOverLimit && suggestion && (
+                      {isOverLimit && suggestion && editPerm.canEdit && (
                         <button
                           type="button"
                           onMouseDown={(e) => {
@@ -725,19 +1053,29 @@ export default function AdminPage() {
               <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
                 <Button
                   type="button"
+                  disabled={!editPerm.canEdit}
                   variant="outline"
                   onClick={() => handleSave21Board(false)}
-                  className="border-2 border-black font-bold text-xs"
+                  className="border-2 border-black font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Check className="h-3.5 w-3.5 mr-1.5" />
+                  {!editPerm.canEdit ? (
+                    <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-500" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5 mr-1.5" />
+                  )}
                   Save for {targetDate}
                 </Button>
                 <Button
                   type="button"
+                  disabled={!editPerm.canEdit}
                   onClick={() => handleSave21Board(true)}
-                  className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4"
+                  className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Play className="h-3.5 w-3.5 mr-1.5" />
+                  {!editPerm.canEdit ? (
+                    <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5 mr-1.5" />
+                  )}
                   Save &amp; Test Play Board
                 </Button>
               </div>
@@ -745,7 +1083,7 @@ export default function AdminPage() {
           </TabsContent>
 
           {/* ================================================================
-           * TAB 3: PRE-SEEDED 66-DAY PUZZLE BANK INSPECTOR
+           * TAB 3: PRE-SEEDED 66-DAY PUZZLE BANK
            * ================================================================ */}
           <TabsContent value="bank">
             <div className="rounded-2xl border-2 border-black bg-white p-5 space-y-4">
@@ -790,6 +1128,7 @@ export default function AdminPage() {
                       <Button
                         size="xs"
                         variant="outline"
+                        disabled={!editPerm.canEdit}
                         onClick={() => {
                           setC5Title(p.title);
                           setC5Words([...p.words]);
@@ -810,7 +1149,8 @@ export default function AdminPage() {
                               "Switched to Connect 5 Creator tab (21 Things tab also loaded).",
                           });
                         }}
-                        className="border border-black font-bold shrink-0"
+                        className="border border-black font-bold shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={!editPerm.canEdit ? "Editing locked for Admins" : "Load into Studio"}
                       >
                         <Eye className="h-3 w-3 mr-1" />
                         Load
@@ -821,6 +1161,255 @@ export default function AdminPage() {
               </div>
             </div>
           </TabsContent>
+
+          {/* ================================================================
+           * TAB 4: USER MANAGEMENT & ROLE ASSIGNMENTS (GAME MASTERS ONLY)
+           * ================================================================ */}
+          {isGM && (
+            <TabsContent value="users">
+              <div className="rounded-2xl border-2 border-black bg-white p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200 pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-black text-amber-300 border-2 border-black font-headline font-black text-xs uppercase">
+                        Game Master Console
+                      </Badge>
+                      <span className="text-xs font-mono text-gray-500">
+                        {userList.length} Accounts Registered
+                      </span>
+                    </div>
+                    <h3 className="font-headline font-black text-xl mt-1">
+                      User Management &amp; Role Assignments
+                    </h3>
+                    <p className="text-xs text-gray-600">
+                      Promote players to Editors (Admins) to curate future puzzles, manage Game Master privileges, or suspend accounts. Root Game Masters have permanent immunity.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRefreshUsers()}
+                      disabled={usersLoading}
+                      className="border-2 border-black font-bold text-xs shrink-0"
+                    >
+                      <RefreshCw
+                        className={cn("h-3.5 w-3.5 mr-1.5", usersLoading && "animate-spin")}
+                      />
+                      Refresh List
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search accounts by name, handle, or email..."
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      className="pl-9 font-medium border-2 border-black text-xs"
+                    />
+                  </div>
+                </div>
+
+                {usersLoading && userList.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <div className="h-6 w-6 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="text-xs font-mono text-gray-500 uppercase tracking-widest">
+                      Loading user registry...
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border-2 border-black rounded-xl overflow-hidden overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-gray-100 border-b-2 border-black font-headline font-black uppercase tracking-wider text-[11px] text-black">
+                          <th className="py-2.5 px-3">Player / Identity</th>
+                          <th className="py-2.5 px-3">Email Address</th>
+                          <th className="py-2.5 px-3">Role</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3">Member Since</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {userList
+                          .filter((u) => {
+                            if (!userSearch.trim()) return true;
+                            const q = userSearch.toLowerCase();
+                            return (
+                              u.email.toLowerCase().includes(q) ||
+                              u.displayName.toLowerCase().includes(q) ||
+                              u.handle.toLowerCase().includes(q)
+                            );
+                          })
+                          .map((u) => {
+                            const isRootGM = isInitialGameMaster(u.email);
+                            const isBusy = actionInProgressEmail === u.email;
+
+                            return (
+                              <tr
+                                key={u.id || u.email}
+                                className={cn(
+                                  "hover:bg-gray-50/80 transition-colors",
+                                  u.isBanned && "bg-red-50/40"
+                                )}
+                              >
+                                <td className="py-3 px-3">
+                                  <div className="flex items-center gap-2.5">
+                                    <div
+                                      className="h-7 w-7 rounded-full border border-black flex items-center justify-center font-headline font-black text-xs shrink-0"
+                                      style={{ backgroundColor: u.avatarColor || "#F9D423" }}
+                                    >
+                                      {(u.displayName || u.email).charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="font-bold text-black truncate">
+                                        {u.displayName || "Anonymous Player"}
+                                      </p>
+                                      <p className="font-mono text-[11px] text-gray-500 truncate">
+                                        {u.handle.startsWith("@") ? u.handle : `@${u.handle}`}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                <td className="py-3 px-3 font-mono text-gray-700">
+                                  {u.email}
+                                </td>
+
+                                <td className="py-3 px-3">
+                                  {u.role === "game_master" ? (
+                                    <Badge className="bg-black text-amber-300 border-2 border-black font-headline font-black text-[10px] uppercase tracking-wider">
+                                      👑 Game Master
+                                    </Badge>
+                                  ) : u.role === "admin" ? (
+                                    <Badge variant="green" className="text-[10px] uppercase font-bold">
+                                      Admin (Editor)
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="text-[10px] uppercase font-medium">
+                                      Player
+                                    </Badge>
+                                  )}
+                                </td>
+
+                                <td className="py-3 px-3">
+                                  {u.isBanned ? (
+                                    <Badge variant="destructive" className="text-[10px] uppercase font-bold">
+                                      Suspended
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] uppercase font-semibold text-emerald-700 border-emerald-600 bg-emerald-50">
+                                      Active
+                                    </Badge>
+                                  )}
+                                </td>
+
+                                <td className="py-3 px-3 font-mono text-gray-500 text-[11px]">
+                                  {u.memberSince || "—"}
+                                </td>
+
+                                <td className="py-3 px-3 text-right">
+                                  {isRootGM ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md border border-amber-300">
+                                      <ShieldCheck className="h-3 w-3" /> Root GM · Immutable
+                                    </span>
+                                  ) : (
+                                    <div className="inline-flex items-center gap-1.5 justify-end">
+                                      {u.role === "user" && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          disabled={isBusy || u.isBanned}
+                                          onClick={() => void handleUpdateRole(u, "admin")}
+                                          className="border border-black font-bold text-[11px] hover:bg-emerald-50 hover:text-emerald-900"
+                                          title="Promote user to Admin (Editor) to curate future puzzles"
+                                        >
+                                          Promote to Admin
+                                        </Button>
+                                      )}
+
+                                      {u.role === "admin" && (
+                                        <>
+                                          <Button
+                                            size="xs"
+                                            variant="outline"
+                                            disabled={isBusy}
+                                            onClick={() => void handleUpdateRole(u, "user")}
+                                            className="border border-black font-bold text-[11px]"
+                                            title="Demote Editor to standard Player"
+                                          >
+                                            Demote to User
+                                          </Button>
+                                          <Button
+                                            size="xs"
+                                            variant="outline"
+                                            disabled={isBusy || u.isBanned}
+                                            onClick={() => void handleUpdateRole(u, "game_master")}
+                                            className="border border-black font-bold text-[11px] hover:bg-black hover:text-white"
+                                            title="Promote Admin to Game Master"
+                                          >
+                                            Make GM
+                                          </Button>
+                                        </>
+                                      )}
+
+                                      {u.role === "game_master" && !isRootGM && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          disabled={isBusy}
+                                          onClick={() => void handleUpdateRole(u, "admin")}
+                                          className="border border-black font-bold text-[11px]"
+                                          title="Demote Game Master to Admin"
+                                        >
+                                          Demote to Admin
+                                        </Button>
+                                      )}
+
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        disabled={isBusy}
+                                        onClick={() => void handleToggleBan(u)}
+                                        className={cn(
+                                          "border font-bold text-[11px]",
+                                          u.isBanned
+                                            ? "border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+                                            : "border-red-500 text-red-600 hover:bg-red-50"
+                                        )}
+                                        title={
+                                          u.isBanned
+                                            ? "Reactivate suspended account"
+                                            : "Suspend player account"
+                                        }
+                                      >
+                                        {u.isBanned ? "Unban" : "Ban"}
+                                      </Button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        {userList.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-gray-500 font-mono text-xs">
+                              No registered users found.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>

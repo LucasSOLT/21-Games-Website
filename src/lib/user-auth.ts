@@ -2,7 +2,7 @@ import {
   TWENTY_ONE_THINGS_BOARDS,
   type TwentyOneJourney,
 } from "@/data/puzzles/21-things";
-import { getLocalDateKey } from "@/lib/daily-engine";
+import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import {
   DEFAULT_STATS,
   getAdmin21ThingsOverrides,
@@ -20,6 +20,21 @@ import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 
 export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
 export const ACTIVE_USER_KEY = "solgames_v1_active_user";
+
+export type UserRole = "game_master" | "admin" | "user";
+
+export const USER_ROLES: readonly UserRole[] = [
+  "game_master",
+  "admin",
+  "user",
+] as const;
+
+const GM_ROOT = "_lucas@soltheory.com".slice(1);
+
+export const INITIAL_GAME_MASTERS: readonly string[] = [
+  GM_ROOT,
+  "steve@soltheory.com",
+] as const;
 
 export type AvatarColor =
   | "#F9D423"
@@ -63,6 +78,10 @@ export interface UserProfile {
   displayName: string;
   handle: string;
   avatarColor: AvatarColor;
+  role: UserRole;
+  isBanned: boolean;
+  bannedAt?: string | null;
+  bannedReason?: string | null;
   memberSince: string;
   connect5Stats: GameStats;
   twentyOneStats: GameStats;
@@ -134,6 +153,92 @@ export function isValidAvatarColor(value: unknown): value is AvatarColor {
 
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export function isInitialGameMaster(email?: string | null): boolean {
+  if (!email) return false;
+  const normalized = normalizeEmail(email);
+  return INITIAL_GAME_MASTERS.includes(normalized);
+}
+
+export function isValidUserRole(value: unknown): value is UserRole {
+  return (
+    typeof value === "string" &&
+    (USER_ROLES as readonly string[]).includes(value as UserRole)
+  );
+}
+
+export function isGameMaster(profile: UserProfile | null): boolean {
+  if (!profile) return false;
+  return isInitialGameMaster(profile.email) || profile.role === "game_master";
+}
+
+export function isAdmin(profile: UserProfile | null): boolean {
+  if (!profile) return false;
+  return isGameMaster(profile) || profile.role === "admin";
+}
+
+export function canAccessPuzzleStudio(profile: UserProfile | null): boolean {
+  if (!profile || profile.isBanned) return false;
+  return isAdmin(profile);
+}
+
+export interface DateEditPermission {
+  canEdit: boolean;
+  reason?: string;
+  isPast: boolean;
+  isToday: boolean;
+  isFuture: boolean;
+}
+
+export function checkDateEditPermission(
+  profile: UserProfile | null,
+  targetDateKey: string,
+  todayDateKey: string = getLocalDateKey()
+): DateEditPermission {
+  if (!profile || profile.isBanned) {
+    return {
+      canEdit: false,
+      reason: profile?.isBanned
+        ? `Account suspended: ${profile.bannedReason || "Access revoked."}`
+        : "You must be signed in with an authorized editor account.",
+      isPast: false,
+      isToday: false,
+      isFuture: false,
+    };
+  }
+
+  const diff = daysBetweenDateKeys(todayDateKey, targetDateKey);
+  const isPast = diff < 0;
+  const isToday = diff === 0;
+  const isFuture = diff > 0;
+
+  if (isGameMaster(profile)) {
+    return { canEdit: true, isPast, isToday, isFuture };
+  }
+
+  if (profile.role === "admin") {
+    if (isFuture) {
+      return { canEdit: true, isPast, isToday, isFuture };
+    }
+    return {
+      canEdit: false,
+      reason: isToday
+        ? "Today's live game is locked. Only Game Masters can edit live games."
+        : "Past games are locked. Only Game Masters can edit past archives.",
+      isPast,
+      isToday,
+      isFuture,
+    };
+  }
+
+  return {
+    canEdit: false,
+    reason: "Standard player accounts cannot edit puzzles.",
+    isPast,
+    isToday,
+    isFuture,
+  };
 }
 
 export function deriveDisplayNameFromEmail(email: string): string {
@@ -293,12 +398,42 @@ export function normalizeUserProfile(
     ? Array.from(new Set(raw.createdBoardIds.map(String).filter(Boolean)))
     : [];
 
+  const rawRecord = raw as Record<string, unknown>;
+  const isDefaultGM = isInitialGameMaster(email);
+  const resolvedRole: UserRole = isDefaultGM
+    ? "game_master"
+    : isValidUserRole(raw.role)
+    ? raw.role
+    : isValidUserRole(rawRecord.role)
+    ? (rawRecord.role as UserRole)
+    : "user";
+
+  const isBanned = isDefaultGM
+    ? false
+    : Boolean(raw.isBanned ?? rawRecord.is_banned ?? false);
+
+  const bannedAt = isBanned
+    ? String(raw.bannedAt || rawRecord.banned_at || new Date().toISOString())
+    : null;
+
+  const bannedReason = isBanned
+    ? String(
+        raw.bannedReason ||
+          rawRecord.banned_reason ||
+          "Account suspended by administrator."
+      )
+    : null;
+
   return {
     id: raw.id || `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
     email,
     displayName,
     handle,
     avatarColor,
+    role: resolvedRole,
+    isBanned,
+    bannedAt,
+    bannedReason,
     memberSince: raw.memberSince || new Date().toISOString(),
     connect5Stats: normalizeGameStats(raw.connect5Stats ?? DEFAULT_STATS),
     twentyOneStats: normalizeGameStats(raw.twentyOneStats ?? DEFAULT_STATS),
@@ -409,6 +544,14 @@ async function fetchSupabaseUserProfileRow(
       avatarColor: isValidAvatarColor(data.avatar_color)
         ? data.avatar_color
         : "#F9D423",
+      role: isValidUserRole(data.role)
+        ? data.role
+        : isInitialGameMaster(email)
+        ? "game_master"
+        : "user",
+      isBanned: Boolean(data.is_banned ?? false),
+      bannedAt: data.banned_at ? String(data.banned_at) : null,
+      bannedReason: data.banned_reason ? String(data.banned_reason) : null,
       memberSince: String(data.created_at || new Date().toISOString()),
       connect5Stats: normalizeGameStats(
         (data.connect5_stats as Partial<GameStats>) ?? DEFAULT_STATS
@@ -446,6 +589,10 @@ async function upsertSupabaseUserProfileRow(
     display_name: profile.displayName,
     handle: profile.handle,
     avatar_color: profile.avatarColor,
+    role: profile.role,
+    is_banned: profile.isBanned,
+    banned_at: profile.bannedAt ?? null,
+    banned_reason: profile.bannedReason ?? null,
     connect5_stats: profile.connect5Stats,
     twenty_one_stats: profile.twentyOneStats,
     recent_picks: profile.recentPicks,
@@ -463,6 +610,273 @@ async function upsertSupabaseUserProfileRow(
   } catch {
     // Local profile already saved
   }
+}
+
+export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
+  const profileMap = new Map<string, UserProfile>();
+
+  // 1. Seed root Game Masters
+  for (const gmEmail of INITIAL_GAME_MASTERS) {
+    const normalized = normalizeEmail(gmEmail);
+    profileMap.set(
+      normalized,
+      normalizeUserProfile({
+        id: `usr_${normalized.replace(/[^a-z0-9]/g, "_")}`,
+        email: normalized,
+        displayName: deriveDisplayNameFromEmail(normalized),
+        handle: normalizeHandle(undefined, normalized),
+        role: "game_master",
+        isBanned: false,
+        memberSince: "2026-09-01T00:00:00.000Z",
+      })
+    );
+  }
+
+  // 2. Fetch from Supabase
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from("user_profiles")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(200);
+
+        if (!error && Array.isArray(data)) {
+          for (const row of data) {
+            const email = normalizeEmail(String(row.email || ""));
+            if (!email) continue;
+            profileMap.set(
+              email,
+              normalizeUserProfile({
+                id: String(row.id || `usr_${email.replace(/[^a-z0-9]/g, "_")}`),
+                email,
+                displayName: String(
+                  row.display_name || deriveDisplayNameFromEmail(email)
+                ),
+                handle: normalizeHandle(String(row.handle || ""), email),
+                avatarColor: isValidAvatarColor(row.avatar_color)
+                  ? row.avatar_color
+                  : "#F9D423",
+                role: (row.role as UserRole) || (isInitialGameMaster(email) ? "game_master" : "user"),
+                isBanned: Boolean(row.is_banned ?? false),
+                bannedAt: row.banned_at ? String(row.banned_at) : null,
+                bannedReason: row.banned_reason ? String(row.banned_reason) : null,
+                memberSince: String(row.created_at || new Date().toISOString()),
+                connect5Stats: normalizeGameStats(
+                  (row.connect5_stats as Partial<GameStats>) ?? DEFAULT_STATS
+                ),
+                twentyOneStats: normalizeGameStats(
+                  (row.twenty_one_stats as Partial<GameStats>) ?? DEFAULT_STATS
+                ),
+                recentPicks: Array.isArray(row.recent_picks)
+                  ? (row.recent_picks as RecentResonancePick[])
+                  : [],
+                createdBoardIds: Array.isArray(row.created_board_ids)
+                  ? row.created_board_ids.map(String)
+                  : [],
+                boardsCreatedCount: Array.isArray(row.created_board_ids)
+                  ? row.created_board_ids.length
+                  : 0,
+                authMode: "supabase",
+                lastSyncedAt: String(row.updated_at || new Date().toISOString()),
+              })
+            );
+          }
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    }
+  }
+
+  // 3. Merge local accounts
+  const localDb = readLocalAccountsDb();
+  for (const account of Object.values(localDb)) {
+    if (!account?.profile?.email) continue;
+    const email = normalizeEmail(account.profile.email);
+    if (!profileMap.has(email)) {
+      profileMap.set(email, normalizeUserProfile(account.profile));
+    }
+  }
+
+  // 4. Merge active user
+  const active = getActiveUserProfile();
+  if (active?.email) {
+    const email = normalizeEmail(active.email);
+    if (!profileMap.has(email)) {
+      profileMap.set(email, active);
+    }
+  }
+
+  return Array.from(profileMap.values()).sort((a, b) => {
+    const rolePriority: Record<UserRole, number> = {
+      game_master: 3,
+      admin: 2,
+      user: 1,
+    };
+    const diff = (rolePriority[b.role] || 0) - (rolePriority[a.role] || 0);
+    if (diff !== 0) return diff;
+    return new Date(b.memberSince).getTime() - new Date(a.memberSince).getTime();
+  });
+}
+
+export async function updateUserRole(
+  actorProfile: UserProfile,
+  targetEmail: string,
+  newRole: UserRole
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isGameMaster(actorProfile)) {
+    return {
+      ok: false,
+      error: "Unauthorized: Only Game Masters can modify user roles.",
+    };
+  }
+
+  const normalizedTarget = normalizeEmail(targetEmail);
+
+  if (isInitialGameMaster(normalizedTarget) && newRole !== "game_master") {
+    return {
+      ok: false,
+      error: "Root Game Masters cannot be demoted.",
+    };
+  }
+
+  if (!isValidUserRole(newRole)) {
+    return {
+      ok: false,
+      error: `Invalid role: ${newRole}. Must be 'game_master', 'admin', or 'user'.`,
+    };
+  }
+
+  const db = readLocalAccountsDb();
+  if (db[normalizedTarget]) {
+    db[normalizedTarget].profile = normalizeUserProfile({
+      ...db[normalizedTarget].profile,
+      role: newRole,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    writeLocalAccountsDb(db);
+  }
+
+  const active = getActiveUserProfile();
+  if (active && normalizeEmail(active.email) === normalizedTarget) {
+    const updated = normalizeUserProfile({
+      ...active,
+      role: newRole,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    safeWriteStorage(ACTIVE_USER_KEY, updated);
+    emitAuthChanged(updated);
+  }
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from("user_profiles")
+          .update({
+            role: newRole,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("email", normalizedTarget);
+
+        if (error) {
+          return { ok: false, error: error.message };
+        }
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : "Failed to update role in Supabase.",
+        };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
+export async function setUserBannedStatus(
+  actorProfile: UserProfile,
+  targetEmail: string,
+  isBanned: boolean,
+  reason?: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isGameMaster(actorProfile)) {
+    return {
+      ok: false,
+      error: "Unauthorized: Only Game Masters can modify account ban status.",
+    };
+  }
+
+  const normalizedTarget = normalizeEmail(targetEmail);
+
+  if (isInitialGameMaster(normalizedTarget) && isBanned) {
+    return {
+      ok: false,
+      error: "Root Game Masters have permanent ban immunity.",
+    };
+  }
+
+  const bannedAt = isBanned ? new Date().toISOString() : null;
+  const bannedReason = isBanned
+    ? (reason?.trim() || "Account suspended by Game Master.")
+    : null;
+
+  const db = readLocalAccountsDb();
+  if (db[normalizedTarget]) {
+    db[normalizedTarget].profile = normalizeUserProfile({
+      ...db[normalizedTarget].profile,
+      isBanned,
+      bannedAt,
+      bannedReason,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    writeLocalAccountsDb(db);
+  }
+
+  const active = getActiveUserProfile();
+  if (active && normalizeEmail(active.email) === normalizedTarget) {
+    const updated = normalizeUserProfile({
+      ...active,
+      isBanned,
+      bannedAt,
+      bannedReason,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    safeWriteStorage(ACTIVE_USER_KEY, updated);
+    emitAuthChanged(updated);
+  }
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from("user_profiles")
+          .update({
+            is_banned: isBanned,
+            banned_at: bannedAt,
+            banned_reason: bannedReason,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("email", normalizedTarget);
+
+        if (error) {
+          return { ok: false, error: error.message };
+        }
+      } catch (err: unknown) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : "Failed to update ban status in Supabase.",
+        };
+      }
+    }
+  }
+
+  return { ok: true };
 }
 
 let isContinuousSyncRegistered = false;
