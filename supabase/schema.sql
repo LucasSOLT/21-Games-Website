@@ -150,3 +150,16 @@ drop policy if exists "Anyone can update user_profiles" on public.user_profiles;
 create policy "Anyone can update user_profiles"
   on public.user_profiles for update using (true) with check (true);
 
+-- 5. Table & Schema Grants for Supabase Publishable / Anon / Authenticated Roles
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.daily_puzzles to anon, authenticated;
+grant select, insert, update, delete on table public.twenty_one_boards to anon, authenticated;
+grant select, insert, update, delete on table public.twenty_one_responses to anon, authenticated;
+grant select, insert, update, delete on table public.user_profiles to anon, authenticated;
+grant usage, select on all sequences in schema public to anon, authenticated;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated;
+alter default privileges in schema public
+  grant usage, select on sequences to anon, authenticated;
+
+
