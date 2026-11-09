@@ -6,6 +6,11 @@ import type {
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import type { PlayableGameSlug } from "@/lib/games-config";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  check21ThingsBoardModeration,
+  checkMultipleFields,
+} from "@/lib/moderation";
+import { computePuzzleContentHash } from "@/lib/seeded-random";
 
 const STORAGE_PREFIX = "solgames_v1";
 
@@ -83,6 +88,7 @@ export interface Connect5SavedProgress {
   hintsUsed: number;
   status: "playing" | "won";
   completedAt?: string;
+  puzzleHash?: string;
 }
 
 export type TwentyOneFunnelPhase =
@@ -102,6 +108,22 @@ export interface TwentyOneSavedProgress {
   reflectionNote: string;
   voiceNoteDataUrl?: string;
   submittedJourneyId?: string;
+  puzzleHash?: string;
+}
+
+export interface SeventeenSyllablesSavedProgress {
+  dateKey: string;
+  puzzleId: string;
+  placedChunks: Record<string, string | null>;
+  lockedChunks: Record<string, boolean>;
+  remainingTrayChunks: string[];
+  wordHintsUsed: number;
+  tileHintsUsed: number;
+  stars: number;
+  elapsedSeconds: number;
+  status: "playing" | "won";
+  completedAt?: string;
+  puzzleHash?: string;
 }
 
 function safeReadJson<T>(key: string, fallback: T): T {
@@ -496,6 +518,46 @@ export function clearConnect5Progress(dateKey: string): void {
 }
 
 // ============================================================================
+// 17 Syllables Progress & Persistence
+// ============================================================================
+
+export function get17SyllablesProgress(
+  dateKey: string,
+  puzzleId: string
+): SeventeenSyllablesSavedProgress | null {
+  const saved = safeReadJson<SeventeenSyllablesSavedProgress | null>(
+    `${STORAGE_PREFIX}_17s_progress_${dateKey}`,
+    null
+  );
+  if (!saved || saved.puzzleId !== puzzleId) return null;
+  return saved;
+}
+
+export function save17SyllablesProgress(
+  progress: SeventeenSyllablesSavedProgress
+): void {
+  safeWriteJson(`${STORAGE_PREFIX}_17s_progress_${progress.dateKey}`, progress);
+}
+
+export function clear17SyllablesProgress(dateKey: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(`${STORAGE_PREFIX}_17s_progress_${dateKey}`);
+}
+
+export function record17SyllablesWin(
+  dateKey: string,
+  stars: number,
+  elapsedSeconds: number
+): GameStats {
+  const stats = recordGameWin("17-syllables", dateKey, elapsedSeconds);
+  const starKey = `stars_${stars.toFixed(1)}`;
+  const currentCount = stats.distribution[starKey] ?? 0;
+  stats.distribution[starKey] = currentCount + 1;
+  setGameStats("17-syllables", stats);
+  return stats;
+}
+
+// ============================================================================
 // 21 Things Progress & Journey Feed Persistence (Local + Supabase)
 // ============================================================================
 
@@ -615,6 +677,21 @@ export async function fetchBoardJourneys(
 export async function submitPlayerJourney(
   journey: Omit<TwentyOneJourney, "id" | "createdAt">
 ): Promise<TwentyOneJourney> {
+  const isCustom =
+    journey.boardId.startsWith("21t-") ||
+    journey.boardId.startsWith("custom-") ||
+    journey.boardId.startsWith("c_");
+  const modCheck = checkMultipleFields(
+    [
+      { text: journey.playerName, field: "Player Name" },
+      { text: journey.reflectionNote, field: "Reflection Note" },
+    ],
+    { mode: isCustom ? "private" : "public" }
+  );
+  if (!modCheck.allowed) {
+    throw new Error(modCheck.reason || "Content moderation rejected submission.");
+  }
+
   const newEntry: TwentyOneJourney = {
     ...journey,
     id: `j-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -731,6 +808,19 @@ export async function saveUserCreated21Board(
   board: TwentyOneThingsBoard,
   rawTranscript?: string
 ): Promise<void> {
+  const modCheck = check21ThingsBoardModeration(
+    {
+      title: board.title,
+      creatorName: board.creatorName,
+      creatorBio: board.creatorBio,
+      items: board.items,
+    },
+    { mode: "private" }
+  );
+  if (!modCheck.allowed) {
+    throw new Error(modCheck.reason || "Custom board contains prohibited Tier 1 content.");
+  }
+
   const existing = getSavedUser21Boards().filter((b) => b.id !== board.id);
   safeWriteJson(`${STORAGE_PREFIX}_user_21boards`, [board, ...existing]);
 
@@ -847,6 +937,8 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
     let c5Changed = false;
     let t21Changed = false;
 
+    const puzzleHashes: Record<string, string> = {};
+
     for (const row of data) {
       const dateKey = String(row.puzzle_date);
       if (!dateKey) continue;
@@ -856,12 +948,14 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
         if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
           c5Overrides[dateKey] = puzzle;
           c5Changed = true;
+          puzzleHashes[`connect-5:${dateKey}`] = computePuzzleContentHash(puzzle);
         }
       } else if (row.game_slug === "21-things" && row.payload) {
         const board = row.payload as TwentyOneThingsBoard;
         if (Array.isArray(board.items) && board.items.length === 21) {
           t21Overrides[dateKey] = board;
           t21Changed = true;
+          puzzleHashes[`21-things:${dateKey}`] = computePuzzleContentHash(board);
         }
       }
     }
@@ -877,7 +971,12 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
       try {
         window.dispatchEvent(
           new CustomEvent("solgames:puzzles-updated", {
-            detail: { source: "syncAllRemoteDailyPuzzles" },
+            detail: {
+              source: "syncAllRemoteDailyPuzzles",
+              c5Overrides,
+              t21Overrides,
+              hashes: puzzleHashes,
+            },
           })
         );
       } catch {
@@ -898,6 +997,7 @@ export async function saveAdminConnect5Override(
   safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
   clearConnect5Progress(dateKey);
 
+  const hash = computePuzzleContentHash(puzzle);
   let remotePersisted = false;
   let remoteError: string | undefined;
 
@@ -905,7 +1005,7 @@ export async function saveAdminConnect5Override(
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { error } = await supabase.from("daily_puzzles").upsert(
+        let { error } = await supabase.from("daily_puzzles").upsert(
           {
             game_slug: "connect-5",
             puzzle_date: dateKey,
@@ -913,11 +1013,28 @@ export async function saveAdminConnect5Override(
             title: puzzle.title,
             author: puzzle.author,
             editor: puzzle.editor,
+            content_hash: hash,
             payload: puzzle,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "game_slug,puzzle_date" }
         );
+        if (error && error.message && error.message.toLowerCase().includes("content_hash")) {
+          const fallback = await supabase.from("daily_puzzles").upsert(
+            {
+              game_slug: "connect-5",
+              puzzle_date: dateKey,
+              puzzle_number: puzzle.puzzleNumber,
+              title: puzzle.title,
+              author: puzzle.author,
+              editor: puzzle.editor,
+              payload: puzzle,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "game_slug,puzzle_date" }
+          );
+          error = fallback.error;
+        }
         if (error) {
           remoteError = error.message;
         } else {
@@ -933,7 +1050,7 @@ export async function saveAdminConnect5Override(
     try {
       window.dispatchEvent(
         new CustomEvent("solgames:puzzles-updated", {
-          detail: { gameSlug: "connect-5", dateKey },
+          detail: { gameSlug: "connect-5", dateKey, hash, puzzle },
         })
       );
     } catch {
@@ -997,6 +1114,7 @@ export async function saveAdmin21ThingsOverride(
   safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
   clear21ThingsProgress(board.id);
 
+  const hash = computePuzzleContentHash(board);
   let remotePersisted = false;
   let remoteError: string | undefined;
 
@@ -1004,7 +1122,7 @@ export async function saveAdmin21ThingsOverride(
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { error } = await supabase.from("daily_puzzles").upsert(
+        let { error } = await supabase.from("daily_puzzles").upsert(
           {
             game_slug: "21-things",
             puzzle_date: dateKey,
@@ -1012,11 +1130,28 @@ export async function saveAdmin21ThingsOverride(
             title: board.title,
             author: board.creatorName,
             editor: "Daily Editorial",
+            content_hash: hash,
             payload: board,
             updated_at: new Date().toISOString(),
           },
           { onConflict: "game_slug,puzzle_date" }
         );
+        if (error && error.message && error.message.toLowerCase().includes("content_hash")) {
+          const fallback = await supabase.from("daily_puzzles").upsert(
+            {
+              game_slug: "21-things",
+              puzzle_date: dateKey,
+              puzzle_number: board.puzzleNumber,
+              title: board.title,
+              author: board.creatorName,
+              editor: "Daily Editorial",
+              payload: board,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "game_slug,puzzle_date" }
+          );
+          error = fallback.error;
+        }
         if (error) {
           remoteError = error.message;
         } else {
@@ -1032,7 +1167,7 @@ export async function saveAdmin21ThingsOverride(
     try {
       window.dispatchEvent(
         new CustomEvent("solgames:puzzles-updated", {
-          detail: { gameSlug: "21-things", dateKey },
+          detail: { gameSlug: "21-things", dateKey, hash, board },
         })
       );
     } catch {
@@ -1046,3 +1181,5 @@ export async function saveAdmin21ThingsOverride(
     error: remoteError,
   };
 }
+
+export const saveAdmin21BoardOverride = saveAdmin21ThingsOverride;

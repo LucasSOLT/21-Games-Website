@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -51,6 +51,7 @@ import {
   type TwentyOneFunnelPhase,
   type TwentyOneSavedProgress,
 } from "@/lib/game-storage";
+import { computePuzzleContentHash } from "@/lib/seeded-random";
 import { GameShell } from "@/components/game-shell";
 import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,11 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import {
+  check21ThingsBoardModeration,
+  checkMultipleFields,
+  type ModerationMode,
+} from "@/lib/moderation";
 import { cn } from "@/lib/utils";
 
 interface SpeechRecognitionEventLike {
@@ -120,9 +126,19 @@ function resolveInitial21Board(
 }
 
 function sanitizeSaved21Progress(
-  saved: TwentyOneSavedProgress | null
+  saved: TwentyOneSavedProgress | null,
+  currentBoard?: TwentyOneThingsBoard | null
 ): TwentyOneSavedProgress | null {
   if (!saved) return null;
+
+  if (currentBoard) {
+    const expectedHash = computePuzzleContentHash(currentBoard);
+    if (saved.puzzleHash && saved.puzzleHash !== expectedHash) {
+      clear21ThingsProgress(currentBoard.id);
+      return null;
+    }
+  }
+
   const pick6 = Array.isArray(saved.pick6Indices)
     ? saved.pick6Indices.filter((i) => i >= 0 && i < 21)
     : [];
@@ -249,7 +265,10 @@ function TwentyOneThingsBoardView({
 
   const [initialSaved] = useState(() =>
     initialCustomBoard
-      ? sanitizeSaved21Progress(get21ThingsProgress(initialCustomBoard.id))
+      ? sanitizeSaved21Progress(
+          get21ThingsProgress(initialCustomBoard.id),
+          initialCustomBoard
+        )
       : null
   );
 
@@ -345,6 +364,48 @@ function TwentyOneThingsBoardView({
     };
   }, []);
 
+  const applyRemoteBoardIfChanged = useCallback(
+    (remoteBoard: TwentyOneThingsBoard) => {
+      if (!board) {
+        setBoard(remoteBoard);
+        setCreatorItems(remoteBoard.items.slice(0, 21));
+        return;
+      }
+      const remoteHash = computePuzzleContentHash(remoteBoard);
+      const currentHash = computePuzzleContentHash(board);
+      const itemsChanged =
+        remoteBoard.items.join("|") !== board.items.join("|");
+      const titleChanged = remoteBoard.title !== board.title;
+
+      if (remoteHash !== currentHash || itemsChanged || titleChanged) {
+        if (board.id) clear21ThingsProgress(board.id);
+        clear21ThingsProgress(remoteBoard.id);
+
+        setBoard(remoteBoard);
+        setCreatorItems(remoteBoard.items.slice(0, 21));
+        setPhase("pick6");
+        setPick6([]);
+        setPick3([]);
+        setPick1(null);
+        setReflectionNote("");
+        setVoiceNoteDataUrl(undefined);
+
+        save21ThingsProgress({
+          boardId: remoteBoard.id,
+          phase: "pick6",
+          pick6Indices: [],
+          pick3Indices: [],
+          pick1Index: null,
+          playerName,
+          reflectionNote: "",
+          voiceNoteDataUrl: undefined,
+          puzzleHash: remoteHash,
+        });
+      }
+    },
+    [board, playerName]
+  );
+
   // Load remote Supabase custom board (twenty_one_boards) or daily override (daily_puzzles)
   useEffect(() => {
     let active = true;
@@ -357,7 +418,8 @@ function TwentyOneThingsBoardView({
             setCreatorItems(remoteBoard.items.slice(0, 21));
             // Initialize game state specifically for this custom board
             const saved = sanitizeSaved21Progress(
-              get21ThingsProgress(remoteBoard.id)
+              get21ThingsProgress(remoteBoard.id),
+              remoteBoard
             );
             setPhase(saved?.phase ?? "pick6");
             setPick6(saved?.pick6Indices ?? []);
@@ -381,24 +443,54 @@ function TwentyOneThingsBoardView({
     } else if (!hasCustomParam && !boardTokenParam && !boardIdParam) {
       fetchRemote21ThingsOverride(activeDateKey).then((remoteOverride) => {
         if (active && remoteOverride) {
-          setBoard((prev) => {
-            if (
-              !prev ||
-              prev.id !== remoteOverride.id ||
-              prev.items.join("|") !== remoteOverride.items.join("|")
-            ) {
-              setCreatorItems(remoteOverride.items.slice(0, 21));
-              return remoteOverride;
-            }
-            return prev;
-          });
+          applyRemoteBoardIfChanged(remoteOverride);
         }
       });
     }
     return () => {
       active = false;
     };
-  }, [activeDateKey, boardIdParam, boardTokenParam, hasCustomParam, profile?.displayName]);
+  }, [activeDateKey, applyRemoteBoardIfChanged, boardIdParam, boardTokenParam, hasCustomParam, profile?.displayName]);
+
+  // Real-time listener for solgames:puzzles-updated event
+  useEffect(() => {
+    if (hasCustomParam || boardTokenParam || boardIdParam) return;
+    let active = true;
+
+    const handlePuzzlesUpdated = (e: Event) => {
+      if (!active) return;
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.gameSlug && detail.gameSlug !== "21-things") return;
+      if (!detail || !detail.dateKey || detail.dateKey === activeDateKey) {
+        if (detail?.board && detail.dateKey === activeDateKey) {
+          applyRemoteBoardIfChanged(detail.board);
+          return;
+        }
+        const local = getAdmin21ThingsOverrides()[activeDateKey];
+        if (local) {
+          applyRemoteBoardIfChanged(local);
+        } else {
+          fetchRemote21ThingsOverride(activeDateKey).then((remoteOverride) => {
+            if (active && remoteOverride) {
+              applyRemoteBoardIfChanged(remoteOverride);
+            }
+          });
+        }
+      }
+    };
+
+    window.addEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    };
+  }, [
+    activeDateKey,
+    applyRemoteBoardIfChanged,
+    boardIdParam,
+    boardTokenParam,
+    hasCustomParam,
+  ]);
 
   // Async fetch journeys (remote Supabase + localStorage + sampleJourneys)
   useEffect(() => {
@@ -432,6 +524,7 @@ function TwentyOneThingsBoardView({
       playerName: nextName,
       reflectionNote: nextNote,
       voiceNoteDataUrl: nextVoice,
+      puzzleHash: computePuzzleContentHash(board),
     });
   };
 
@@ -599,6 +692,29 @@ function TwentyOneThingsBoardView({
     const finalNote =
       reflectionNote.trim() ||
       `I narrowed ${board.creatorName}'s 21 Things down to "${board.items[pick1]}" as my #1 resonance!`;
+
+    const isCustom = Boolean(
+      hasCustomParam ||
+      (board.id && (board.id.startsWith("21t-") || board.id.startsWith("custom-") || board.puzzleNumber === 0))
+    );
+    const mode: ModerationMode = isCustom ? "private" : "public";
+
+    const modCheck = checkMultipleFields(
+      [
+        { text: finalName, field: "Player Name" },
+        { text: finalNote, field: "Reflection Note" },
+      ],
+      { mode }
+    );
+
+    if (!modCheck.allowed) {
+      toast({
+        title: modCheck.tier === 1 ? "Prohibited Content (Tier 1)" : "Moderation Notice",
+        description: modCheck.reason,
+        variant: "destructive",
+      });
+      return;
+    }
 
     const created = await submitPlayerJourney({
       boardId: board.id,
@@ -827,6 +943,25 @@ function TwentyOneThingsBoardView({
       items: sanitized,
       sampleJourneys: [],
     };
+
+    const boardMod = check21ThingsBoardModeration(
+      {
+        title: customBoard.title,
+        creatorName: customBoard.creatorName,
+        creatorBio: customBoard.creatorBio,
+        items: customBoard.items,
+      },
+      { mode: "private" }
+    );
+
+    if (!boardMod.allowed) {
+      toast({
+        title: "Content Prohibited (Tier 1 Violation)",
+        description: boardMod.reason,
+        variant: "destructive",
+      });
+      return;
+    }
 
     await saveUserCreated21Board(customBoard, rawTranscript);
 

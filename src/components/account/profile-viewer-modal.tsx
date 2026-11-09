@@ -52,6 +52,10 @@ import { shareCustomGame } from "@/lib/custom-game-share";
 import type { TwentyOneThingsBoard } from "@/data/puzzles/21-things";
 import { assetPath } from "@/lib/asset-path";
 import { useToast } from "@/hooks/use-toast";
+import {
+  checkContentModeration,
+  checkUserProfileModeration,
+} from "@/lib/moderation";
 import { cn } from "@/lib/utils";
 
 export function getAvatarTextClass(color: AvatarColor): string {
@@ -237,6 +241,16 @@ export function GuestAuthPanel({
     if (password.trim().length > 0 && password.trim().length < 6) {
       setErrorMessage("Password must be at least 6 characters.");
       return;
+    }
+    if (displayName.trim()) {
+      const mod = checkContentModeration(displayName.trim(), {
+        mode: "public",
+        field: "Display Name",
+      });
+      if (!mod.allowed) {
+        setErrorMessage(mod.reason || "Display name contains inappropriate content.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -691,10 +705,30 @@ export function LoggedInProfileDashboard({
     e.preventDefault();
     setIsSavingEdit(true);
     setSaveFeedback(null);
+
+    const nextDisplayName = editDisplayName.trim() || profile.displayName;
+    const nextHandle = editHandle.trim() || profile.handle;
+
+    const profileMod = checkUserProfileModeration({
+      displayName: nextDisplayName,
+      handle: nextHandle,
+    });
+
+    if (!profileMod.allowed) {
+      setIsSavingEdit(false);
+      setSaveFeedback(profileMod.reason || "Invalid display name or handle.");
+      toast({
+        title: "Profile Moderation Notice",
+        description: profileMod.reason,
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const res = await updateProfile({
-        displayName: editDisplayName.trim() || profile.displayName,
-        handle: editHandle.trim() || profile.handle,
+        displayName: nextDisplayName,
+        handle: nextHandle,
         avatarColor: editAvatarColor,
       });
       if (res.ok) {

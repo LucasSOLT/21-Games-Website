@@ -6,6 +6,10 @@ import {
   TWENTY_ONE_THINGS_BOARDS,
   type TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
+import {
+  SEVENTEEN_SYLLABLES_PUZZLES,
+  type SeventeenSyllablesPuzzle,
+} from "@/data/puzzles/17-syllables";
 import type { PlayableGameSlug } from "@/lib/games-config";
 
 const LAUNCH_EPOCH = "2026-09-01";
@@ -148,6 +152,28 @@ export function get21ThingsBoardForDate(
 }
 
 /**
+ * Returns the 17 Syllables haiku puzzle for a given YYYY-MM-DD date key.
+ */
+export function get17SyllablesPuzzleForDate(
+  dateKey: string = getLocalDateKey(),
+  customOverrides?: Record<string, SeventeenSyllablesPuzzle>
+): SeventeenSyllablesPuzzle {
+  if (customOverrides && customOverrides[dateKey]) {
+    return customOverrides[dateKey];
+  }
+  const index = getRotationIndexForDate(
+    dateKey,
+    SEVENTEEN_SYLLABLES_PUZZLES.length
+  );
+  const base = SEVENTEEN_SYLLABLES_PUZZLES[index];
+  return {
+    ...base,
+    puzzleNumber: getPuzzleNumberForDate(dateKey),
+    dateKey,
+  };
+}
+
+/**
  * Generates an array of past N date keys (including today at index 0) for Archive views.
  */
 export function getPastDateKeys(
@@ -185,7 +211,8 @@ export function getArchiveEntriesForGame(
   daysCount: number = 60,
   fromDate: Date = new Date(),
   c5Overrides?: Record<string, Connect5Puzzle>,
-  t21Overrides?: Record<string, TwentyOneThingsBoard>
+  t21Overrides?: Record<string, TwentyOneThingsBoard>,
+  s17Overrides?: Record<string, SeventeenSyllablesPuzzle>
 ): ArchiveEntrySummary[] {
   const dateKeys = getPastDateKeys(daysCount, fromDate);
   return dateKeys.map((dateKey) => {
@@ -201,6 +228,18 @@ export function getArchiveEntriesForGame(
         title: `${p.title} (${p.words[0]} → …)`,
         author: p.author,
         editor: p.editor,
+      };
+    } else if (gameSlug === "17-syllables") {
+      const p = get17SyllablesPuzzleForDate(dateKey, s17Overrides);
+      return {
+        dateKey,
+        dayName,
+        dateFormatted,
+        puzzleNumber: p.puzzleNumber,
+        gameSlug,
+        title: `${p.theme} — ${p.lines[0]}`,
+        author: p.author,
+        editor: "Daily Editorial",
       };
     } else {
       const b = get21ThingsBoardForDate(dateKey, t21Overrides);

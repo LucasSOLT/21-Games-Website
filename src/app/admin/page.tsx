@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
   Calendar,
   Check,
@@ -11,6 +12,7 @@ import {
   Database,
   Eye,
   Lightbulb,
+  Loader2,
   Lock,
   Play,
   RefreshCw,
@@ -18,6 +20,14 @@ import {
   ShieldCheck,
   Wand2,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   CONNECT_5_PUZZLES,
   type Connect5HintCoord,
@@ -62,10 +72,31 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import {
+  checkConnect5PuzzleModeration,
+  check21ThingsBoardModeration,
+} from "@/lib/moderation";
 import { cn } from "@/lib/utils";
 
 const SSR_ANCHOR_DATE = "2026-11-05";
 const subscribeNoop = () => () => {};
+
+interface PendingPublishState {
+  isOpen: boolean;
+  gameSlug: "connect-5" | "21-things";
+  gameTitle: string;
+  targetDate: string;
+  isToday: boolean;
+  dateStatus: "Today" | "Future" | "Past";
+  playImmediately: boolean;
+  summary: {
+    title: string;
+    creatorOrAuthor: string;
+    preview: string;
+    details: string[];
+  };
+  onConfirm: () => Promise<void>;
+}
 
 export default function AdminPage() {
   const router = useRouter();
@@ -81,6 +112,10 @@ export default function AdminPage() {
   const todayDateKey = mounted ? getLocalDateKey() : SSR_ANCHOR_DATE;
   const targetDate = selectedDate ?? todayDateKey;
   const [activeTab, setActiveTab] = useState<string>("connect-5");
+
+  // Confirmation Modal State before Publishing Puzzles
+  const [pendingPublish, setPendingPublish] = useState<PendingPublishState | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
 
   // Authorization and permission calculations
   const isGM = isGameMaster(profile);
@@ -267,25 +302,79 @@ export default function AdminPage() {
     }
 
     const puzzleObj = buildC5PuzzleObject();
-    const res = await saveAdminConnect5Override(targetDate, puzzleObj);
+    const modCheck = checkConnect5PuzzleModeration(
+      {
+        title: puzzleObj.title,
+        author: puzzleObj.author,
+        editor: puzzleObj.editor,
+        words: puzzleObj.words,
+        connections: puzzleObj.connections,
+      },
+      { mode: "public" }
+    );
 
-    if (res.remotePersisted) {
+    if (!modCheck.allowed) {
       toast({
-        title: `Connect 5 Saved Globally for ${targetDate}!`,
-        description: `Persisted to Supabase and browser cache: ${puzzleObj.words.join(" → ")}.`,
+        title: "Content Moderation Error",
+        description: modCheck.reason,
+        variant: "destructive",
       });
-    } else {
-      toast({
-        title: `Connect 5 Saved for ${targetDate}!`,
-        description: res.error
-          ? `Saved locally in browser (Supabase notice: ${res.error}).`
-          : `${puzzleObj.words.join(" → ")} (${puzzleObj.revealedHints.length} hints).`,
-      });
+      return;
     }
 
-    if (playImmediately) {
-      router.push(`/games/connect-5?date=${targetDate}`);
-    }
+    const dateStatus: "Today" | "Future" | "Past" = editPerm.isToday
+      ? "Today"
+      : editPerm.isFuture
+      ? "Future"
+      : "Past";
+
+    setPendingPublish({
+      isOpen: true,
+      gameSlug: "connect-5",
+      gameTitle: "Connect 5",
+      targetDate,
+      isToday: editPerm.isToday,
+      dateStatus,
+      playImmediately,
+      summary: {
+        title: puzzleObj.title,
+        creatorOrAuthor: puzzleObj.author,
+        preview: puzzleObj.words.join(" → "),
+        details: [
+          `Chain: ${puzzleObj.words.join(" → ")}`,
+          `Hints Pre-Revealed: ${puzzleObj.revealedHints.length}`,
+          `Editor: ${puzzleObj.editor}`,
+        ],
+      },
+      onConfirm: async () => {
+        setIsPublishing(true);
+        try {
+          const res = await saveAdminConnect5Override(targetDate, puzzleObj);
+
+          if (res.remotePersisted) {
+            toast({
+              title: `Connect 5 Saved Globally for ${targetDate}!`,
+              description: `Persisted to Supabase and browser cache: ${puzzleObj.words.join(" → ")}.`,
+            });
+          } else {
+            toast({
+              title: `Connect 5 Saved for ${targetDate}!`,
+              description: res.error
+                ? `Saved locally in browser (Supabase notice: ${res.error}).`
+                : `${puzzleObj.words.join(" → ")} (${puzzleObj.revealedHints.length} hints).`,
+            });
+          }
+
+          setPendingPublish(null);
+
+          if (playImmediately) {
+            router.push(`/games/connect-5?date=${targetDate}`);
+          }
+        } finally {
+          setIsPublishing(false);
+        }
+      },
+    });
   };
 
   const handleCopyConnect5Json = async () => {
@@ -344,25 +433,78 @@ export default function AdminPage() {
       customDate: targetDate,
     };
 
-    const res = await saveAdmin21ThingsOverride(targetDate, boardObj);
+    const modCheck = check21ThingsBoardModeration(
+      {
+        title: boardObj.title,
+        creatorName: boardObj.creatorName,
+        creatorBio: boardObj.creatorBio,
+        items: boardObj.items,
+      },
+      { mode: "public" }
+    );
 
-    if (res.remotePersisted) {
+    if (!modCheck.allowed) {
       toast({
-        title: `21 Things Saved Globally for ${targetDate}!`,
-        description: `Persisted to Supabase: "${boardObj.title}" by ${boardObj.creatorName} is now live across all sessions.`,
+        title: "Content Moderation Error",
+        description: modCheck.reason,
+        variant: "destructive",
       });
-    } else {
-      toast({
-        title: `21 Things Board Saved for ${targetDate}!`,
-        description: res.error
-          ? `Saved locally in browser (Supabase notice: ${res.error}).`
-          : `"${boardObj.title}" by ${boardObj.creatorName} is now live.`,
-      });
+      return;
     }
 
-    if (playImmediately) {
-      router.push(`/games/21-things?date=${targetDate}`);
-    }
+    const dateStatus: "Today" | "Future" | "Past" = editPerm.isToday
+      ? "Today"
+      : editPerm.isFuture
+      ? "Future"
+      : "Past";
+
+    setPendingPublish({
+      isOpen: true,
+      gameSlug: "21-things",
+      gameTitle: "21 Things",
+      targetDate,
+      isToday: editPerm.isToday,
+      dateStatus,
+      playImmediately,
+      summary: {
+        title: boardObj.title,
+        creatorOrAuthor: boardObj.creatorName,
+        preview: `21 items: "${boardObj.items[0]}", "${boardObj.items[1]}", "${boardObj.items[2]}"...`,
+        details: [
+          `Theme: "${boardObj.title}"`,
+          `Creator: ${boardObj.creatorName} (${boardObj.creatorHandle})`,
+          `Total items: ${boardObj.items.length} tiles`,
+        ],
+      },
+      onConfirm: async () => {
+        setIsPublishing(true);
+        try {
+          const res = await saveAdmin21ThingsOverride(targetDate, boardObj);
+
+          if (res.remotePersisted) {
+            toast({
+              title: `21 Things Saved Globally for ${targetDate}!`,
+              description: `Persisted to Supabase: "${boardObj.title}" by ${boardObj.creatorName} is now live across all sessions.`,
+            });
+          } else {
+            toast({
+              title: `21 Things Board Saved for ${targetDate}!`,
+              description: res.error
+                ? `Saved locally in browser (Supabase notice: ${res.error}).`
+                : `"${boardObj.title}" by ${boardObj.creatorName} is now live.`,
+            });
+          }
+
+          setPendingPublish(null);
+
+          if (playImmediately) {
+            router.push(`/games/21-things?date=${targetDate}`);
+          }
+        } finally {
+          setIsPublishing(false);
+        }
+      },
+    });
   };
 
   const handleUpdateRole = async (targetUser: UserProfile, newRole: UserRole) => {
@@ -1412,6 +1554,129 @@ export default function AdminPage() {
           )}
         </Tabs>
       </main>
+
+      {/* Confirmation Modal Popup before publishing puzzle modifications */}
+      <Dialog
+        open={Boolean(pendingPublish?.isOpen)}
+        onOpenChange={(open) => {
+          if (!open && !isPublishing) {
+            setPendingPublish(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg border-2 border-black rounded-2xl bg-white p-6 shadow-2xl">
+          <DialogHeader className="space-y-1.5">
+            <DialogTitle className="font-headline font-black text-2xl flex items-center gap-2">
+              Confirm &amp; Publish {pendingPublish?.gameTitle}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-600">
+              Review puzzle details and destination date before publishing to the live platform.
+            </DialogDescription>
+          </DialogHeader>
+
+          {pendingPublish && (
+            <div className="space-y-4 py-2">
+              {/* Prominent High-Visibility Warning for Today's Active Live Game */}
+              {pendingPublish.isToday ? (
+                <div className="rounded-xl border-2 border-red-500 bg-red-50 p-4 text-red-950 space-y-1">
+                  <div className="font-headline font-black text-sm flex items-center gap-2 text-red-900">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+                    <span>Modifying Today&apos;s Active Live Game</span>
+                  </div>
+                  <p className="text-xs leading-relaxed font-semibold">
+                    ⚠️ You are modifying today&apos;s live puzzle. This will immediately update the live game for all active players.
+                  </p>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "rounded-xl border p-3 text-xs",
+                    pendingPublish.dateStatus === "Future"
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+                      : "border-amber-300 bg-amber-50 text-amber-950"
+                  )}
+                >
+                  <strong>Target Date:</strong> {pendingPublish.targetDate} ({pendingPublish.dateStatus} Game)
+                </div>
+              )}
+
+              {/* Puzzle Details */}
+              <div className="rounded-xl border-2 border-black/10 bg-gray-50 p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between border-b border-gray-200 pb-2">
+                  <span className="font-bold text-gray-600 uppercase text-[10px]">Game:</span>
+                  <span className="font-black text-black">{pendingPublish.gameTitle}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-gray-200 pb-2">
+                  <span className="font-bold text-gray-600 uppercase text-[10px]">Target Date:</span>
+                  <span className="font-mono font-bold text-black">{pendingPublish.targetDate}</span>
+                </div>
+                <div className="flex items-center justify-between border-b border-gray-200 pb-2">
+                  <span className="font-bold text-gray-600 uppercase text-[10px]">Date Status:</span>
+                  <Badge
+                    variant={
+                      pendingPublish.isToday
+                        ? "destructive"
+                        : pendingPublish.dateStatus === "Future"
+                        ? "green"
+                        : "outline"
+                    }
+                    className="text-[10px]"
+                  >
+                    {pendingPublish.dateStatus}
+                  </Badge>
+                </div>
+                <div className="space-y-1 pt-1">
+                  <span className="font-bold text-gray-600 uppercase text-[10px]">Puzzle Summary:</span>
+                  <p className="font-bold text-black text-xs">{pendingPublish.summary.title}</p>
+                  <p className="text-gray-600 text-xs font-mono">{pendingPublish.summary.preview}</p>
+                </div>
+              </div>
+
+              {/* Persistence Indicators */}
+              <div className="flex items-center gap-3 text-[11px] text-gray-600 px-1">
+                <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                  <Check className="h-3.5 w-3.5" /> Supabase Cloud DB
+                </span>
+                <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                  <Check className="h-3.5 w-3.5" /> Browser Local Cache
+                </span>
+                {pendingPublish.playImmediately && (
+                  <span className="flex items-center gap-1 text-blue-700 font-semibold">
+                    <Play className="h-3 w-3" /> Test Play Immediately
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-gray-100">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isPublishing}
+              onClick={() => setPendingPublish(null)}
+              className="font-bold border-2 border-black text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={isPublishing}
+              onClick={() => void pendingPublish?.onConfirm()}
+              className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4 border-2 border-black"
+            >
+              {isPublishing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  Publishing...
+                </>
+              ) : (
+                "Confirm & Publish"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

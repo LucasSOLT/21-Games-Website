@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { assetPath } from "@/lib/asset-path";
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import {
   Dialog,
   DialogContent,
@@ -176,10 +177,11 @@ export function Hero() {
         </div>
 
         <div className="hero-visual">
-          <img
-            src={assetPath("/boxes-bg.png")}
+          <ImageWithFallback
+            src="/boxes-bg.png"
             alt="Background Boxes"
             className="hero-boxes-bg"
+            fallbackSvgTitle="Background Boxes"
           />
 
           <div className="hero-phone-stage">
@@ -207,10 +209,11 @@ export function Hero() {
               </div>
             </div>
 
-            <img
-              src={assetPath("/hands.png")}
+            <ImageWithFallback
+              src="/hands.png"
               alt="Hands holding a smartphone"
               className="hero-hands"
+              fallbackSvgTitle="SOL GaMES Gameplay Hands"
             />
 
             <div

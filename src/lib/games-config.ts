@@ -9,9 +9,10 @@ export type GameColor =
   | "customYellow2"
   | "customF4D621";
 
-export type PlayableGameSlug = "21-things" | "connect-5";
+export type PlayableGameSlug = "21-things" | "connect-5" | "17-syllables";
 
 export interface GameConfig {
+  id?: string;
   name: string;
   slug: string;
   color: GameColor;
@@ -23,27 +24,6 @@ export interface GameConfig {
 }
 
 export const ALL_GAMES: GameConfig[] = [
-  {
-    name: "9 Rhymes",
-    color: "customYellow2",
-    logo: "rhymes",
-    slug: "9-rhymes",
-    showCreate: true,
-    isPlayable: false,
-    tagline: "Rhyming grid deduction",
-    description: "Connect nine rhyming clues across a 3×3 phonetic board.",
-  },
-  {
-    name: "Connect 5",
-    color: "grey",
-    logo: "connect",
-    slug: "connect-5",
-    showCreate: true,
-    isPlayable: true,
-    tagline: "5-word compound chain puzzle",
-    description:
-      "Complete the 5-row word chain where each word connects with the word above it.",
-  },
   {
     name: "21 Things",
     color: "customPurple2",
@@ -61,29 +41,20 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "syllables",
     slug: "17-syllables",
     showCreate: true,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "Daily 5-7-5 haiku puzzle",
     description: "Arrange poetic fragments into a 5-7-5 daily haiku.",
   },
   {
-    name: "6 Pics",
-    color: "customF4D621",
-    logo: "6-pics",
-    slug: "6-pics",
+    name: "9 Rhymes",
+    color: "customYellow2",
+    logo: "rhymes",
+    slug: "9-rhymes",
     showCreate: true,
     isPlayable: false,
-    tagline: "Visual connection puzzle",
-    description: "Find the hidden theme linking six daily visual clues.",
-  },
-  {
-    name: "1 Win",
-    color: "grey",
-    logo: "win",
-    slug: "1-win",
-    showCreate: false,
-    isPlayable: false,
-    tagline: "One winning move",
-    description: "Find the single winning sequence on a 3×3 tactical board.",
+    tagline: "Daily rhyming text chat",
+    description:
+      "Text with Nine to solve 9 daily rhyming clues in an iMessage-style chat.",
   },
   {
     name: "Eightfold Echo",
@@ -92,28 +63,65 @@ export const ALL_GAMES: GameConfig[] = [
     slug: "eightfold-echo",
     showCreate: false,
     isPlayable: false,
-    tagline: "Circular word ring",
-    description: "Loop eight overlapping words around the center echo ring.",
+    tagline: "3×3 shape logic sequence",
+    description:
+      "Follow visual logic rules to deduce the 8-step sequence across a 3×3 grid.",
   },
   {
-    name: "The 11th Hour",
+    name: "6 Pics",
+    color: "customF4D621",
+    logo: "6-pics",
+    slug: "6-pics",
+    showCreate: true,
+    isPlayable: false,
+    tagline: "Progressive 6-image deduction",
+    description:
+      "Deduce the overarching secret theme connecting six progressive visual clues.",
+  },
+  {
+    name: "Connect 5",
     color: "grey",
-    logo: "letter",
-    slug: "the-11th-hour",
+    logo: "connect",
+    slug: "connect-5",
+    showCreate: true,
+    isPlayable: true,
+    tagline: "5-word compound chain puzzle",
+    description:
+      "Complete the 5-row word chain where each word connects with the word above it.",
+  },
+  {
+    id: "four-score",
+    name: "Four Score",
+    color: "yellow",
+    logo: "four-score",
+    slug: "four-score",
     showCreate: false,
     isPlayable: false,
-    tagline: "Beat the final-hour clock",
-    description: "Solve 11 rapid-fire word clues before the clock strikes 12.",
+    tagline: "Reach 80 math puzzle",
+    description:
+      "Combine four numbers with basic arithmetic and squares to hit the target score of 80.",
   },
   {
-    name: "Move 2",
+    name: "Move Two",
     color: "green",
     logo: "move-2",
     slug: "move-2",
     showCreate: false,
     isPlayable: false,
-    tagline: "Two-step tile shift",
-    description: "Rearrange the board in exactly two strategic tile moves.",
+    tagline: "3×3 cube domino puzzle",
+    description:
+      "Roll the 3D domino across 6 cube faces to land on the red target.",
+  },
+  {
+    name: "1 Win",
+    color: "grey",
+    logo: "win",
+    slug: "1-win",
+    showCreate: false,
+    isPlayable: false,
+    tagline: "Daily community win",
+    description:
+      "Share 1 win from your day and see how many players around the world share it.",
   },
 ];
 
@@ -124,5 +132,5 @@ export function getGameBySlug(slug: string): GameConfig | undefined {
 }
 
 export function isPlayableGameSlug(slug: string): slug is PlayableGameSlug {
-  return slug === "21-things" || slug === "connect-5";
+  return slug === "21-things" || slug === "connect-5" || slug === "17-syllables";
 }

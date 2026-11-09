@@ -26,8 +26,6 @@ const VARIANT_DIMENSIONS: Record<
   mini: 28,
 };
 
-const ECHO_ANGLES = [-90, -45, 0, 45, 90, 135, 180, 225];
-
 function normalizeLogoKey(raw: string): string {
   const cleaned = raw.trim().toLowerCase().replace(/\s+/g, "-");
   switch (cleaned) {
@@ -52,10 +50,13 @@ function normalizeLogoKey(raw: string): string {
     case "echo":
     case "eightfold-echo":
       return "echo";
+    case "four-score":
+    case "fourscore":
+    case "score":
     case "letter":
     case "the-11th-hour":
     case "11th-hour":
-      return "letter";
+      return "four-score";
     case "move-2":
     case "move2":
       return "move-2";
@@ -72,8 +73,10 @@ const DEFAULT_LABELS: Record<string, string> = {
   "6-pics": "6 Pics",
   win: "1 Win",
   echo: "Eightfold Echo",
-  letter: "The 11th Hour",
-  "move-2": "Move 2",
+  "four-score": "Four Score",
+  score: "Four Score",
+  letter: "Four Score",
+  "move-2": "Move Two",
 };
 
 export function GameLogo({
@@ -108,114 +111,120 @@ export function GameLogo({
 
   switch (logoKey) {
     case "rhymes": {
-      const coords = [8, 28, 48];
       return (
         <svg {...svgProps}>
-          {/* Off-diagonal phonetic grid tiles (all 9 tiles clearly visible) */}
-          {coords.map((y, row) =>
-            coords.map((x, col) => {
-              if (row === col) return null;
-              return (
-                <g key={`rhyme-cell-${row}-${col}`}>
-                  <rect
-                    x={x}
-                    y={y}
-                    width="17"
-                    height="17"
-                    rx="3.5"
-                    fill={WHITE}
-                    stroke={INK}
-                    strokeWidth="2.5"
-                  />
-                  <line
-                    x1={x + 4.5}
-                    y1={y + 8.5}
-                    x2={x + 12.5}
-                    y2={y + 8.5}
-                    stroke={INK}
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    opacity="0.35"
-                  />
-                </g>
-              );
-            })
-          )}
-
-          {/* Sweeping acoustic soundwave arc connecting the 3 diagonal rhyme tiles */}
+          {/* Nine's Main Chat Bubble with hard-offset shadow */}
           <path
-            d="M16.5 16.5 Q 44 10 56.5 56.5"
-            stroke={PURPLE}
-            strokeWidth="2.5"
-            strokeDasharray="3 2.5"
-            strokeLinecap="round"
+            d="M 18 16 H 56 C 62 16 66 20 66 26 V 46 C 66 52 62 56 56 56 H 22 L 11 67 L 14 56 C 10 56 7 52 7 46 V 26 C 7 20 10 16 18 16 Z"
+            fill={INK}
+            transform="translate(2.5, 2.5)"
           />
           <path
-            d="M16.5 16.5 L36.5 36.5 L56.5 56.5"
+            d="M 18 16 H 56 C 62 16 66 20 66 26 V 46 C 66 52 62 56 56 56 H 22 L 11 67 L 14 56 C 10 56 7 52 7 46 V 26 C 7 20 10 16 18 16 Z"
+            fill={WHITE}
             stroke={INK}
-            strokeWidth="4"
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+          />
+
+          {/* Bold golden numeral 9 inside Nine's bubble */}
+          <circle
+            cx="26"
+            cy="31"
+            r="6"
+            fill={YELLOW}
+            stroke={INK}
+            strokeWidth="2.4"
+          />
+          <path
+            d="M 32 31 V 42 C 32 45 28 46 24.5 44"
+            fill="none"
+            stroke={INK}
+            strokeWidth="2.5"
             strokeLinecap="round"
           />
 
-          {/* Elevated 3-in-a-row golden rhyme diagonal with hard-offset shadows */}
-          {coords.map((pos, idx) => (
-            <g key={`rhyme-diag-${idx}`}>
-              <rect
-                x={pos + 2}
-                y={pos + 2}
-                width="17"
-                height="17"
-                rx="3.5"
-                fill={INK}
-              />
-              <rect
-                x={pos}
-                y={pos}
-                width="17"
-                height="17"
-                rx="3.5"
-                fill={YELLOW}
-                stroke={INK}
-                strokeWidth="2.5"
-              />
-              <circle cx={pos + 5.2} cy={pos + 8.5} r="1.5" fill={INK} />
-              <line
-                x1={pos + 8.5}
-                y1={pos + 8.5}
-                x2={pos + 12.8}
-                y2={pos + 8.5}
-                stroke={INK}
-                strokeWidth="2.2"
-                strokeLinecap="round"
-              />
-            </g>
-          ))}
+          {/* Acoustic rhyming soundwaves radiating from 9 */}
+          <path
+            d="M 37 28 A 6 6 0 0 1 37 38"
+            fill="none"
+            stroke={PURPLE}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 42 24 A 12 12 0 0 1 42 42"
+            fill="none"
+            stroke={YELLOW}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 47 21 A 18 18 0 0 1 47 45"
+            fill="none"
+            stroke={PURPLE}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
 
-          {/* Musical resonance / acoustic soundwave badge in upper-right corner */}
+          {/* Clue blanks prompt: _ _ _ _ */}
+          <path
+            d="M 18 51 H 24 M 28 51 H 34 M 38 51 H 44 M 48 51 H 54"
+            stroke={INK}
+            strokeWidth="2"
+            strokeLinecap="round"
+            opacity="0.4"
+          />
+
+          {/* Active Reply / Typing Indicator Bubble at top-right */}
           <g>
-            <circle cx="67.5" cy="16.5" r="9" fill={INK} />
-            <circle
-              cx="65.5"
-              cy="14.5"
-              r="9"
+            <rect
+              x="44.5"
+              y="6.5"
+              width="28"
+              height="16"
+              rx="8"
+              fill={INK}
+            />
+            <rect
+              x="43"
+              y="5"
+              width="28"
+              height="16"
+              rx="8"
               fill={PURPLE}
               stroke={INK}
-              strokeWidth="2.5"
-            />
-            <circle cx="62" cy="14.5" r="1.5" fill={YELLOW} />
-            <path
-              d="M64.5 11.5 A 4.2 4.2 0 0 1 64.5 17.5"
-              stroke={WHITE}
-              strokeWidth="2"
-              strokeLinecap="round"
+              strokeWidth="2.2"
             />
             <path
-              d="M67.2 9.5 A 7 7 0 0 1 67.2 19.5"
-              stroke={YELLOW}
-              strokeWidth="2"
-              strokeLinecap="round"
+              d="M 48 20 L 45 24 L 52 20 Z"
+              fill={PURPLE}
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinejoin="round"
             />
+            {/* 3 typing indicator dots */}
+            <circle cx="51" cy="13" r="2" fill={WHITE} />
+            <circle cx="57" cy="13" r="2.2" fill={WHITE} />
+            <circle cx="63" cy="13" r="2" fill={WHITE} />
           </g>
+
+          {/* Nine avatar badge at bottom-left */}
+          <circle
+            cx="9"
+            cy="69"
+            r="6"
+            fill={YELLOW}
+            stroke={INK}
+            strokeWidth="2"
+          />
+          <path
+            d="M 7 71 V 67 L 11 71 V 67"
+            stroke={INK}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     }
@@ -676,312 +685,532 @@ export function GameLogo({
     }
 
     case "win": {
-      const grid = [8, 30, 52];
       return (
         <svg {...svgProps}>
-          {/* 3x3 tactical strategy board with golden #F9D423 winning diagonal */}
-          {grid.map((y, row) =>
-            grid.map((x, col) => {
-              const isDiag = row === col;
-              return (
-                <g key={`win-cell-${row}-${col}`}>
-                  {isDiag && (
-                    <rect
-                      x={x + 2}
-                      y={y + 2}
-                      width="20"
-                      height="20"
-                      rx="4"
-                      fill={INK}
-                    />
-                  )}
-                  <rect
-                    x={x}
-                    y={y}
-                    width="20"
-                    height="20"
-                    rx="4"
-                    fill={isDiag ? YELLOW : WHITE}
-                    stroke={INK}
-                    strokeWidth="2.5"
-                  />
-                  {/* Subtle tactical markers on off-diagonal cells */}
-                  {row === 0 && col === 2 && (
-                    <path
-                      d="M59 15 L65 21 M65 15 L59 21"
-                      stroke={INK}
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      opacity="0.4"
-                    />
-                  )}
-                  {row === 2 && col === 0 && (
-                    <circle
-                      cx="18"
-                      cy="62"
-                      r="3.5"
-                      stroke={INK}
-                      strokeWidth="2.2"
-                      opacity="0.4"
-                    />
-                  )}
-                </g>
-              );
-            })
-          )}
-
-          {/* Bold winning three-in-a-row diagonal line */}
-          <line
-            x1="15"
-            y1="15"
-            x2="65"
-            y2="65"
-            stroke={INK}
-            strokeWidth="4"
-            strokeLinecap="round"
+          {/* Foundation Ground Bar */}
+          <rect
+            x="6"
+            y="68"
+            width="68"
+            height="6"
+            rx="3"
+            fill={INK}
           />
 
-          {/* Oversized central golden trophy tile with numeral "1" & crown */}
+          {/* Rank 2 Podium (Left - White) */}
           <g>
             <rect
-              x="25.5"
-              y="25.5"
-              width="33"
-              height="33"
-              rx="6"
+              x="10.5"
+              y="43.5"
+              width="18"
+              height="25"
+              rx="3"
               fill={INK}
             />
             <rect
-              x="23"
-              y="23"
-              width="33"
-              height="33"
-              rx="6"
+              x="9"
+              y="42"
+              width="18"
+              height="26"
+              rx="3"
+              fill={WHITE}
+              stroke={INK}
+              strokeWidth="2.4"
+            />
+            {/* Numeral 2 on podium */}
+            <path
+              d="M 15 49 C 15 47 21 47 21 49 C 21 51 15 53 15 55.5 H 21"
+              stroke={INK}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+
+          {/* Rank 3 Podium (Right - White) */}
+          <g>
+            <rect
+              x="54.5"
+              y="51.5"
+              width="18"
+              height="17"
+              rx="3"
+              fill={INK}
+            />
+            <rect
+              x="53"
+              y="50"
+              width="18"
+              height="18"
+              rx="3"
+              fill={WHITE}
+              stroke={INK}
+              strokeWidth="2.4"
+            />
+            {/* Numeral 3 on podium */}
+            <path
+              d="M 59 54.5 C 61 53.5 64 54 64 56 C 64 57.5 61 58 61 58 C 64 58 64 60.5 62 61.5 C 60 62 59 61.5 59 61.5"
+              stroke={INK}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+
+          {/* Rank 1 Central Podium (Center - Golden) */}
+          <g>
+            <rect
+              x="32"
+              y="32"
+              width="20"
+              height="36"
+              rx="4"
+              fill={INK}
+            />
+            <rect
+              x="30"
+              y="30"
+              width="20"
+              height="38"
+              rx="4"
               fill={YELLOW}
               stroke={INK}
               strokeWidth="2.5"
             />
-            {/* Mini 3-point crown accent */}
+            {/* Numeral 1 on central podium */}
             <path
-              d="M33.5 32.5 L35.5 28 L39.5 31 L43.5 28 L45.5 32.5 Z"
-              fill={GREEN}
+              d="M 38 45 L 40 43 V 53 M 37 53 H 43"
               stroke={INK}
-              strokeWidth="2"
-              strokeLinejoin="round"
-            />
-            {/* Bold numeral 1 */}
-            <path
-              d="M36 39 L40 36.5 V49.5 M35.5 49.5 H44.5"
-              stroke={INK}
-              strokeWidth="3.2"
+              strokeWidth="2.4"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
+          </g>
+
+          {/* Crowning Golden #1 Trophy */}
+          <g>
+            {/* Trophy shadow */}
+            <rect
+              x="29"
+              y="8"
+              width="26"
+              height="20"
+              rx="4.5"
+              fill={INK}
+            />
+            {/* Trophy Card */}
+            <rect
+              x="27"
+              y="6"
+              width="26"
+              height="20"
+              rx="4.5"
+              fill={YELLOW}
+              stroke={INK}
+              strokeWidth="2.4"
+            />
+            {/* 3-point green crown atop trophy */}
+            <path
+              d="M 33 10 L 35 6.5 L 40 9.5 L 45 6.5 L 47 10 Z"
+              fill={GREEN}
+              stroke={INK}
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            {/* Bold numeral 1 inside trophy */}
+            <path
+              d="M 38 13.5 L 40.5 12 V 21 M 37.5 21 H 43.5"
+              stroke={INK}
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {/* Celebration radiance rays and sparks */}
+            <path
+              d="M 23 8 L 20 6 M 22 16 H 18 M 57 8 L 60 6 M 58 16 H 62"
+              stroke={INK}
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <circle cx="21" cy="11" r="1.5" fill={YELLOW} stroke={INK} strokeWidth="1" />
+            <circle cx="59" cy="11" r="1.5" fill={YELLOW} stroke={INK} strokeWidth="1" />
           </g>
         </svg>
       );
     }
 
     case "echo": {
-      const radius = 25;
+      // 3x3 shape logic grid coords: row/col at 8, 30, 52 (tile size 20x20)
+      const cells = [
+        // row 0: Step 1 (Gold), Step 2 (Purple), Step 3 (Cobalt)
+        { x: 8, y: 8, fill: YELLOW, type: "circle" },
+        { x: 30, y: 8, fill: PURPLE, type: "diamond" },
+        { x: 52, y: 8, fill: "#3B82F6", type: "triangle" },
+        // row 1: Step 8 (Amber), Step 0 (Emerald Center), Step 4 (Tangerine)
+        { x: 8, y: 30, fill: "#F59E0B", type: "bars" },
+        { x: 30, y: 30, fill: GREEN, type: "center" },
+        { x: 52, y: 30, fill: "#F97316", type: "square" },
+        // row 2: Step 7 (Teal), Step 6 (Lavender), Step 5 (Active Step - Rose border)
+        { x: 8, y: 52, fill: "#14B8A6", type: "slash" },
+        { x: 30, y: 52, fill: LAVENDER, type: "plus" },
+        { x: 52, y: 52, fill: WHITE, type: "active" },
+      ];
+
       return (
         <svg {...svgProps}>
-          {/* Concentric acoustic ripple rings */}
-          <circle
-            cx="40"
-            cy="40"
-            r="36"
+          {/* Subtle sequence trace line connecting surrounding 8 steps */}
+          <path
+            d="M 28 18 H 30 M 50 18 H 52 M 62 28 V 30 M 62 50 V 52 M 52 62 H 50 M 30 62 H 28 M 18 52 V 50 M 18 30 V 28"
             stroke={INK}
-            strokeWidth="1.8"
-            strokeDasharray="3 3"
-            opacity="0.5"
-          />
-          <circle
-            cx="40"
-            cy="40"
-            r="25"
-            stroke={INK}
-            strokeWidth="2.5"
-          />
-          <circle
-            cx="40"
-            cy="40"
-            r="14.5"
-            fill={WHITE}
-            stroke={INK}
-            strokeWidth="2"
-            strokeDasharray="2.5 2.5"
+            strokeWidth="1.5"
+            strokeDasharray="1.5 1.5"
+            opacity="0.4"
           />
 
-          {/* 8 orbital word nodes at 45° intervals with progressive echo opacity */}
-          {ECHO_ANGLES.map((deg, idx) => {
-            const rad = (deg * Math.PI) / 180;
-            const cx = Number((40 + radius * Math.cos(rad)).toFixed(3));
-            const cy = Number((40 + radius * Math.sin(rad)).toFixed(3));
-            const tileSize = 12;
-            const x = Number((cx - tileSize / 2).toFixed(3));
-            const y = Number((cy - tileSize / 2).toFixed(3));
-            const echoOpacity = Number(Math.max(0.25, 1 - idx * 0.1).toFixed(2));
+          {cells.map((cell, idx) => {
+            const isCenter = cell.type === "center";
+            const isActive = cell.type === "active";
             return (
-              <g key={`echo-node-${idx}`}>
+              <g key={`echo-cell-${idx}`}>
+                {/* Hard offset drop shadow */}
                 <rect
-                  x={x + 1.5}
-                  y={y + 1.5}
-                  width={tileSize}
-                  height={tileSize}
-                  rx="3.2"
+                  x={cell.x + 2}
+                  y={cell.y + 2}
+                  width="20"
+                  height="20"
+                  rx="4"
                   fill={INK}
                 />
+                {/* Base Tile */}
                 <rect
-                  x={x}
-                  y={y}
-                  width={tileSize}
-                  height={tileSize}
-                  rx="3.2"
-                  fill={WHITE}
+                  x={cell.x}
+                  y={cell.y}
+                  width="20"
+                  height="20"
+                  rx="4"
+                  fill={cell.fill}
+                  stroke={isActive ? "#EC4899" : INK}
+                  strokeWidth={isActive ? "2.8" : isCenter ? "2.6" : "2.2"}
+                  strokeDasharray={isActive ? "3 2" : undefined}
                 />
-                <rect
-                  x={x}
-                  y={y}
-                  width={tileSize}
-                  height={tileSize}
-                  rx="3.2"
-                  fill={idx < 4 ? PURPLE : LAVENDER}
-                  fillOpacity={echoOpacity}
-                  stroke={INK}
-                  strokeWidth="2.5"
-                />
+
+                {/* Glyphs inside each step */}
+                {cell.type === "center" && (
+                  <>
+                    <circle
+                      cx="40"
+                      cy="40"
+                      r="5.5"
+                      fill="none"
+                      stroke={WHITE}
+                      strokeWidth="2"
+                    />
+                    <circle cx="40" cy="40" r="2" fill={WHITE} />
+                  </>
+                )}
+                {cell.type === "circle" && (
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="4"
+                    fill={WHITE}
+                    stroke={INK}
+                    strokeWidth="1.8"
+                  />
+                )}
+                {cell.type === "diamond" && (
+                  <path
+                    d="M 40 13 L 45 18 L 40 23 L 35 18 Z"
+                    fill={WHITE}
+                    stroke={INK}
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                )}
+                {cell.type === "triangle" && (
+                  <path
+                    d="M 62 13.5 L 66.5 21.5 H 57.5 Z"
+                    fill={WHITE}
+                    stroke={INK}
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                )}
+                {cell.type === "square" && (
+                  <rect
+                    x="58.5"
+                    y="36.5"
+                    width="7"
+                    height="7"
+                    rx="1.5"
+                    fill={WHITE}
+                    stroke={INK}
+                    strokeWidth="1.8"
+                  />
+                )}
+                {cell.type === "active" && (
+                  <>
+                    <circle
+                      cx="62"
+                      cy="62"
+                      r="4.5"
+                      fill="none"
+                      stroke={INK}
+                      strokeWidth="1.8"
+                    />
+                    <path
+                      d="M 62 57.5 A 4.5 4.5 0 0 1 62 66.5 Z"
+                      fill="#EC4899"
+                    />
+                  </>
+                )}
+                {cell.type === "plus" && (
+                  <path
+                    d="M 40 57.5 V 66.5 M 35.5 62 H 44.5"
+                    stroke={INK}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                )}
+                {cell.type === "slash" && (
+                  <path
+                    d="M 13.5 66.5 L 22.5 57.5"
+                    stroke={WHITE}
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                  />
+                )}
+                {cell.type === "bars" && (
+                  <path
+                    d="M 13.5 38 H 22.5 M 13.5 42 H 22.5"
+                    stroke={WHITE}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                )}
               </g>
             );
           })}
-
-          {/* Golden acoustic core */}
-          <circle cx="41.8" cy="41.8" r="9" fill={INK} />
-          <circle
-            cx="40"
-            cy="40"
-            r="9"
-            fill={YELLOW}
-            stroke={INK}
-            strokeWidth="2.5"
-          />
-          <circle cx="40" cy="40" r="2.8" fill={INK} />
         </svg>
       );
     }
 
+    case "four-score":
     case "letter": {
-      const cx = 41;
-      const cy = 42;
       return (
         <svg {...svgProps}>
-          {/* Editorial double-rimmed timepiece bezel with hard-offset shadow */}
-          <circle cx={cx + 2.5} cy={cy + 2.5} r="30.5" fill={INK} />
-          <circle
-            cx={cx}
-            cy={cy}
-            r="30.5"
-            fill={PURPLE}
+          {/* Subtle connecting convergence lines into center */}
+          <line
+            x1="19"
+            y1="20"
+            x2="25"
+            y2="25"
             stroke={INK}
-            strokeWidth="2.5"
+            strokeWidth="1.8"
+            strokeDasharray="2.5 2"
+            opacity="0.4"
           />
-          <circle
-            cx={cx}
-            cy={cy}
-            r="26"
-            fill={WHITE}
+          <line
+            x1="61"
+            y1="19"
+            x2="55"
+            y2="25"
+            stroke={INK}
+            strokeWidth="1.8"
+            strokeDasharray="2.5 2"
+            opacity="0.4"
+          />
+          <line
+            x1="19"
+            y1="61"
+            x2="25"
+            y2="55"
+            stroke={INK}
+            strokeWidth="1.8"
+            strokeDasharray="2.5 2"
+            opacity="0.4"
+          />
+          <line
+            x1="61"
+            y1="61"
+            x2="55"
+            y2="55"
+            stroke={INK}
+            strokeWidth="1.8"
+            strokeDasharray="2.5 2"
+            opacity="0.4"
+          />
+
+          {/* Central Target Card (= 80) with hard drop shadow */}
+          <rect
+            x="23.5"
+            y="23.5"
+            width="38"
+            height="38"
+            rx="7"
+            fill={INK}
+          />
+          <rect
+            x="21"
+            y="21"
+            width="38"
+            height="38"
+            rx="7"
+            fill={YELLOW}
             stroke={INK}
             strokeWidth="2.5"
           />
 
-          {/* Glowing golden wedge for the 11-to-12 final hour (-120 deg to -90 deg) */}
+          {/* Target card header accent */}
           <path
-            d={`M ${cx} ${cy} L ${cx - 13} ${cy - 22.52} A 26 26 0 0 1 ${cx} ${
-              cy - 26
-            } Z`}
-            fill={YELLOW}
-          />
-          <circle
-            cx={cx}
-            cy={cy}
-            r="26"
+            d="M 32 26 H 48"
             stroke={INK}
-            strokeWidth="2.5"
+            strokeWidth="2"
+            strokeLinecap="round"
+            opacity="0.3"
           />
 
-          {/* 12 precision tick marks */}
-          {Array.from({ length: 12 }).map((_, i) => {
-            const angle = ((i * 30 - 90) * Math.PI) / 180;
-            const isCardinal = i % 3 === 0;
-            const rInner = isCardinal ? 20.5 : 22.2;
-            const rOuter = 25;
-            return (
-              <line
-                key={`tick-${i}`}
-                x1={Number((cx + rInner * Math.cos(angle)).toFixed(3))}
-                y1={Number((cy + rInner * Math.sin(angle)).toFixed(3))}
-                x2={Number((cx + rOuter * Math.cos(angle)).toFixed(3))}
-                y2={Number((cy + rOuter * Math.sin(angle)).toFixed(3))}
-                stroke={INK}
-                strokeWidth={isCardinal ? "2.5" : "1.8"}
-                strokeLinecap="round"
-              />
-            );
-          })}
-
-          {/* Hour & minute hands poised cleanly at 11:00 (exact -90 deg and -120 deg) */}
-          <line
-            x1={cx}
-            y1={cy}
-            x2={cx}
-            y2={cy - 18.5}
+          {/* Equals prefix = */}
+          <path
+            d="M 26.5 37.5 H 31.5 M 26.5 41.5 H 31.5"
             stroke={INK}
-            strokeWidth="3"
+            strokeWidth="2.2"
             strokeLinecap="round"
           />
-          <line
-            x1={cx}
-            y1={cy}
-            x2={cx - 8}
-            y2={cy - 13.86}
+
+          {/* Numeral 8 */}
+          <circle
+            cx="38"
+            cy="35"
+            r="3.5"
+            fill="none"
             stroke={INK}
-            strokeWidth="3.4"
-            strokeLinecap="round"
+            strokeWidth="2.6"
           />
           <circle
-            cx={cx}
-            cy={cy}
-            r="3.8"
-            fill={YELLOW}
+            cx="38"
+            cy="43"
+            r="4.2"
+            fill="none"
             stroke={INK}
-            strokeWidth="2.5"
+            strokeWidth="2.6"
           />
 
-          {/* Bold "11" pill badge */}
+          {/* Numeral 0 */}
+          <rect
+            x="44.5"
+            y="31.5"
+            width="8.5"
+            height="15.5"
+            rx="4.25"
+            fill="none"
+            stroke={INK}
+            strokeWidth="2.6"
+          />
+
+          {/* Satellites: */}
+          {/* Top-Left: Number tile 4 */}
           <g>
             <rect
-              x="7.5"
-              y="8.5"
-              width="22"
-              height="15"
-              rx="7.5"
+              x="6.5"
+              y="7.5"
+              width="16"
+              height="16"
+              rx="3.5"
               fill={INK}
             />
             <rect
-              x="5.5"
-              y="6.5"
-              width="22"
-              height="15"
-              rx="7.5"
-              fill={YELLOW}
+              x="5"
+              y="6"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill={WHITE}
               stroke={INK}
-              strokeWidth="2.5"
+              strokeWidth="2.2"
+            />
+            {/* Numeral 4 */}
+            <path
+              d="M 15 9.5 L 10.5 15 H 16 M 14 13 V 18.5"
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+
+          {/* Top-Right: Multiply operator badge × */}
+          <g>
+            <circle cx="68" cy="15" r="7.5" fill={INK} />
+            <circle
+              cx="66.5"
+              cy="13.5"
+              r="7.5"
+              fill={PURPLE}
+              stroke={INK}
+              strokeWidth="2.2"
             />
             <path
-              d="M14 10.8 V17.2 M19 10.8 V17.2"
-              stroke={INK}
-              strokeWidth="2.6"
+              d="M 63.5 10.5 L 69.5 16.5 M 69.5 10.5 L 63.5 16.5"
+              stroke={WHITE}
+              strokeWidth="2.2"
               strokeLinecap="round"
+            />
+          </g>
+
+          {/* Bottom-Left: Add operator badge + */}
+          <g>
+            <circle cx="14.5" cy="68" r="7.5" fill={INK} />
+            <circle
+              cx="13"
+              cy="66.5"
+              r="7.5"
+              fill={GREEN}
+              stroke={INK}
+              strokeWidth="2.2"
+            />
+            <path
+              d="M 13 62 V 71 M 8.5 66.5 H 17.5"
+              stroke={WHITE}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+          </g>
+
+          {/* Bottom-Right: Square operator tile x² */}
+          <g>
+            <rect
+              x="60.5"
+              y="59.5"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill={INK}
+            />
+            <rect
+              x="59"
+              y="58"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill={WHITE}
+              stroke={INK}
+              strokeWidth="2.2"
+            />
+            {/* Base x */}
+            <path
+              d="M 63 65 L 67 71 M 67 65 L 63 71"
+              stroke={INK}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+            {/* Exponent 2 */}
+            <path
+              d="M 69.5 61.8 C 69.5 60.6 71.5 60.6 71.5 61.8 C 71.5 62.8 69.5 63.6 69.5 64.8 H 72"
+              stroke={INK}
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
           </g>
         </svg>
@@ -989,127 +1218,145 @@ export function GameLogo({
     }
 
     case "move-2": {
-      const stationaryTiles: Array<[number, number]> = [
-        [2, 0],
-        [0, 1],
-        [0, 2],
-        [1, 2],
-        [2, 2],
-      ];
       return (
         <svg {...svgProps}>
-          {/* Dashed recessed target slots at (1,0) and (2,1) */}
-          <rect
-            x="30"
-            y="7"
-            width="20"
-            height="20"
-            rx="4"
-            fill={WHITE}
-            fillOpacity="0.7"
+          {/* Subtle isometric ground grid lines */}
+          <path
+            d="M 8 74 H 72 M 20 74 L 38 56 M 42 74 L 60 56 M 29 65 H 67"
             stroke={INK}
-            strokeWidth="2.5"
-            strokeDasharray="3.5 2.5"
-          />
-          <rect
-            x="53"
-            y="30"
-            width="20"
-            height="20"
-            rx="4"
-            fill={WHITE}
-            fillOpacity="0.7"
-            stroke={INK}
-            strokeWidth="2.5"
-            strokeDasharray="3.5 2.5"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            opacity="0.2"
           />
 
-          {/* Stationary white puzzle tiles */}
-          {stationaryTiles.map(([col, row]) => (
-            <rect
-              key={`move-stat-${col}-${row}`}
-              x={7 + col * 23}
-              y={7 + row * 23}
-              width="20"
-              height="20"
-              rx="4"
-              fill={WHITE}
-              stroke={INK}
-              strokeWidth="2.5"
-            />
-          ))}
-
-          {/* Sliding Tile 1 (Golden #F9D423) shifting right from (0,0) -> (1,0) */}
+          {/* Red Target Tile at top-right (landing zone) */}
           <g>
             <rect
-              x="11"
-              y="9"
-              width="20"
-              height="20"
+              x="52.5"
+              y="12.5"
+              width="22"
+              height="22"
               rx="4"
               fill={INK}
             />
             <rect
-              x="9"
-              y="7"
-              width="20"
-              height="20"
+              x="50"
+              y="10"
+              width="22"
+              height="22"
               rx="4"
+              fill="#EF4444"
+              stroke={INK}
+              strokeWidth="2.5"
+            />
+            {/* Concentric bullseye target rings */}
+            <circle
+              cx="61"
+              cy="21"
+              r="6.5"
+              fill="none"
+              stroke={WHITE}
+              strokeWidth="2"
+            />
+            <circle cx="61" cy="21" r="2.5" fill={WHITE} />
+          </g>
+
+          {/* Dynamic tumbling / rolling arc toward red target */}
+          <path
+            d="M 35 28 C 35 14 45 13 48 18"
+            fill="none"
+            stroke={INK}
+            strokeWidth="2.6"
+            strokeDasharray="3 2"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 45 13.5 L 50.5 18 L 44.5 21 Z"
+            fill={INK}
+          />
+
+          {/* Isometric Domino Shadow */}
+          <path
+            d="M 10 70 L 32 60 L 50 48 L 40 68 Z"
+            fill={INK}
+            opacity="0.25"
+          />
+
+          {/* 3D Isometric 1x1x2 Domino Block */}
+          {/* Trailing Cube Unit (Cube 2 - Gold) */}
+          <g>
+            {/* Front Face */}
+            <rect
+              x="8"
+              y="50"
+              width="18"
+              height="18"
+              rx="2"
               fill={YELLOW}
               stroke={INK}
-              strokeWidth="2.5"
+              strokeWidth="2.4"
             />
+            {/* Top Face */}
             <path
-              d="M21.5 17 H42 M37.5 12.5 L42.5 17 L37.5 21.5"
-              stroke={WHITE}
-              strokeWidth="5.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M21.5 17 H42 M37.5 12.5 L42.5 17 L37.5 21.5"
+              d="M 8 50 L 16 42 H 34 L 26 50 Z"
+              fill="#FDE047"
               stroke={INK}
-              strokeWidth="2.8"
-              strokeLinecap="round"
+              strokeWidth="2.4"
               strokeLinejoin="round"
             />
+            {/* Right Face */}
+            <path
+              d="M 26 50 L 34 42 V 60 L 26 68 Z"
+              fill="#CA8A04"
+              stroke={INK}
+              strokeWidth="2.4"
+              strokeLinejoin="round"
+            />
+            {/* Domino pips on top face */}
+            <circle cx="18" cy="46" r="1.5" fill={INK} />
+            <circle cx="24" cy="46" r="1.5" fill={INK} />
           </g>
 
-          {/* Sliding Tile 2 (Vibrant #2ECC71) shifting right from (1,1) -> (2,1) */}
+          {/* Leading Cube Unit (Cube 1 - Vibrant Green) */}
           <g>
+            {/* Front Face */}
             <rect
-              x="34"
-              y="32"
-              width="20"
-              height="20"
-              rx="4"
-              fill={INK}
-            />
-            <rect
-              x="32"
-              y="30"
-              width="20"
-              height="20"
-              rx="4"
+              x="22"
+              y="38"
+              width="18"
+              height="18"
+              rx="2"
               fill={GREEN}
               stroke={INK}
-              strokeWidth="2.5"
+              strokeWidth="2.4"
             />
+            {/* Top Face */}
             <path
-              d="M44.5 40 H65 M60.5 35.5 L65.5 40 L60.5 44.5"
-              stroke={WHITE}
-              strokeWidth="5.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M44.5 40 H65 M60.5 35.5 L65.5 40 L60.5 44.5"
+              d="M 22 38 L 30 30 H 48 L 40 38 Z"
+              fill="#4ADE80"
               stroke={INK}
-              strokeWidth="2.8"
-              strokeLinecap="round"
+              strokeWidth="2.4"
               strokeLinejoin="round"
             />
+            {/* Right Face */}
+            <path
+              d="M 40 38 L 48 30 V 48 L 40 56 Z"
+              fill="#16A34A"
+              stroke={INK}
+              strokeWidth="2.4"
+              strokeLinejoin="round"
+            />
+            {/* Single center pip on leading cube */}
+            <circle cx="35" cy="34" r="1.8" fill={INK} />
           </g>
+
+          {/* Seam line between the 2 domino cubes */}
+          <path
+            d="M 26 50 L 34 42"
+            stroke={INK}
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
         </svg>
       );
     }

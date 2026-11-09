@@ -15,11 +15,14 @@ create table if not exists public.daily_puzzles (
   title text not null,
   author text not null default 'SOL Theory',
   editor text not null default 'Daily Editorial',
+  content_hash text,
   payload jsonb not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (game_slug, puzzle_date)
 );
+
+alter table public.daily_puzzles add column if not exists content_hash text;
 
 create index if not exists idx_daily_puzzles_slug_date
   on public.daily_puzzles (game_slug, puzzle_date desc);
@@ -128,7 +131,7 @@ create index if not exists idx_user_profiles_is_banned
 -- Seed / enforce initial Game Masters
 update public.user_profiles
   set role = 'game_master', is_banned = false, banned_at = null, banned_reason = null
-  where lower(email) in ('lucas@soltheory.com', 'steve@soltheory.com');
+  where lower(email) in ('lucas@soltheory.com', 'steve@soltheory.com', 'luke@soltheory.com');
 
 alter table public.user_profiles enable row level security;
 

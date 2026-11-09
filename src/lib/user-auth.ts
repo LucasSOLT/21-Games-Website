@@ -17,6 +17,7 @@ import {
 } from "@/lib/game-storage";
 import { assetPath } from "@/lib/asset-path";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import { checkContentModeration } from "@/lib/moderation";
 
 export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
 export const ACTIVE_USER_KEY = "solgames_v1_active_user";
@@ -34,6 +35,7 @@ const GM_ROOT = "_lucas@soltheory.com".slice(1);
 export const INITIAL_GAME_MASTERS: readonly string[] = [
   GM_ROOT,
   "steve@soltheory.com",
+  "luke@soltheory.com",
 ] as const;
 
 export type AvatarColor =
@@ -1068,6 +1070,26 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     };
   }
 
+  if (input.displayName && input.displayName.trim().length > 0) {
+    const mod = checkContentModeration(input.displayName, {
+      mode: "public",
+      field: "Display Name",
+    });
+    if (!mod.allowed) {
+      return { ok: false, profile: null, error: mod.reason };
+    }
+  }
+
+  if (input.handle && input.handle.trim().length > 0) {
+    const mod = checkContentModeration(input.handle, {
+      mode: "public",
+      field: "Handle",
+    });
+    if (!mod.allowed) {
+      return { ok: false, profile: null, error: mod.reason };
+    }
+  }
+
   const displayName =
     input.displayName && input.displayName.trim().length > 0
       ? input.displayName.trim()
@@ -1407,6 +1429,26 @@ export async function updateUserProfile(
       profile: null,
       error: "You must be signed in to update your profile.",
     };
+  }
+
+  if (updates.displayName !== undefined && updates.displayName.trim().length > 0) {
+    const mod = checkContentModeration(updates.displayName, {
+      mode: "public",
+      field: "Display Name",
+    });
+    if (!mod.allowed) {
+      return { ok: false, profile: null, error: mod.reason };
+    }
+  }
+
+  if (updates.handle !== undefined && updates.handle.trim().length > 0) {
+    const mod = checkContentModeration(updates.handle, {
+      mode: "public",
+      field: "Handle",
+    });
+    if (!mod.allowed) {
+      return { ok: false, profile: null, error: mod.reason };
+    }
   }
 
   const nextDisplayName =

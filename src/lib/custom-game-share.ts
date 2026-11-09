@@ -62,6 +62,83 @@ export function buildBoardPlayHref(board: { id: string }): string {
 }
 
 /**
+ * Builds the canonical short share URL for a custom 17 Syllables haiku.
+ * Format: https://www.solworld.ai/solgames/games/17-syllables?b=<id>
+ */
+export function build17SyllablesShareUrl(haiku: { id: string }): string {
+  const origin =
+    typeof window !== "undefined" && window.location?.origin
+      ? window.location.origin
+      : "https://www.solworld.ai";
+  const path = assetPath("/games/17-syllables");
+  return `${origin}${path}?b=${encodeURIComponent(haiku.id)}`;
+}
+
+/**
+ * Builds the internal Next.js link href for a custom 17 Syllables haiku.
+ */
+export function build17SyllablesPlayHref(haiku: { id: string }): string {
+  return `/games/17-syllables?b=${encodeURIComponent(haiku.id)}`;
+}
+
+/**
+ * Encodes a custom 17 Syllables haiku into a compact URL-safe base64 string
+ * for offline and instant sharing without backend roundtrips.
+ */
+export function encodeShareable17Haiku(haiku: {
+  id: string;
+  theme: string;
+  creatorName: string;
+  lines: [string, string, string];
+}): string {
+  try {
+    const json = JSON.stringify({
+      i: haiku.id,
+      t: haiku.theme,
+      c: haiku.creatorName,
+      l: haiku.lines,
+    });
+    if (typeof window !== "undefined") {
+      return btoa(encodeURIComponent(json));
+    }
+    return Buffer.from(encodeURIComponent(json), "utf-8").toString("base64");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Decodes a custom 17 Syllables haiku from a compact token.
+ */
+export function decodeShareable17Haiku(
+  token: string
+): {
+  id: string;
+  theme: string;
+  creatorName: string;
+  lines: [string, string, string];
+} | null {
+  try {
+    const raw =
+      typeof window !== "undefined"
+        ? decodeURIComponent(atob(token))
+        : decodeURIComponent(Buffer.from(token, "base64").toString("utf-8"));
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.l) || parsed.l.length !== 3) {
+      return null;
+    }
+    return {
+      id: String(parsed.i || "17s-custom"),
+      theme: String(parsed.t || "Custom Haiku"),
+      creatorName: String(parsed.c || "Friend"),
+      lines: [String(parsed.l[0]), String(parsed.l[1]), String(parsed.l[2])],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Extracts a clean username string without leading '@' or illegal characters.
  * Ensures consistent '@<username>' attribution in the share blurb.
  */
