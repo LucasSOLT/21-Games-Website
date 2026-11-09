@@ -6,10 +6,10 @@
 
 create extension if not exists "pgcrypto";
 
--- 1. Daily & Admin Puzzles Table (Connect 5 & 21 Things)
+-- 1. Daily & Admin Puzzles Table (All 9 SOL GaMES Countdown Titles)
 create table if not exists public.daily_puzzles (
   id uuid primary key default gen_random_uuid(),
-  game_slug text not null check (game_slug in ('21-things', 'connect-5')),
+  game_slug text not null check (game_slug in ('21-things', '17-syllables', '9-rhymes', 'eightfold-echo', '6-pics', 'connect-5', 'four-score', 'move-2', '1-win')),
   puzzle_date date not null,
   puzzle_number integer not null,
   title text not null,
@@ -23,6 +23,9 @@ create table if not exists public.daily_puzzles (
 );
 
 alter table public.daily_puzzles add column if not exists content_hash text;
+alter table public.daily_puzzles drop constraint if exists daily_puzzles_game_slug_check;
+alter table public.daily_puzzles add constraint daily_puzzles_game_slug_check
+  check (game_slug in ('21-things', '17-syllables', '9-rhymes', 'eightfold-echo', '6-pics', 'connect-5', 'four-score', 'move-2', '1-win'));
 
 create index if not exists idx_daily_puzzles_slug_date
   on public.daily_puzzles (game_slug, puzzle_date desc);
