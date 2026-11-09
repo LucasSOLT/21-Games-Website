@@ -1,0 +1,14 @@
+{
+  "redirects": [
+    {
+      "source": "/solgames",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/solgames/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    }
+  ]
+}

@@ -921,7 +921,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       ...rowEmojis,
       typeof window !== "undefined"
         ? window.location.href
-        : "https://www.solworld.ai/solgames/games/connect-5",
+        : "https://21games.ai/games/connect-5",
     ].join("\n");
 
     try {

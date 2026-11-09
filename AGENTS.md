@@ -8,8 +8,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## 1. Ownership & Deployment Architecture
 - **Source Repository**: `gerardrickjardin/21-Games-Website` (`origin/main`)
-- **Live URL — `https://www.solworld.ai/solgames/`**: served from the Static Host Repository `gerardrickjardin/SOL-World` (`solgames/`, `dist/solgames/`, and `public/solgames/` subdirectories; also reachable at `https://sol-world.vercel.app/solgames/`), built with `basePath` = `/solgames`. Changes only go live after `npm run deploy:solworld` + committing and pushing **both** repos.
-- **Root build (`basePath` = `""`)**: plain `npm run build` builds the site for a domain root. It is not the live site; `21games.ai` is not attached to any Vercel project.
+- **Primary Live URL — `https://21games.ai`**: served by its own standalone Vercel project (`21-games-website` / `sol-games`) deploying directly from `gerardrickjardin/21-Games-Website` (`origin/main`) with `npm run build` (root `basePath` = `""`). Decoupled from `SOL-World` so commits to `SOL-World` can never overwrite or revert `21games.ai`.
+- **Legacy Subpath Redirects (`https://www.solworld.ai/solgames/*`)**: `SOL-World/vercel.json` permanently redirects `/solgames` and `/solgames/:path*` (`308`) to `https://21games.ai` and `https://21games.ai/:path*`. `21-Games-Website/vercel.json` also permanently redirects `/solgames` and `/solgames/:path*` to `/` and `/:path*` on `21games.ai`.
 - **Co-Developers**:
   - **Lucas Huff** (`@LucasSOLT`, `233151608+LucasSOLT@users.noreply.github.com`)
   - **Gerard Rick Jardin** (`@gerardrickjardin`, `gerard@soltheory.com`, `gerardrickjardin@gmail.com`)
@@ -17,25 +17,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ---
 
 ## 2. Mandatory Co-Editing & Build Sync Workflow
-1. **Pre-Edit Pull (Both Repos)**:
+1. **Pre-Edit Pull**:
    ```bash
    git fetch origin && git pull --rebase origin main
-   cd ../SOL-World && git fetch origin && git pull --rebase origin main
    ```
 2. **Source of Truth & `basePath` Configuration**:
    - `next.config.ts` uses `output: 'export'` and `basePath: process.env.NEXT_PUBLIC_BASE_PATH ?? ''`.
-   - `npm run build` → root build (`basePath` = `""`, not the live site). `npm run build:solworld` → `/solgames` build (what goes live at `https://www.solworld.ai/solgames/`).
-   - Never hardcode `/solgames/...` in `src/`. For files in `public/` referenced from plain `<img>`/`<a>` tags use `assetPath('/file.png')` from `src/lib/asset-path.ts`; `next/link` hrefs get the basePath automatically.
-   - Always edit Next.js source files here in `21-Games-Website/src/` (never edit compiled files inside `../SOL-World/solgames/` directly).
-3. **Syncing Static Export to `SOL-World/solgames/`**:
-   - Run:
-     ```bash
-     npm run deploy:solworld
-     ```
-     This runs `npm run build:solworld` (outputting to `out/` with `basePath: '/solgames'`) and syncs `out/` cleanly into `../SOL-World/solgames/`, `../SOL-World/dist/solgames/`, and `../SOL-World/public/solgames/`.
-   - If you added any new `.png` files in `public/`, remember that `SOL-World/.gitignore` ignores `*.png` by default—run `git add -f solgames/<new-file>.png dist/solgames/<new-file>.png public/solgames/<new-file>.png` inside `../SOL-World`.
-4. **Commit & Push Both Repositories**:
-   - Commit and push your source changes to `21-Games-Website` (`origin/main`) AND commit/push the updated static export in `../SOL-World` (`origin/main`) so the source repo and live `/solgames/` deployment never drift apart.
+   - `npm run build` → root build (`basePath` = `""`), which is the primary production build deployed to `https://21games.ai`.
+   - `npm run build:solworld` / `npm run deploy:solworld` → legacy `/solgames` basePath build if ever needed for local subpath testing or static archive sync.
+   - Always edit Next.js source files here in `21-Games-Website/src/`.
+3. **Commit & Push**:
+   - Verify `npm run lint` and `npm run build` pass cleanly, then commit and push to `21-Games-Website` (`origin/main`). Vercel automatically builds and deploys `https://21games.ai`.
 
 ---
 

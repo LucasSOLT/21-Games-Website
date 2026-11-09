@@ -1,7 +1,7 @@
 # Project: 21 Games (SOL GaMES) Platform Modernization
 
 ## Architecture
-- **Framework & Deployment**: Next.js 16 App Router, React 19, Tailwind CSS. Static export architecture (`output: 'export'`), basePath `/solgames` for production deployment on `https://www.solworld.ai/solgames/` (and local root build for domain roots).
+- **Framework & Deployment**: Next.js 16 App Router, React 19, Tailwind CSS. Static export architecture (`output: 'export'`), root `basePath` (`""`) for standalone production deployment on `https://21games.ai` from `gerardrickjardin/21-Games-Website` (with legacy `/solgames` subpath redirects).
 - **Backend & Persistence**: Supabase PostgreSQL database via `@supabase/supabase-js`. Client-side authentication and direct Supabase database interactions with Postgres RLS policies.
 - **State Management**: React state + `localStorage` client caching + global event bus (`"solgames:puzzles-updated"`) synchronized with Supabase tables (`public.daily_puzzles`, `public.user_profiles`, `public.twenty_one_responses`, `public.twenty_one_boards`).
 
@@ -57,7 +57,7 @@
 | M3-B1 | Resilient Infrastructure & Seeded PRNG | R3 (`<GameErrorBoundary>`, `<ImageWithFallback>`, `seeded-random.ts` + payload validation) | None | DONE |
 | M4-B1 | Admin Puzzle Studio Persistence & Permissions | R4 (GM roles with Luke, Admin future-only, confirmation modal, Supabase sync & board re-sync) | M2-B1, M3-B1 | DONE |
 | M17 | 17 Syllables Playable Countdown Game | Pre-game splash screen, 66-day haiku bank, playable drag/tap UI, route, custom share | M1-B1, M2-B1, M3-B1 | DONE |
-| M5-B1 | Full Verification & Live Deployment Sync | R5 (Lint, build, unit test suites, deploy:solworld, git push both repos, halt for permission) | M1-B1, M2-B1, M3-B1, M4-B1, M17 | IN_PROGRESS |
+| M5-B1 | Full Verification & Live Deployment Sync | R5 (Lint, build, unit test suites, deploy:solworld, git push both repos, halt for permission) | M1-B1, M2-B1, M3-B1, M4-B1, M17 | DONE |
 
 ## Interface Contracts
 

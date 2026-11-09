@@ -18,7 +18,7 @@ const robotoSlab = Roboto_Slab({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.solworld.ai/solgames"),
+  metadataBase: new URL("https://21games.ai"),
   title: {
     default: "21 Games (SOL GaMES) · Smart Games. Daily Rituals.",
     template: "%s · 21 Games",
@@ -54,7 +54,7 @@ export const metadata: Metadata = {
     title: "21 Games (SOL GaMES) · Smart Games. Daily Rituals.",
     description:
       "Daily gratitude, word-chain, and logic puzzle games by SOL Theory. Play Connect 5, 21 Things, 9 Rhymes, and daily brain puzzles.",
-    url: "https://www.solworld.ai/solgames/",
+    url: "https://21games.ai/",
     siteName: "21 Games (SOL GaMES)",
     images: [
       {

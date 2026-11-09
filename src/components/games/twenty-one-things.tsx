@@ -756,7 +756,7 @@ function TwentyOneThingsBoardView({
       reflectionNote ? `💬 "${reflectionNote}"` : "",
       typeof window !== "undefined"
         ? window.location.href
-        : "https://www.solworld.ai/solgames/games/21-things",
+        : "https://21games.ai/games/21-things",
     ]
       .filter(Boolean)
       .join("\n");

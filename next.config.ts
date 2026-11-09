@@ -1,9 +1,8 @@
 import type { NextConfig } from "next";
 
-// Live URL: https://www.solworld.ai/solgames/ (also https://sol-world.vercel.app/solgames/).
-// The static export is copied into the SOL-World repo and served there -> basePath "/solgames".
-// `npm run deploy:solworld` sets NEXT_PUBLIC_BASE_PATH=/solgames; a plain
-// `npm run build` builds for a domain root (basePath "") and is not the live site.
+// Primary Live URL: https://21games.ai (standalone Vercel project deploying from
+// `gerardrickjardin/21-Games-Website` with `npm run build` -> root `basePath: ""`).
+// Legacy / SOL-World subpath build: `npm run deploy:solworld` sets NEXT_PUBLIC_BASE_PATH=/solgames.
 // In local development (`next dev`), always serve at root (`basePath: ""`) and rewrite
 // `/solgames` and `/solgames/:path*` so both `http://localhost:9002` and
 // `http://localhost:9002/solgames` work seamlessly without 404ing.

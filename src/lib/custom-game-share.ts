@@ -43,13 +43,13 @@ export function generateShortGameId(prefix = "21t"): string {
 
 /**
  * Builds the canonical short share URL for a custom 21 Things board.
- * Format: https://www.solworld.ai/solgames/games/21-things?b=<id>
+ * Format: https://21games.ai/games/21-things?b=<id>
  */
 export function buildBoardShareUrl(board: { id: string }): string {
   const origin =
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
-      : "https://www.solworld.ai";
+      : "https://21games.ai";
   const path = assetPath("/games/21-things");
   return `${origin}${path}?b=${encodeURIComponent(board.id)}`;
 }
@@ -63,13 +63,13 @@ export function buildBoardPlayHref(board: { id: string }): string {
 
 /**
  * Builds the canonical short share URL for a custom 17 Syllables haiku.
- * Format: https://www.solworld.ai/solgames/games/17-syllables?b=<id>
+ * Format: https://21games.ai/games/17-syllables?b=<id>
  */
 export function build17SyllablesShareUrl(haiku: { id: string }): string {
   const origin =
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
-      : "https://www.solworld.ai";
+      : "https://21games.ai";
   const path = assetPath("/games/17-syllables");
   return `${origin}${path}?b=${encodeURIComponent(haiku.id)}`;
 }

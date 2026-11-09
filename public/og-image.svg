@@ -154,6 +154,6 @@
   <!-- Bottom URL Pill -->
   <g transform="translate(930, 560)">
     <rect x="0" y="0" width="210" height="28" rx="6" fill="#FFFFFF" stroke="#171717" stroke-width="1.5" />
-    <text x="105" y="19" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">solworld.ai/solgames</text>
+    <text x="105" y="19" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="700" fill="#171717" text-anchor="middle">21games.ai</text>
   </g>
 </svg>

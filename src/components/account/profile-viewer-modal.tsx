@@ -120,7 +120,7 @@ export function buildBoardShareUrl(board: TwentyOneThingsBoard): string {
   const origin =
     typeof window !== "undefined" && window.location?.origin
       ? window.location.origin
-      : "https://www.solworld.ai";
+      : "https://21games.ai";
   const path = assetPath("/games/21-things");
   return `${origin}${path}?b=${encodeURIComponent(board.id)}`;
 }

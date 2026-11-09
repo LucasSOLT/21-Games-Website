@@ -603,6 +603,11 @@ export function SeventeenSyllablesGame() {
         ? "⭐"
         : "✨";
 
+    const shareUrl =
+      typeof window !== "undefined" && window.location?.href
+        ? window.location.href
+        : "https://21games.ai/games/17-syllables";
+
     const text = [
       `17 Syllables #${puzzle.puzzleNumber || "Daily"}`,
       `${starStr} (${currentStars.toFixed(1)}/3)`,
@@ -610,13 +615,12 @@ export function SeventeenSyllablesGame() {
       "🟩🟩🟩",
       "🟩🟩🟩🟩",
       "🟩🟩🟩",
-      `Play: https://www.solworld.ai/solgames/games/17-syllables`,
     ].join("\n");
 
     void shareTextResult({
       title: "17 Syllables Victory",
       text,
-      url: "https://www.solworld.ai/solgames/games/17-syllables",
+      url: shareUrl,
     });
   }, [currentStars, elapsedSeconds, puzzle.puzzleNumber, wordHintsUsed, tileHintsUsed]);
 
