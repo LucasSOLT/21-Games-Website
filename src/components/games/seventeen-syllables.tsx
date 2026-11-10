@@ -11,15 +11,19 @@ import {
   type HaikuLineInfo,
 } from "@/data/puzzles/17-syllables";
 import {
-  get17SyllablesPuzzleForDate,
   getLocalDateKey,
+  get17SyllablesPuzzleForDate,
 } from "@/lib/daily-engine";
 import {
   get17SyllablesProgress,
   save17SyllablesProgress,
   record17SyllablesWin,
   isDateCompleted,
+  getAdmin17SyllablesOverrides,
+  fetchRemote17SyllablesOverride,
+  clear17SyllablesProgress,
 } from "@/lib/game-storage";
+import { computePuzzleContentHash } from "@/lib/seeded-random";
 import {
   generateShortGameId,
   build17SyllablesShareUrl,
@@ -76,7 +80,8 @@ function createInitialGameState(
   structuredLines: HaikuLineInfo[],
   dateKey: string,
   puzzleId: string,
-  isCustomMode: boolean
+  isCustomMode: boolean,
+  currentHash?: string
 ) {
   const newSlots: Record<string, SlotState> = {};
   const initialChunks: TrayChunk[] = [];
@@ -118,33 +123,38 @@ function createInitialGameState(
   if (!isCustomMode && typeof window !== "undefined") {
     const saved = get17SyllablesProgress(dateKey, puzzleId);
     if (saved) {
-      const reconstructedTray = [...shuffled];
-      const updatedSlots = { ...newSlots };
+      // Invalidate saved progress if puzzle content hash was updated remotely
+      if (saved.puzzleHash && currentHash && saved.puzzleHash !== currentHash) {
+        clear17SyllablesProgress(dateKey);
+      } else {
+        const reconstructedTray = [...shuffled];
+        const updatedSlots = { ...newSlots };
 
-      Object.entries(saved.placedChunks).forEach(([k, placedText]) => {
-        if (placedText && updatedSlots[k]) {
-          const trayIdx = reconstructedTray.findIndex((c) => c.text === placedText);
-          if (trayIdx !== -1) {
-            const matchedChunk = reconstructedTray[trayIdx];
-            reconstructedTray.splice(trayIdx, 1);
-            updatedSlots[k] = {
-              ...updatedSlots[k],
-              placedChunk: placedText,
-              placedChunkId: matchedChunk.id,
-              isLocked: Boolean(saved.lockedChunks[k]),
-            };
+        Object.entries(saved.placedChunks).forEach(([k, placedText]) => {
+          if (placedText && updatedSlots[k]) {
+            const trayIdx = reconstructedTray.findIndex((c) => c.text === placedText);
+            if (trayIdx !== -1) {
+              const matchedChunk = reconstructedTray[trayIdx];
+              reconstructedTray.splice(trayIdx, 1);
+              updatedSlots[k] = {
+                ...updatedSlots[k],
+                placedChunk: placedText,
+                placedChunkId: matchedChunk.id,
+                isLocked: Boolean(saved.lockedChunks[k]),
+              };
+            }
           }
-        }
-      });
+        });
 
-      return {
-        slots: updatedSlots,
-        trayChunks: reconstructedTray,
-        wordHintsUsed: saved.wordHintsUsed || 0,
-        tileHintsUsed: saved.tileHintsUsed || 0,
-        elapsedSeconds: saved.elapsedSeconds || 0,
-        isGameWon: saved.status === "won",
-      };
+        return {
+          slots: updatedSlots,
+          trayChunks: reconstructedTray,
+          wordHintsUsed: saved.wordHintsUsed || 0,
+          tileHintsUsed: saved.tileHintsUsed || 0,
+          elapsedSeconds: saved.elapsedSeconds || 0,
+          isGameWon: saved.status === "won",
+        };
+      }
     }
   }
 
@@ -204,8 +214,10 @@ function resolvePuzzle(
     }
   }
 
+  const overrides =
+    typeof window !== "undefined" ? getAdmin17SyllablesOverrides() : undefined;
   return {
-    puzzle: get17SyllablesPuzzleForDate(todayKey),
+    puzzle: get17SyllablesPuzzleForDate(todayKey, overrides),
     isCustomMode: false,
   };
 }
@@ -217,9 +229,19 @@ export function SeventeenSyllablesGame() {
 
   const todayKey = useMemo(() => getLocalDateKey(), []);
 
-  const { puzzle, isCustomMode } = useMemo(
+  const resolvedInitial = useMemo(
     () => resolvePuzzle(customParam, todayKey),
     [customParam, todayKey]
+  );
+
+  const [puzzle, setPuzzle] = useState<SeventeenSyllablesPuzzle>(
+    resolvedInitial.puzzle
+  );
+  const isCustomMode = resolvedInitial.isCustomMode;
+
+  const currentContentHash = useMemo(
+    () => computePuzzleContentHash(puzzle),
+    [puzzle]
   );
 
   // Structured lines definition
@@ -229,8 +251,15 @@ export function SeventeenSyllablesGame() {
 
   // Initial game state (computed once per puzzle without setState in effect)
   const initialData = useMemo(
-    () => createInitialGameState(structuredLines, puzzle.dateKey, puzzle.id, isCustomMode),
-    [structuredLines, puzzle.dateKey, puzzle.id, isCustomMode]
+    () =>
+      createInitialGameState(
+        structuredLines,
+        puzzle.dateKey,
+        puzzle.id,
+        isCustomMode,
+        currentContentHash
+      ),
+    [structuredLines, puzzle.dateKey, puzzle.id, isCustomMode, currentContentHash]
   );
 
   // Game state
@@ -262,6 +291,93 @@ export function SeventeenSyllablesGame() {
   const [creatorLine3, setCreatorLine3] = useState("");
   const [creatorErrors, setCreatorErrors] = useState<string[]>([]);
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
+
+  // Real-Time Propagation: update board when puzzle is modified by Game Master
+  const applyRemotePuzzleIfChanged = useCallback(
+    (remotePuzzle: SeventeenSyllablesPuzzle) => {
+      if (isCustomMode) return;
+      const remoteHash = computePuzzleContentHash(remotePuzzle);
+      const currentHash = computePuzzleContentHash(puzzle);
+      const linesChanged =
+        remotePuzzle.lines.join("|") !== puzzle.lines.join("|");
+      const themeChanged = remotePuzzle.theme !== puzzle.theme;
+
+      if (remoteHash !== currentHash || linesChanged || themeChanged) {
+        clear17SyllablesProgress(todayKey);
+        const nextStructured = buildStructuredHaikuLines(remotePuzzle.lines);
+        const base = createInitialGameState(
+          nextStructured,
+          todayKey,
+          remotePuzzle.id,
+          false,
+          remoteHash
+        );
+        setPuzzle(remotePuzzle);
+        setSlots(base.slots);
+        setTrayChunks(base.trayChunks);
+        setSelectedTrayChunkId(null);
+        setWordHintsUsed(0);
+        setTileHintsUsed(0);
+        setElapsedSeconds(0);
+        setIsTimerRunning(false);
+        setIsGameWon(false);
+        setVictoryModalOpen(false);
+
+        save17SyllablesProgress({
+          dateKey: todayKey,
+          puzzleId: remotePuzzle.id,
+          placedChunks: {},
+          lockedChunks: {},
+          remainingTrayChunks: base.trayChunks.map((c) => c.text),
+          wordHintsUsed: 0,
+          tileHintsUsed: 0,
+          stars: 3.0,
+          elapsedSeconds: 0,
+          status: "playing",
+          puzzleHash: remoteHash,
+        });
+      }
+    },
+    [isCustomMode, puzzle, todayKey]
+  );
+
+  // Fetch remote Supabase daily_puzzles override on mount and listen to live updates
+  useEffect(() => {
+    if (isCustomMode) return;
+    let active = true;
+
+    void fetchRemote17SyllablesOverride(todayKey).then((remotePuzzle) => {
+      if (!active || !remotePuzzle) return;
+      applyRemotePuzzleIfChanged(remotePuzzle);
+    });
+
+    const handlePuzzlesUpdated = (e: Event) => {
+      if (!active) return;
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.gameSlug && detail.gameSlug !== "17-syllables") return;
+      if (!detail || !detail.dateKey || detail.dateKey === todayKey) {
+        if (detail?.puzzle && detail.dateKey === todayKey) {
+          applyRemotePuzzleIfChanged(detail.puzzle as SeventeenSyllablesPuzzle);
+          return;
+        }
+        const local = getAdmin17SyllablesOverrides()[todayKey];
+        if (local) {
+          applyRemotePuzzleIfChanged(local);
+        } else {
+          void fetchRemote17SyllablesOverride(todayKey).then((remotePuzzle) => {
+            if (!active || !remotePuzzle) return;
+            applyRemotePuzzleIfChanged(remotePuzzle);
+          });
+        }
+      }
+    };
+
+    window.addEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
+    };
+  }, [isCustomMode, todayKey, applyRemotePuzzleIfChanged]);
 
   // Timer effect
   useEffect(() => {
@@ -301,6 +417,7 @@ export function SeventeenSyllablesGame() {
       stars: currentStars,
       elapsedSeconds,
       status: isGameWon ? "won" : "playing",
+      puzzleHash: currentContentHash,
     });
   }, [
     slots,
@@ -314,6 +431,7 @@ export function SeventeenSyllablesGame() {
     splashDismissed,
     puzzle.dateKey,
     puzzle.id,
+    currentContentHash,
   ]);
 
   // Full-Board Check Routine

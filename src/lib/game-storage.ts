@@ -3,6 +3,7 @@ import type {
   TwentyOneJourney,
   TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
+import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import type { PlayableGameSlug } from "@/lib/games-config";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
@@ -11,6 +12,10 @@ import {
   checkMultipleFields,
 } from "@/lib/moderation";
 import { computePuzzleContentHash } from "@/lib/seeded-random";
+import {
+  classifyDiagnosticError,
+  type DiagnosticReport,
+} from "@/lib/diagnostic-errors";
 
 const STORAGE_PREFIX = "solgames_v1";
 
@@ -890,9 +895,13 @@ export interface SaveAdminOverrideResult {
   ok: boolean;
   remotePersisted: boolean;
   error?: string;
+  rawError?: unknown;
+  diagnosticReport?: DiagnosticReport;
 }
 
 let puzzlesStoreRevision = 0;
+let crossTabSyncSetup = false;
+let broadcastChannelInstance: BroadcastChannel | null = null;
 
 export function getPuzzlesStoreSnapshot(): number {
   return puzzlesStoreRevision;
@@ -912,9 +921,235 @@ export function subscribeToPuzzlesUpdated(callback: () => void): () => void {
   };
 }
 
+export function broadcastPuzzleUpdate(detail: Record<string, unknown>): void {
+  puzzlesStoreRevision += 1;
+
+  if (typeof window === "undefined") return;
+
+  // 1. Post to BroadcastChannel for other open tabs
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      if (!broadcastChannelInstance) {
+        broadcastChannelInstance = new BroadcastChannel("solgames_puzzles_channel");
+      }
+      broadcastChannelInstance.postMessage(detail);
+    } catch {
+      // Ignore BroadcastChannel errors
+    }
+  }
+
+  // 2. Storage fallback for tabs/browsers without BroadcastChannel
+  try {
+    safeWriteJson(`${STORAGE_PREFIX}_puzzles_broadcast_ping`, {
+      ...detail,
+      _broadcastTimestamp: Date.now(),
+    });
+  } catch {
+    // Ignore storage quota errors
+  }
+
+  // 3. Local DOM CustomEvent for current tab
+  try {
+    window.dispatchEvent(
+      new CustomEvent("solgames:puzzles-updated", { detail })
+    );
+  } catch {
+    // Ignore DOM event errors
+  }
+}
+
+function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
+  if (!detail) return;
+  puzzlesStoreRevision += 1;
+
+  // If this update contained puzzle data, ensure local storage has it
+  if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && detail.puzzle) {
+    const current = getAdminConnect5Overrides();
+    current[detail.dateKey] = detail.puzzle as Connect5Puzzle;
+    safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
+  } else if (detail.gameSlug === "21-things" && typeof detail.dateKey === "string" && detail.board) {
+    const current = getAdmin21ThingsOverrides();
+    current[detail.dateKey] = detail.board as TwentyOneThingsBoard;
+    safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
+  } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && detail.puzzle) {
+    const current = getAdmin17SyllablesOverrides();
+    current[detail.dateKey] = detail.puzzle as SeventeenSyllablesPuzzle;
+    safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+  }
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent("solgames:puzzles-updated", { detail })
+    );
+  } catch {
+    // Ignore DOM event errors
+  }
+}
+
+function setupCrossTabSync(): void {
+  if (typeof window === "undefined" || crossTabSyncSetup) return;
+  crossTabSyncSetup = true;
+
+  if (typeof BroadcastChannel !== "undefined") {
+    try {
+      broadcastChannelInstance = new BroadcastChannel("solgames_puzzles_channel");
+      broadcastChannelInstance.onmessage = (event) => {
+        handleReceivedPuzzleUpdate(event.data);
+      };
+    } catch {
+      // Fall back to storage event
+    }
+  }
+
+  window.addEventListener("storage", (e) => {
+    if (e.key === `${STORAGE_PREFIX}_puzzles_broadcast_ping` && e.newValue) {
+      try {
+        const data = JSON.parse(e.newValue);
+        handleReceivedPuzzleUpdate(data);
+      } catch {
+        // Ignore JSON parse error
+      }
+    }
+  });
+}
+
+let realtimeChannelInitialized = false;
+let realtimeChannelUnsubscribe: (() => void) | null = null;
+
+export function initRealtimePuzzleSync(): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  if (realtimeChannelInitialized && realtimeChannelUnsubscribe) {
+    return realtimeChannelUnsubscribe;
+  }
+
+  // 1. Setup BroadcastChannel and storage listeners for cross-tab communication
+  setupCrossTabSync();
+
+  // 2. Setup focus & visibility change listeners (throttled to at most once every 10 seconds)
+  let lastVisibilitySync = 0;
+  const handleWakeupSync = () => {
+    const now = Date.now();
+    if (now - lastVisibilitySync < 10000) return;
+    lastVisibilitySync = now;
+    void syncAllRemoteDailyPuzzles();
+  };
+
+  window.addEventListener("focus", handleWakeupSync);
+  const handleVisibility = () => {
+    if (document.visibilityState === "visible") {
+      handleWakeupSync();
+    }
+  };
+  document.addEventListener("visibilitychange", handleVisibility);
+
+  // 3. Setup Supabase Realtime channel if Supabase is configured
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const channel = supabase
+          .channel("daily_puzzles_live")
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "daily_puzzles",
+            },
+            (payload) => {
+              const newRow = payload.new as {
+                game_slug?: string;
+                puzzle_date?: string;
+                payload?: unknown;
+              } | null;
+
+              if (newRow && newRow.game_slug && newRow.puzzle_date && newRow.payload) {
+                const dateKey = String(newRow.puzzle_date);
+                if (newRow.game_slug === "connect-5") {
+                  const puzzle = newRow.payload as Connect5Puzzle;
+                  if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
+                    const current = getAdminConnect5Overrides();
+                    current[dateKey] = puzzle;
+                    safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
+                    broadcastPuzzleUpdate({
+                      gameSlug: "connect-5",
+                      dateKey,
+                      hash: computePuzzleContentHash(puzzle),
+                      puzzle,
+                      source: "realtime",
+                    });
+                  }
+                } else if (newRow.game_slug === "21-things") {
+                  const board = newRow.payload as TwentyOneThingsBoard;
+                  if (Array.isArray(board.items) && board.items.length === 21) {
+                    const current = getAdmin21ThingsOverrides();
+                    current[dateKey] = board;
+                    safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
+                    broadcastPuzzleUpdate({
+                      gameSlug: "21-things",
+                      dateKey,
+                      hash: computePuzzleContentHash(board),
+                      board,
+                      source: "realtime",
+                    });
+                  }
+                } else if (newRow.game_slug === "17-syllables") {
+                  const puzzle = newRow.payload as SeventeenSyllablesPuzzle;
+                  if (Array.isArray(puzzle.lines) && puzzle.lines.length === 3) {
+                    const current = getAdmin17SyllablesOverrides();
+                    current[dateKey] = puzzle;
+                    safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+                    broadcastPuzzleUpdate({
+                      gameSlug: "17-syllables",
+                      dateKey,
+                      hash: computePuzzleContentHash(puzzle),
+                      puzzle,
+                      source: "realtime",
+                    });
+                  }
+                }
+              } else {
+                // If row payload missing or event was DELETE, trigger full resync
+                void syncAllRemoteDailyPuzzles();
+              }
+            }
+          )
+          .subscribe();
+
+        realtimeChannelInitialized = true;
+        realtimeChannelUnsubscribe = () => {
+          try {
+            void supabase.removeChannel(channel);
+          } catch {
+            // Ignore channel cleanup errors
+          }
+          window.removeEventListener("focus", handleWakeupSync);
+          document.removeEventListener("visibilitychange", handleVisibility);
+          realtimeChannelInitialized = false;
+          realtimeChannelUnsubscribe = null;
+        };
+        return realtimeChannelUnsubscribe;
+      } catch {
+        // Fallback to local polling/focus sync
+      }
+    }
+  }
+
+  realtimeChannelInitialized = true;
+  realtimeChannelUnsubscribe = () => {
+    window.removeEventListener("focus", handleWakeupSync);
+    document.removeEventListener("visibilitychange", handleVisibility);
+    realtimeChannelInitialized = false;
+    realtimeChannelUnsubscribe = null;
+  };
+  return realtimeChannelUnsubscribe;
+}
+
 /**
- * Fetches all daily puzzles from Supabase `public.daily_puzzles` (Connect 5 & 21 Things),
- * updates local storage override caches, and dispatches "solgames:puzzles-updated".
+ * Fetches all daily puzzles from Supabase `public.daily_puzzles` (Connect 5, 21 Things, 17 Syllables),
+ * updates local storage override caches, and dispatches "solgames:puzzles-updated" via BroadcastChannel.
  * This ensures that puzzle edits made by Game Masters on any device immediately
  * synchronize across all browser sessions upon page load or refresh.
  */
@@ -934,8 +1169,10 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
 
     const c5Overrides = getAdminConnect5Overrides();
     const t21Overrides = getAdmin21ThingsOverrides();
+    const s17Overrides = getAdmin17SyllablesOverrides();
     let c5Changed = false;
     let t21Changed = false;
+    let s17Changed = false;
 
     const puzzleHashes: Record<string, string> = {};
 
@@ -957,6 +1194,13 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
           t21Changed = true;
           puzzleHashes[`21-things:${dateKey}`] = computePuzzleContentHash(board);
         }
+      } else if (row.game_slug === "17-syllables" && row.payload) {
+        const puzzle = row.payload as SeventeenSyllablesPuzzle;
+        if (Array.isArray(puzzle.lines) && puzzle.lines.length === 3) {
+          s17Overrides[dateKey] = puzzle;
+          s17Changed = true;
+          puzzleHashes[`17-syllables:${dateKey}`] = computePuzzleContentHash(puzzle);
+        }
       }
     }
 
@@ -966,22 +1210,18 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
     if (t21Changed) {
       safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, t21Overrides);
     }
+    if (s17Changed) {
+      safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, s17Overrides);
+    }
 
-    if ((c5Changed || t21Changed) && typeof window !== "undefined") {
-      try {
-        window.dispatchEvent(
-          new CustomEvent("solgames:puzzles-updated", {
-            detail: {
-              source: "syncAllRemoteDailyPuzzles",
-              c5Overrides,
-              t21Overrides,
-              hashes: puzzleHashes,
-            },
-          })
-        );
-      } catch {
-        // Ignore DOM event errors
-      }
+    if (c5Changed || t21Changed || s17Changed) {
+      broadcastPuzzleUpdate({
+        source: "syncAllRemoteDailyPuzzles",
+        c5Overrides,
+        t21Overrides,
+        s17Overrides,
+        hashes: puzzleHashes,
+      });
     }
   } catch {
     // Non-fatal sync fallback
@@ -1000,6 +1240,8 @@ export async function saveAdminConnect5Override(
   const hash = computePuzzleContentHash(puzzle);
   let remotePersisted = false;
   let remoteError: string | undefined;
+  let rawError: unknown;
+  let diagnosticReport: DiagnosticReport | undefined;
 
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
@@ -1036,32 +1278,43 @@ export async function saveAdminConnect5Override(
           error = fallback.error;
         }
         if (error) {
+          rawError = error;
           remoteError = error.message;
+          diagnosticReport = classifyDiagnosticError(error, {
+            gameSlug: "connect-5",
+            targetDate: dateKey,
+            action: "save",
+            puzzlePayload: puzzle,
+          });
         } else {
           remotePersisted = true;
         }
       } catch (err: unknown) {
+        rawError = err;
         remoteError = err instanceof Error ? err.message : "Failed to persist puzzle to Supabase.";
+        diagnosticReport = classifyDiagnosticError(err, {
+          gameSlug: "connect-5",
+          targetDate: dateKey,
+          action: "save",
+          puzzlePayload: puzzle,
+        });
       }
     }
   }
 
-  if (typeof window !== "undefined") {
-    try {
-      window.dispatchEvent(
-        new CustomEvent("solgames:puzzles-updated", {
-          detail: { gameSlug: "connect-5", dateKey, hash, puzzle },
-        })
-      );
-    } catch {
-      // Ignore DOM event errors
-    }
-  }
+  broadcastPuzzleUpdate({
+    gameSlug: "connect-5",
+    dateKey,
+    hash,
+    puzzle,
+  });
 
   return {
     ok: true,
     remotePersisted,
     error: remoteError,
+    rawError,
+    diagnosticReport,
   };
 }
 
@@ -1117,6 +1370,8 @@ export async function saveAdmin21ThingsOverride(
   const hash = computePuzzleContentHash(board);
   let remotePersisted = false;
   let remoteError: string | undefined;
+  let rawError: unknown;
+  let diagnosticReport: DiagnosticReport | undefined;
 
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
@@ -1153,33 +1408,179 @@ export async function saveAdmin21ThingsOverride(
           error = fallback.error;
         }
         if (error) {
+          rawError = error;
           remoteError = error.message;
+          diagnosticReport = classifyDiagnosticError(error, {
+            gameSlug: "21-things",
+            targetDate: dateKey,
+            action: "save",
+            puzzlePayload: board,
+          });
         } else {
           remotePersisted = true;
         }
       } catch (err: unknown) {
+        rawError = err;
         remoteError = err instanceof Error ? err.message : "Failed to persist board to Supabase.";
+        diagnosticReport = classifyDiagnosticError(err, {
+          gameSlug: "21-things",
+          targetDate: dateKey,
+          action: "save",
+          puzzlePayload: board,
+        });
       }
     }
   }
 
-  if (typeof window !== "undefined") {
-    try {
-      window.dispatchEvent(
-        new CustomEvent("solgames:puzzles-updated", {
-          detail: { gameSlug: "21-things", dateKey, hash, board },
-        })
-      );
-    } catch {
-      // Ignore DOM event errors
-    }
-  }
+  broadcastPuzzleUpdate({
+    gameSlug: "21-things",
+    dateKey,
+    hash,
+    board,
+  });
 
   return {
     ok: true,
     remotePersisted,
     error: remoteError,
+    rawError,
+    diagnosticReport,
   };
 }
 
 export const saveAdmin21BoardOverride = saveAdmin21ThingsOverride;
+
+export function getAdmin17SyllablesOverrides(): Record<
+  string,
+  SeventeenSyllablesPuzzle
+> {
+  return safeReadJson<Record<string, SeventeenSyllablesPuzzle>>(
+    `${STORAGE_PREFIX}_admin_17s_overrides`,
+    {}
+  );
+}
+
+export async function fetchRemote17SyllablesOverride(
+  dateKey: string
+): Promise<SeventeenSyllablesPuzzle | null> {
+  if (!isSupabaseConfigured) return null;
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from("daily_puzzles")
+      .select("payload")
+      .eq("game_slug", "17-syllables")
+      .eq("puzzle_date", dateKey)
+      .maybeSingle();
+
+    if (!error && data && data.payload) {
+      const puzzle = data.payload as SeventeenSyllablesPuzzle;
+      if (
+        Array.isArray(puzzle.lines) &&
+        puzzle.lines.length === 3 &&
+        Array.isArray(puzzle.chunks) &&
+        puzzle.chunks.length > 0
+      ) {
+        const current = getAdmin17SyllablesOverrides();
+        current[dateKey] = puzzle;
+        safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+        return puzzle;
+      }
+    }
+  } catch {
+    // Fallback to local overrides
+  }
+  return null;
+}
+
+export async function saveAdmin17SyllablesOverride(
+  dateKey: string,
+  puzzle: SeventeenSyllablesPuzzle
+): Promise<SaveAdminOverrideResult> {
+  const current = getAdmin17SyllablesOverrides();
+  current[dateKey] = puzzle;
+  safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+  clear17SyllablesProgress(dateKey);
+
+  const hash = computePuzzleContentHash(puzzle);
+  let remotePersisted = false;
+  let remoteError: string | undefined;
+  let rawError: unknown;
+  let diagnosticReport: DiagnosticReport | undefined;
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        let { error } = await supabase.from("daily_puzzles").upsert(
+          {
+            game_slug: "17-syllables",
+            puzzle_date: dateKey,
+            puzzle_number: puzzle.puzzleNumber,
+            title: puzzle.theme || `17 Syllables #${puzzle.puzzleNumber}`,
+            author: puzzle.author || "SOL Theory",
+            editor: "Daily Editorial",
+            content_hash: hash,
+            payload: puzzle,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "game_slug,puzzle_date" }
+        );
+        if (error && error.message && error.message.toLowerCase().includes("content_hash")) {
+          const fallback = await supabase.from("daily_puzzles").upsert(
+            {
+              game_slug: "17-syllables",
+              puzzle_date: dateKey,
+              puzzle_number: puzzle.puzzleNumber,
+              title: puzzle.theme || `17 Syllables #${puzzle.puzzleNumber}`,
+              author: puzzle.author || "SOL Theory",
+              editor: "Daily Editorial",
+              payload: puzzle,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "game_slug,puzzle_date" }
+          );
+          error = fallback.error;
+        }
+        if (error) {
+          rawError = error;
+          remoteError = error.message;
+          diagnosticReport = classifyDiagnosticError(error, {
+            gameSlug: "17-syllables",
+            targetDate: dateKey,
+            action: "save",
+            puzzlePayload: puzzle,
+          });
+        } else {
+          remotePersisted = true;
+        }
+      } catch (err: unknown) {
+        rawError = err;
+        remoteError = err instanceof Error ? err.message : "Failed to persist 17 Syllables puzzle to Supabase.";
+        diagnosticReport = classifyDiagnosticError(err, {
+          gameSlug: "17-syllables",
+          targetDate: dateKey,
+          action: "save",
+          puzzlePayload: puzzle,
+        });
+      }
+    }
+  }
+
+  broadcastPuzzleUpdate({
+    gameSlug: "17-syllables",
+    dateKey,
+    hash,
+    puzzle,
+  });
+
+  return {
+    ok: true,
+    remotePersisted,
+    error: remoteError,
+    rawError,
+    diagnosticReport,
+  };
+}

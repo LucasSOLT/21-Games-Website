@@ -25,7 +25,10 @@ import {
   type UpdateProfileInput,
   type UserProfile,
 } from "@/lib/user-auth";
-import { syncAllRemoteDailyPuzzles } from "@/lib/game-storage";
+import {
+  initRealtimePuzzleSync,
+  syncAllRemoteDailyPuzzles,
+} from "@/lib/game-storage";
 import { ProfileViewerModal } from "@/components/account/profile-viewer-modal";
 
 export type AccountModalTab = "signin" | "signup" | "profile";
@@ -63,8 +66,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let isMounted = true;
 
-    // Bootstrap global daily puzzles from Supabase
+    // Bootstrap global daily puzzles from Supabase and initialize Realtime / cross-tab sync
     void syncAllRemoteDailyPuzzles();
+    const unsubscribeRealtime = initRealtimePuzzleSync();
 
     void initializeAuthSession()
       .then((restored) => {
@@ -84,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       isMounted = false;
+      unsubscribeRealtime();
       unsubscribe();
     };
   }, []);

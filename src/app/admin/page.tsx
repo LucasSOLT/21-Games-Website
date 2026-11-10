@@ -40,19 +40,34 @@ import {
   type TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
 import {
+  countLineSyllables,
+  sliceHaikuIntoChunks,
+  validateHaikuStructure,
+  type SeventeenSyllablesPuzzle,
+} from "@/data/puzzles/17-syllables";
+import {
+  get17SyllablesPuzzleForDate,
   get21ThingsBoardForDate,
   getConnect5PuzzleForDate,
   getLocalDateKey,
   getPuzzleNumberForDate,
 } from "@/lib/daily-engine";
 import {
+  fetchRemote17SyllablesOverride,
   fetchRemote21ThingsOverride,
   fetchRemoteConnect5Override,
+  getAdmin17SyllablesOverrides,
   getAdmin21ThingsOverrides,
   getAdminConnect5Overrides,
+  saveAdmin17SyllablesOverride,
   saveAdmin21ThingsOverride,
   saveAdminConnect5Override,
 } from "@/lib/game-storage";
+import {
+  classifyDiagnosticError,
+  type DiagnosticReport,
+} from "@/lib/diagnostic-errors";
+import { DiagnosticErrorModal } from "@/components/admin/diagnostic-error-modal";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { useAuth } from "@/components/account/auth-provider";
 import {
@@ -83,7 +98,7 @@ const subscribeNoop = () => () => {};
 
 interface PendingPublishState {
   isOpen: boolean;
-  gameSlug: "connect-5" | "21-things";
+  gameSlug: "connect-5" | "21-things" | "17-syllables";
   gameTitle: string;
   targetDate: string;
   isToday: boolean;
@@ -123,11 +138,46 @@ export default function AdminPage() {
   const [pendingPublish, setPendingPublish] = useState<PendingPublishState | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
 
+  // Diagnostic Error Modal State
+  const [diagnosticReport, setDiagnosticReport] = useState<DiagnosticReport | null>(null);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
+  const [retrySyncFn, setRetrySyncFn] = useState<(() => Promise<void>) | null>(null);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+
   // Authorization and permission calculations
   const isGM = isGameMaster(profile);
   const editPerm = useMemo(() => {
     return checkDateEditPermission(profile, targetDate, todayDateKey);
   }, [profile, targetDate, todayDateKey]);
+
+  const openDiagnosticError = useCallback(
+    (
+      error: unknown,
+      context: {
+        gameSlug: "connect-5" | "21-things" | "17-syllables";
+        targetDate: string;
+        action: "save" | "fetch" | "sync" | "validate";
+        customMessage?: string;
+      },
+      retryHandler?: () => Promise<void>
+    ) => {
+      const report = classifyDiagnosticError(error, {
+        gameSlug: context.gameSlug,
+        targetDate: context.targetDate,
+        action: context.action,
+        customMessage: context.customMessage,
+        userEmail: profile?.email,
+        userRole: profile?.role,
+        isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
+      });
+
+      setDiagnosticReport(report);
+      setIsDiagnosticOpen(true);
+      setRetrySyncFn(retryHandler ? () => retryHandler : null);
+    },
+    [profile]
+  );
 
   // ==========================================================================
   // Connect 5 Creator State
@@ -169,6 +219,15 @@ export default function AdminPage() {
   );
 
   // ==========================================================================
+  // 17 Syllables Creator State
+  // ==========================================================================
+  const [s17Theme, setS17Theme] = useState<string>("Golden Autumn");
+  const [s17Author, setS17Author] = useState<string>("SOL Theory");
+  const [s17Line1, setS17Line1] = useState<string>("Gold leaves drift along");
+  const [s17Line2, setS17Line2] = useState<string>("Cool winds whisper in the dusk");
+  const [s17Line3, setS17Line3] = useState<string>("Soft earth waits for dawn");
+
+  // ==========================================================================
   // User Management State (Game Masters Only)
   // ==========================================================================
   const [userList, setUserList] = useState<UserProfile[]>([]);
@@ -188,9 +247,59 @@ export default function AdminPage() {
     }
   }, []);
 
+  const handleManualCloudSync = async () => {
+    setIsManualSyncing(true);
+    try {
+      const [remoteC5, remote21, remote17] = await Promise.all([
+        fetchRemoteConnect5Override(targetDate),
+        fetchRemote21ThingsOverride(targetDate),
+        fetchRemote17SyllablesOverride(targetDate),
+      ]);
+      if (remoteC5) {
+        setC5Title(remoteC5.title);
+        setC5Author(remoteC5.author);
+        setC5Editor(remoteC5.editor);
+        setC5Words([...remoteC5.words]);
+        setC5Connections([...remoteC5.connections]);
+        setC5Hints([...remoteC5.revealedHints]);
+      }
+      if (remote21) {
+        setT21Title(remote21.title);
+        setT21Creator(remote21.creatorName);
+        setT21Bio(remote21.creatorBio);
+        setT21Items(remote21.items.slice(0, 21));
+      }
+      if (remote17) {
+        setS17Theme(remote17.theme || "");
+        setS17Author(remote17.author || "SOL Theory");
+        setS17Line1(remote17.lines[0] || "");
+        setS17Line2(remote17.lines[1] || "");
+        setS17Line3(remote17.lines[2] || "");
+      }
+      toast({
+        title: "Cloud Sync Complete",
+        description: `Refreshed puzzle overrides from Supabase for ${targetDate}.`,
+      });
+    } catch (err) {
+      openDiagnosticError(
+        err,
+        {
+          gameSlug: activeTab === "21-things" || activeTab === "17-syllables" ? activeTab : "connect-5",
+          targetDate,
+          action: "fetch",
+          customMessage: "Cloud Sync Failed: Unable to fetch daily puzzle overrides from Supabase.",
+        },
+        handleManualCloudSync
+      );
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     async function fetchSchedule(dateKey: string) {
+      // 1. Immediately render local / scheduled cache to prevent blocking UI
       const localC5 = getAdminConnect5Overrides()[dateKey];
       const scheduledC5 = localC5 ?? getConnect5PuzzleForDate(dateKey);
       if (cancelled) return;
@@ -208,9 +317,23 @@ export default function AdminPage() {
       setT21Bio(scheduled21.creatorBio);
       setT21Items(scheduled21.items.slice(0, 21));
 
-      if (!localC5) {
-        const remoteC5 = await fetchRemoteConnect5Override(dateKey);
-        if (remoteC5 && !cancelled) {
+      const local17 = getAdmin17SyllablesOverrides()[dateKey];
+      const scheduled17 = local17 ?? get17SyllablesPuzzleForDate(dateKey);
+      setS17Theme(scheduled17.theme || "");
+      setS17Author(scheduled17.author || "SOL Theory");
+      setS17Line1(scheduled17.lines[0] || "");
+      setS17Line2(scheduled17.lines[1] || "");
+      setS17Line3(scheduled17.lines[2] || "");
+
+      // 2. Unconditionally fetch remote overrides in parallel to prevent stale local cache
+      try {
+        const [remoteC5, remote21, remote17] = await Promise.all([
+          fetchRemoteConnect5Override(dateKey),
+          fetchRemote21ThingsOverride(dateKey),
+          fetchRemote17SyllablesOverride(dateKey),
+        ]);
+        if (cancelled) return;
+        if (remoteC5) {
           setC5Title(remoteC5.title);
           setC5Author(remoteC5.author);
           setC5Editor(remoteC5.editor);
@@ -218,15 +341,21 @@ export default function AdminPage() {
           setC5Connections([...remoteC5.connections]);
           setC5Hints([...remoteC5.revealedHints]);
         }
-      }
-      if (!local21) {
-        const remote21 = await fetchRemote21ThingsOverride(dateKey);
-        if (remote21 && !cancelled) {
+        if (remote21) {
           setT21Title(remote21.title);
           setT21Creator(remote21.creatorName);
           setT21Bio(remote21.creatorBio);
           setT21Items(remote21.items.slice(0, 21));
         }
+        if (remote17) {
+          setS17Theme(remote17.theme || "");
+          setS17Author(remote17.author || "SOL Theory");
+          setS17Line1(remote17.lines[0] || "");
+          setS17Line2(remote17.lines[1] || "");
+          setS17Line3(remote17.lines[2] || "");
+        }
+      } catch {
+        // Fallback silently to local cache
       }
     }
 
@@ -358,23 +487,58 @@ export default function AdminPage() {
           const res = await saveAdminConnect5Override(targetDate, puzzleObj);
 
           if (res.remotePersisted) {
+            setPendingPublish(null);
             toast({
               title: `Connect 5 Saved Globally for ${targetDate}!`,
               description: `Persisted to Supabase and browser cache: ${puzzleObj.words.join(" → ")}.`,
             });
+
+            if (playImmediately) {
+              router.push(`/games/connect-5?date=${targetDate}`);
+            }
           } else {
-            toast({
-              title: `Connect 5 Saved for ${targetDate}!`,
-              description: res.error
-                ? `Saved locally in browser (Supabase notice: ${res.error}).`
-                : `${puzzleObj.words.join(" → ")} (${puzzleObj.revealedHints.length} hints).`,
-            });
-          }
+            setPendingPublish(null);
+            const doRetry = async () => {
+              setIsRetryingSync(true);
+              try {
+                const retryRes = await saveAdminConnect5Override(targetDate, puzzleObj);
+                if (retryRes.remotePersisted) {
+                  setIsDiagnosticOpen(false);
+                  setDiagnosticReport(null);
+                  setRetrySyncFn(null);
+                  toast({
+                    title: `Connect 5 Saved Globally for ${targetDate}!`,
+                    description: `Persisted to Supabase: ${puzzleObj.words.join(" → ")}.`,
+                  });
+                  if (playImmediately) {
+                    router.push(`/games/connect-5?date=${targetDate}`);
+                  }
+                } else {
+                  openDiagnosticError(
+                    retryRes.rawError || retryRes.error || "Retry attempt failed to persist Connect 5 to Supabase.",
+                    {
+                      gameSlug: "connect-5",
+                      targetDate,
+                      action: "save",
+                      customMessage: "Retry Cloud Sync Failed: Could not persist Connect 5 changes to Supabase.",
+                    },
+                    doRetry
+                  );
+                }
+              } finally {
+                setIsRetryingSync(false);
+              }
+            };
 
-          setPendingPublish(null);
-
-          if (playImmediately) {
-            router.push(`/games/connect-5?date=${targetDate}`);
+            openDiagnosticError(
+              res.rawError || res.error || "Failed to persist Connect 5 puzzle to Supabase cloud database.",
+              {
+                gameSlug: "connect-5",
+                targetDate,
+                action: "save",
+              },
+              doRetry
+            );
           }
         } finally {
           setIsPublishing(false);
@@ -488,23 +652,196 @@ export default function AdminPage() {
           const res = await saveAdmin21ThingsOverride(targetDate, boardObj);
 
           if (res.remotePersisted) {
+            setPendingPublish(null);
             toast({
               title: `21 Things Saved Globally for ${targetDate}!`,
               description: `Persisted to Supabase: "${boardObj.title}" by ${boardObj.creatorName} is now live across all sessions.`,
             });
+
+            if (playImmediately) {
+              router.push(`/games/21-things?date=${targetDate}`);
+            }
           } else {
-            toast({
-              title: `21 Things Board Saved for ${targetDate}!`,
-              description: res.error
-                ? `Saved locally in browser (Supabase notice: ${res.error}).`
-                : `"${boardObj.title}" by ${boardObj.creatorName} is now live.`,
-            });
+            setPendingPublish(null);
+            const doRetry = async () => {
+              setIsRetryingSync(true);
+              try {
+                const retryRes = await saveAdmin21ThingsOverride(targetDate, boardObj);
+                if (retryRes.remotePersisted) {
+                  setIsDiagnosticOpen(false);
+                  setDiagnosticReport(null);
+                  setRetrySyncFn(null);
+                  toast({
+                    title: `21 Things Saved Globally for ${targetDate}!`,
+                    description: `Persisted to Supabase: "${boardObj.title}" is now live.`,
+                  });
+                  if (playImmediately) {
+                    router.push(`/games/21-things?date=${targetDate}`);
+                  }
+                } else {
+                  openDiagnosticError(
+                    retryRes.rawError || retryRes.error || "Retry attempt failed to persist 21 Things to Supabase.",
+                    {
+                      gameSlug: "21-things",
+                      targetDate,
+                      action: "save",
+                      customMessage: "Retry Cloud Sync Failed: Could not persist 21 Things changes to Supabase.",
+                    },
+                    doRetry
+                  );
+                }
+              } finally {
+                setIsRetryingSync(false);
+              }
+            };
+
+            openDiagnosticError(
+              res.rawError || res.error || "Failed to persist 21 Things board to Supabase cloud database.",
+              {
+                gameSlug: "21-things",
+                targetDate,
+                action: "save",
+              },
+              doRetry
+            );
           }
+        } finally {
+          setIsPublishing(false);
+        }
+      },
+    });
+  };
 
-          setPendingPublish(null);
+  const handleSave17Syllables = async (playImmediately = false) => {
+    if (!editPerm.canEdit) {
+      toast({
+        title: "Permission Denied",
+        description: editPerm.reason || "You cannot edit today's live or past puzzles.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-          if (playImmediately) {
-            router.push(`/games/21-things?date=${targetDate}`);
+    const lines: [string, string, string] = [
+      s17Line1.trim(),
+      s17Line2.trim(),
+      s17Line3.trim(),
+    ];
+
+    const validation = validateHaikuStructure(lines);
+    if (!validation.isValid) {
+      openDiagnosticError(
+        new Error(validation.errors.join(" ")),
+        {
+          gameSlug: "17-syllables",
+          targetDate,
+          action: "validate",
+          customMessage: `Haiku structure error: ${validation.errors.join(" ")}`,
+        }
+      );
+      toast({
+        title: "Haiku Validation Error",
+        description: validation.errors[0] || "Must strictly adhere to 5-7-5 syllable structure.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const chunks = sliceHaikuIntoChunks(lines, 16);
+    const puzzleNumber = getPuzzleNumberForDate(targetDate);
+    const puzzleObj: SeventeenSyllablesPuzzle = {
+      id: `17s-custom-${targetDate}-${Date.now()}`,
+      puzzleNumber,
+      dateKey: targetDate,
+      theme: s17Theme.trim() || `17 Syllables #${puzzleNumber}`,
+      author: s17Author.trim() || "SOL Theory",
+      lines,
+      chunks,
+    };
+
+    const dateStatus: "Today" | "Future" | "Past" = editPerm.isToday
+      ? "Today"
+      : editPerm.isFuture
+      ? "Future"
+      : "Past";
+
+    setPendingPublish({
+      isOpen: true,
+      gameSlug: "17-syllables",
+      gameTitle: "17 Syllables",
+      targetDate,
+      isToday: editPerm.isToday,
+      dateStatus,
+      playImmediately,
+      summary: {
+        title: puzzleObj.theme,
+        creatorOrAuthor: puzzleObj.author,
+        preview: lines.join(" / "),
+        details: [
+          `Theme: "${puzzleObj.theme}"`,
+          `Author: ${puzzleObj.author}`,
+          `17 Syllables: Line 1 (5), Line 2 (7), Line 3 (5)`,
+          `Sliced into ${chunks.length} uppercase chunks`,
+        ],
+      },
+      onConfirm: async () => {
+        setIsPublishing(true);
+        try {
+          const res = await saveAdmin17SyllablesOverride(targetDate, puzzleObj);
+
+          if (res.remotePersisted) {
+            setPendingPublish(null);
+            toast({
+              title: `17 Syllables Saved Globally for ${targetDate}!`,
+              description: `Persisted to Supabase: "${puzzleObj.theme}" is now live across all sessions.`,
+            });
+
+            if (playImmediately) {
+              router.push(`/games/17-syllables?date=${targetDate}`);
+            }
+          } else {
+            setPendingPublish(null);
+            const doRetry = async () => {
+              setIsRetryingSync(true);
+              try {
+                const retryRes = await saveAdmin17SyllablesOverride(targetDate, puzzleObj);
+                if (retryRes.remotePersisted) {
+                  setIsDiagnosticOpen(false);
+                  setDiagnosticReport(null);
+                  setRetrySyncFn(null);
+                  toast({
+                    title: `17 Syllables Saved Globally for ${targetDate}!`,
+                    description: `Persisted to Supabase: "${puzzleObj.theme}".`,
+                  });
+                  if (playImmediately) {
+                    router.push(`/games/17-syllables?date=${targetDate}`);
+                  }
+                } else {
+                  openDiagnosticError(
+                    retryRes.rawError || retryRes.error || "Retry attempt failed to persist 17 Syllables to Supabase.",
+                    {
+                      gameSlug: "17-syllables",
+                      targetDate,
+                      action: "save",
+                      customMessage: "Retry Cloud Sync Failed: Could not persist 17 Syllables changes to Supabase.",
+                    },
+                    doRetry
+                  );
+                }
+              } finally {
+                setIsRetryingSync(false);
+              }
+            };
+
+            openDiagnosticError(
+              res.rawError || res.error || "Failed to persist 17 Syllables puzzle to Supabase cloud database.",
+              {
+                gameSlug: "17-syllables",
+                targetDate,
+                action: "save",
+              },
+              doRetry
+            );
           }
         } finally {
           setIsPublishing(false);
@@ -674,14 +1011,27 @@ export default function AdminPage() {
               the {CONNECT_5_PUZZLES.length} pre-seeded daily puzzles.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <Calendar className="h-4 w-4 text-gray-600" />
-            <Input
-              type="date"
-              value={targetDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-44 font-mono font-bold border-2 border-black"
-            />
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isManualSyncing}
+              onClick={() => void handleManualCloudSync()}
+              className="border-2 border-black font-headline font-black text-xs h-10 px-3 hover:bg-gray-100 shadow-[2px_2px_0px_#000]"
+              title="Refreshes puzzle overrides from Supabase cloud database"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isManualSyncing && "animate-spin")} />
+              {isManualSyncing ? "Syncing..." : "Sync Cloud"}
+            </Button>
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-gray-600" />
+              <Input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="w-40 sm:w-44 font-mono font-bold border-2 border-black h-10 shadow-[2px_2px_0px_#000]"
+              />
+            </div>
           </div>
         </div>
 
@@ -713,12 +1063,15 @@ export default function AdminPage() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full sm:w-auto">
+          <TabsList className="w-full sm:w-auto flex flex-wrap">
             <TabsTrigger value="connect-5">
               🔗 Connect 5 Creator
             </TabsTrigger>
             <TabsTrigger value="21-things">
               ✨ 21 Things Creator
+            </TabsTrigger>
+            <TabsTrigger value="17-syllables">
+              🎋 17 Syllables Creator
             </TabsTrigger>
             <TabsTrigger value="bank">
               📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
@@ -1156,6 +1509,242 @@ export default function AdminPage() {
                   )}
                   Save &amp; Test Play Board
                 </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* ================================================================
+           * TAB 2.5: 17 SYLLABLES HAIKU CREATOR
+           * ================================================================ */}
+          <TabsContent value="17-syllables">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column: 3 Haiku Lines & Metadata */}
+              <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 space-y-4 shadow-[4px_4px_0px_#000]">
+                <div>
+                  <Badge variant="green" className="mb-1">
+                    🎋 17 Syllables Haiku Builder
+                  </Badge>
+                  <h3 className="font-headline font-black text-xl">
+                    1. Compose 5-7-5 Daily Haiku
+                  </h3>
+                  <p className="text-xs text-gray-600">
+                    Write 3 poetic lines adhering strictly to the 5-7-5 syllable structure. The game automatically slices your haiku into uppercase chunks for player reconstruction.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                      Haiku Theme / Title
+                    </label>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Theme}
+                      onChange={(e) => setS17Theme(e.target.value)}
+                      placeholder="e.g. Golden Autumn"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                      Poet / Author
+                    </label>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Author}
+                      onChange={(e) => setS17Author(e.target.value)}
+                      placeholder="SOL Theory"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  {/* Line 1 (5 syllables) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold uppercase text-gray-700">
+                        Line 1 (5 Syllables)
+                      </label>
+                      <Badge
+                        variant={countLineSyllables(s17Line1) === 5 ? "green" : "destructive"}
+                        className="font-mono text-[10px]"
+                      >
+                        {countLineSyllables(s17Line1)} / 5 syllables
+                      </Badge>
+                    </div>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Line1}
+                      onChange={(e) => setS17Line1(e.target.value)}
+                      placeholder="Gold leaves drift along"
+                      className="font-serif text-sm"
+                    />
+                  </div>
+
+                  {/* Line 2 (7 syllables) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold uppercase text-gray-700">
+                        Line 2 (7 Syllables)
+                      </label>
+                      <Badge
+                        variant={countLineSyllables(s17Line2) === 7 ? "green" : "destructive"}
+                        className="font-mono text-[10px]"
+                      >
+                        {countLineSyllables(s17Line2)} / 7 syllables
+                      </Badge>
+                    </div>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Line2}
+                      onChange={(e) => setS17Line2(e.target.value)}
+                      placeholder="Cool winds whisper in the dusk"
+                      className="font-serif text-sm"
+                    />
+                  </div>
+
+                  {/* Line 3 (5 syllables) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold uppercase text-gray-700">
+                        Line 3 (5 Syllables)
+                      </label>
+                      <Badge
+                        variant={countLineSyllables(s17Line3) === 5 ? "green" : "destructive"}
+                        className="font-mono text-[10px]"
+                      >
+                        {countLineSyllables(s17Line3)} / 5 syllables
+                      </Badge>
+                    </div>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Line3}
+                      onChange={(e) => setS17Line3(e.target.value)}
+                      placeholder="Soft earth waits for dawn"
+                      className="font-serif text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs space-y-1">
+                    <span className="font-bold uppercase text-gray-600 text-[10px]">Structure Validation</span>
+                    {validateHaikuStructure([s17Line1, s17Line2, s17Line3]).isValid ? (
+                      <p className="text-emerald-700 font-bold flex items-center gap-1.5">
+                        <Check className="h-4 w-4 stroke-[3]" /> Perfect 5-7-5 Haiku (17 Total Syllables)
+                      </p>
+                    ) : (
+                      <div className="text-red-700 font-semibold space-y-0.5">
+                        {validateHaikuStructure([s17Line1, s17Line2, s17Line3]).errors.map((err, i) => (
+                          <p key={i} className="flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3 shrink-0" /> {err}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Sliced Chunks Tray Preview & Publishing */}
+              <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 space-y-4 shadow-[4px_4px_0px_#000] flex flex-col justify-between">
+                <div className="space-y-4">
+                  <div>
+                    <Badge variant="yellow" className="mb-1">
+                      Interactive Live Preview
+                    </Badge>
+                    <h3 className="font-headline font-black text-xl">
+                      2. Sliced Chunk Tiles Preview
+                    </h3>
+                    <p className="text-xs text-gray-600">
+                      Here are the uppercase chunks players will arrange on the board:
+                    </p>
+                  </div>
+
+                  {/* Sliced Chunk Tiles Preview */}
+                  <div className="rounded-xl border-2 border-black bg-[#FAF9F6] p-4 min-h-[160px]">
+                    <div className="flex flex-wrap gap-2">
+                      {sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16).map((chunk, i) => (
+                        <div
+                          key={i}
+                          className="px-3 py-1.5 rounded-lg border-2 border-black bg-white font-mono font-black text-sm uppercase shadow-[2px_2px_0px_#000]"
+                        >
+                          {chunk}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs space-y-1">
+                    <span className="font-bold uppercase text-gray-600 text-[10px]">Haiku Preview</span>
+                    <p className="italic text-gray-800 font-serif text-sm leading-relaxed whitespace-pre-line">
+                      &quot;{s17Line1 || "..."}&quot;{"\n"}
+                      &quot;{s17Line2 || "..."}&quot;{"\n"}
+                      &quot;{s17Line3 || "..."}&quot;
+                    </p>
+                    <p className="text-[11px] text-gray-500 font-medium pt-1">
+                      — {s17Author || "SOL Theory"} ({s17Theme || "Untitled"})
+                    </p>
+                  </div>
+                </div>
+
+                {/* Save and Publish Controls */}
+                <div className="pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const chunks = sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16);
+                        const copyPayload = {
+                          theme: s17Theme,
+                          author: s17Author,
+                          lines: [s17Line1, s17Line2, s17Line3],
+                          chunks,
+                        };
+                        void navigator.clipboard.writeText(JSON.stringify(copyPayload, null, 2));
+                        toast({
+                          title: "17 Syllables JSON Copied!",
+                          description: "Payload copied to clipboard.",
+                        });
+                      }}
+                      className="border-2 border-black text-xs font-bold"
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" />
+                      Copy JSON
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!editPerm.canEdit}
+                      onClick={() => void handleSave17Syllables(false)}
+                      className="border-2 border-black font-headline font-black text-xs px-4 hover:bg-gray-100"
+                    >
+                      {!editPerm.canEdit ? (
+                        <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Save for {targetDate}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      disabled={!editPerm.canEdit}
+                      onClick={() => void handleSave17Syllables(true)}
+                      className="bg-black text-white hover:bg-gray-800 font-headline font-black text-xs px-4 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-black shadow-[2px_2px_0px_#000]"
+                    >
+                      {!editPerm.canEdit ? (
+                        <Lock className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Save &amp; Test Play Haiku
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </TabsContent>
@@ -1613,6 +2202,21 @@ export default function AdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Diagnostic Error Modal Popup when save/sync fails */}
+      <DiagnosticErrorModal
+        open={isDiagnosticOpen}
+        onOpenChange={(open) => {
+          setIsDiagnosticOpen(open);
+          if (!open) {
+            setDiagnosticReport(null);
+            setRetrySyncFn(null);
+          }
+        }}
+        report={diagnosticReport}
+        onRetry={retrySyncFn ? () => retrySyncFn() : undefined}
+        isRetrying={isRetryingSync}
+      />
     </div>
   );
 }
