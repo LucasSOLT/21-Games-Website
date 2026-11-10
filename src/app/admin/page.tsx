@@ -101,13 +101,19 @@ interface PendingPublishState {
 export default function AdminPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { profile, isLoading: authLoading, openAccountModal } = useAuth();
+  const { profile, isLoading: authLoading } = useAuth();
 
   const mounted = useSyncExternalStore(
     subscribeNoop,
     () => true,
     () => false
   );
+
+  useEffect(() => {
+    if (mounted && !authLoading && !canAccessPuzzleStudio(profile)) {
+      router.replace("/");
+    }
+  }, [mounted, authLoading, profile, router]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const todayDateKey = mounted ? getLocalDateKey() : SSR_ANCHOR_DATE;
   const targetDate = selectedDate ?? todayDateKey;
@@ -593,9 +599,9 @@ export default function AdminPage() {
   };
 
   // ==========================================================================
-  // Auth Guarding: Loading State
+  // Auth Guarding: Loading State or Unauthorized Redirecting
   // ==========================================================================
-  if (authLoading) {
+  if (!mounted || authLoading || !canAccessPuzzleStudio(profile)) {
     return (
       <div className="min-h-screen bg-[#FCFCFD] flex items-center justify-center p-4">
         <div className="text-center space-y-3">
@@ -604,76 +610,6 @@ export default function AdminPage() {
             Verifying Editorial Credentials...
           </p>
         </div>
-      </div>
-    );
-  }
-
-  // ==========================================================================
-  // Auth Guarding: Access Denied (Unauthenticated, Player, or Banned)
-  // ==========================================================================
-  if (!canAccessPuzzleStudio(profile)) {
-    const isPlayer = Boolean(profile && profile.role === "user");
-    const isBannedUser = Boolean(profile?.isBanned);
-
-    return (
-      <div className="min-h-screen bg-[#FCFCFD] flex flex-col text-black">
-        <header className="border-b-2 border-black/10 bg-white px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3 py-1 text-xs font-bold text-black hover:bg-gray-100 transition-colors"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to SOL GaMES
-          </Link>
-          <span className="font-headline font-black text-xs uppercase tracking-widest text-gray-500">
-            Admin Puzzle Studio
-          </span>
-        </header>
-
-        <main className="flex-1 flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-white border-2 border-black rounded-2xl p-6 sm:p-8 text-center shadow-[0_4px_0_#111111] space-y-4">
-            <div className="h-14 w-14 rounded-full bg-amber-50 border-2 border-black flex items-center justify-center mx-auto text-black">
-              <Lock className="h-7 w-7" />
-            </div>
-
-            <h2 className="font-headline font-black text-2xl text-black">
-              Restricted Access
-            </h2>
-
-            <p className="text-sm text-gray-600 leading-relaxed">
-              {isBannedUser
-                ? `Your account (${profile?.email}) has been suspended. Access to the Puzzle Studio is prohibited.`
-                : isPlayer
-                ? `Your account (${profile?.handle || profile?.email}) is registered as a Standard Player. Access to the Puzzle Studio is reserved for Editors (Admins) and Game Masters.`
-                : "Sign in with an authorized Editor or Game Master account to curate daily puzzles."}
-            </p>
-
-            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-              {profile ? (
-                <Link
-                  href="/"
-                  className="inline-flex items-center justify-center h-8 px-4 rounded-lg bg-black text-white hover:bg-gray-800 font-bold border-2 border-black text-sm"
-                >
-                  Return to Homepage
-                </Link>
-              ) : (
-                <>
-                  <Button
-                    onClick={() => openAccountModal("signin")}
-                    className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
-                  >
-                    Sign In to Studio
-                  </Button>
-                  <Link
-                    href="/"
-                    className="inline-flex items-center justify-center h-8 px-4 rounded-lg border-2 border-black font-bold text-sm hover:bg-gray-100"
-                  >
-                    Return Home
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        </main>
       </div>
     );
   }

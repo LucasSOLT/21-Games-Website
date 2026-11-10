@@ -98,13 +98,13 @@ console.log("TEST SUITE: Admin Puzzle Studio Persistence & RBAC Permissions (R4)
 console.log("=================================================================\n");
 
 // -----------------------------------------------------------------------------
-// Section 1: Initial Game Masters Configuration (Lucas, Steve, Luke)
+// Section 1: Initial Game Masters Configuration (Lucas, Steve)
 // -----------------------------------------------------------------------------
 console.log("Section 1: Initial Game Masters Configuration & Normalization");
 
-runTest("INITIAL_GAME_MASTERS contains lucas, steve, and luke", () => {
+runTest("INITIAL_GAME_MASTERS strictly contains lucas and steve (2 GMs, luke excluded)", () => {
   assert.ok(Array.isArray(INITIAL_GAME_MASTERS), "INITIAL_GAME_MASTERS must be an array");
-  assert.equal(INITIAL_GAME_MASTERS.length, 3, "Must have exactly 3 initial Game Masters");
+  assert.equal(INITIAL_GAME_MASTERS.length, 2, "Must have exactly 2 initial Game Masters");
 
   assert.ok(
     INITIAL_GAME_MASTERS.includes("lucas@soltheory.com"),
@@ -114,13 +114,14 @@ runTest("INITIAL_GAME_MASTERS contains lucas, steve, and luke", () => {
     INITIAL_GAME_MASTERS.includes("steve@soltheory.com"),
     "steve@soltheory.com must be in INITIAL_GAME_MASTERS"
   );
-  assert.ok(
+  assert.equal(
     INITIAL_GAME_MASTERS.includes("luke@soltheory.com"),
-    "luke@soltheory.com must be in INITIAL_GAME_MASTERS"
+    false,
+    "luke@soltheory.com must NOT be in INITIAL_GAME_MASTERS"
   );
 });
 
-runTest("isInitialGameMaster recognizes all 3 Game Masters case-insensitively", () => {
+runTest("isInitialGameMaster recognizes the 2 Game Masters case-insensitively and rejects luke", () => {
   assert.equal(isInitialGameMaster("lucas@soltheory.com"), true);
   assert.equal(isInitialGameMaster("Lucas@SolTheory.com"), true);
   assert.equal(isInitialGameMaster("LUCAS@SOLTHEORY.COM"), true);
@@ -129,12 +130,12 @@ runTest("isInitialGameMaster recognizes all 3 Game Masters case-insensitively", 
   assert.equal(isInitialGameMaster("Steve@SolTheory.com"), true);
   assert.equal(isInitialGameMaster("STEVE@SOLTHEORY.COM"), true);
 
-  assert.equal(isInitialGameMaster("luke@soltheory.com"), true);
-  assert.equal(isInitialGameMaster("Luke@SolTheory.com"), true);
-  assert.equal(isInitialGameMaster("LUKE@SOLTHEORY.COM"), true);
+  assert.equal(isInitialGameMaster("luke@soltheory.com"), false);
+  assert.equal(isInitialGameMaster("Luke@SolTheory.com"), false);
+  assert.equal(isInitialGameMaster("LUKE@SOLTHEORY.COM"), false);
 
   // Whitespace trimming
-  assert.equal(isInitialGameMaster("  luke@soltheory.com  "), true);
+  assert.equal(isInitialGameMaster("  lucas@soltheory.com  "), true);
   assert.equal(isInitialGameMaster("  steve@soltheory.com\n"), true);
 });
 
@@ -142,14 +143,15 @@ runTest("isInitialGameMaster rejects unauthorized emails and empty values", () =
   assert.equal(isInitialGameMaster("player@gmail.com"), false);
   assert.equal(isInitialGameMaster("admin@soltheory.com"), false);
   assert.equal(isInitialGameMaster("hacker@bad.actor"), false);
+  assert.equal(isInitialGameMaster("luke@soltheory.com"), false);
   assert.equal(isInitialGameMaster(""), false);
   assert.equal(isInitialGameMaster(null), false);
   assert.equal(isInitialGameMaster(undefined), false);
 });
 
-runTest("isGameMaster recognizes initial Game Masters even if role profile is 'user'", () => {
+runTest("isGameMaster recognizes initial Game Masters and rejects non-whitelisted emails", () => {
   const profileLuke = createMockProfile("luke@soltheory.com", "user");
-  assert.equal(isGameMaster(profileLuke), true, "Luke must be recognized as GM by email");
+  assert.equal(isGameMaster(profileLuke), false, "Luke must NOT be recognized as GM");
 
   const profileSteve = createMockProfile("steve@soltheory.com", "user");
   assert.equal(isGameMaster(profileSteve), true, "Steve must be recognized as GM by email");
@@ -158,11 +160,11 @@ runTest("isGameMaster recognizes initial Game Masters even if role profile is 'u
   assert.equal(isGameMaster(profileLucas), true, "Lucas must be recognized as GM by email");
 });
 
-runTest("isGameMaster recognizes explicitly assigned 'game_master' roles", () => {
+runTest("isGameMaster rejects non-whitelisted emails with assigned 'game_master' roles (strict email check)", () => {
   const assignedGM = createMockProfile("moderator@soltheory.com", "game_master");
-  assert.equal(isGameMaster(assignedGM), true);
-  assert.equal(isAdmin(assignedGM), true, "GMs inherit Admin access");
-  assert.equal(canAccessPuzzleStudio(assignedGM), true);
+  assert.equal(isGameMaster(assignedGM), false, "Non-whitelisted GM role must be rejected");
+  assert.equal(isAdmin(assignedGM), false);
+  assert.equal(canAccessPuzzleStudio(assignedGM), false);
 });
 
 runTest("Standard users cannot access Puzzle Studio", () => {
@@ -182,7 +184,7 @@ const pastKey = "2026-11-01";
 const futureKey = "2026-11-15";
 
 runTest("Game Masters can edit Past, Today, and Future puzzles", () => {
-  const gmProfile = createMockProfile("luke@soltheory.com", "game_master");
+  const gmProfile = createMockProfile("lucas@soltheory.com", "game_master");
 
   // Past puzzle
   const pastPerm = checkDateEditPermission(gmProfile, pastKey, todayKey);

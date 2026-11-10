@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useAuth } from "@/components/account/auth-provider";
 import { GameCard } from "@/components/game-card";
 import { GameLogo } from "@/components/game-logo";
 import { Hero } from "@/components/hero";
@@ -34,6 +35,7 @@ export default function Home() {
   const leftGame = ALL_GAMES.find((g) => g.slug === "9-rhymes")!;
   const centerGame = ALL_GAMES.find((g) => g.slug === "21-things")!;
   const rightGame = ALL_GAMES.find((g) => g.slug === "connect-5")!;
+  const { isGameMaster, isLoading: authLoading } = useAuth();
 
   const mounted = useSyncExternalStore(
     subscribeNoop,
@@ -287,9 +289,11 @@ export default function Home() {
             >
               Create Your Own 21 Things
             </Link>
-            <Link href="/admin" className="underline text-gray-600 hover:text-black">
-              Admin Puzzle Studio
-            </Link>
+            {mounted && !authLoading && isGameMaster && (
+              <Link href="/admin" className="underline text-gray-600 hover:text-black">
+                Admin Puzzle Studio
+              </Link>
+            )}
           </div>
         </footer>
       </main>

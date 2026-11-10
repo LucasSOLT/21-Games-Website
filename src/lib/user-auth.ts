@@ -30,12 +30,9 @@ export const USER_ROLES: readonly UserRole[] = [
   "user",
 ] as const;
 
-const GM_ROOT = "_lucas@soltheory.com".slice(1);
-
 export const INITIAL_GAME_MASTERS: readonly string[] = [
-  GM_ROOT,
+  "lucas@soltheory.com",
   "steve@soltheory.com",
-  "luke@soltheory.com",
 ] as const;
 
 export type AvatarColor =
@@ -171,18 +168,16 @@ export function isValidUserRole(value: unknown): value is UserRole {
 }
 
 export function isGameMaster(profile: UserProfile | null): boolean {
-  if (!profile) return false;
-  return isInitialGameMaster(profile.email) || profile.role === "game_master";
+  if (!profile || profile.isBanned) return false;
+  return isInitialGameMaster(profile.email);
 }
 
 export function isAdmin(profile: UserProfile | null): boolean {
-  if (!profile) return false;
-  return isGameMaster(profile) || profile.role === "admin";
+  return isGameMaster(profile);
 }
 
 export function canAccessPuzzleStudio(profile: UserProfile | null): boolean {
-  if (!profile || profile.isBanned) return false;
-  return isAdmin(profile);
+  return isGameMaster(profile);
 }
 
 export interface DateEditPermission {
@@ -404,9 +399,9 @@ export function normalizeUserProfile(
   const isDefaultGM = isInitialGameMaster(email);
   const resolvedRole: UserRole = isDefaultGM
     ? "game_master"
-    : isValidUserRole(raw.role)
+    : isValidUserRole(raw.role) && raw.role !== "game_master"
     ? raw.role
-    : isValidUserRole(rawRecord.role)
+    : isValidUserRole(rawRecord.role) && rawRecord.role !== "game_master"
     ? (rawRecord.role as UserRole)
     : "user";
 
@@ -742,6 +737,13 @@ export async function updateUserRole(
     return {
       ok: false,
       error: "Root Game Masters cannot be demoted.",
+    };
+  }
+
+  if (newRole === "game_master" && !isInitialGameMaster(normalizedTarget)) {
+    return {
+      ok: false,
+      error: "Only authorized root Game Masters can hold the Game Master role.",
     };
   }
 
