@@ -8,7 +8,11 @@ import {
   Copy,
   Edit3,
   ExternalLink,
+  Eye,
+  EyeOff,
   Flame,
+  KeyRound,
+  Lock,
   LogOut,
   Mail,
   Play,
@@ -57,6 +61,7 @@ import {
   checkUserProfileModeration,
 } from "@/lib/moderation";
 import { cn } from "@/lib/utils";
+import { getSupabaseClient, setRememberLogin } from "@/lib/supabase";
 
 export function getAvatarTextClass(color: AvatarColor): string {
   const match = AVATAR_COLOR_OPTIONS.find((opt) => opt.color === color);
@@ -144,13 +149,13 @@ export function buildResonancePickHref(pick: RecentResonancePick): string {
   return "/games/21-things";
 }
 
-type GuestAuthTab = "signin" | "signup" | "magic";
+export type GuestAuthTab = "signin" | "signup" | "magic" | "forgot";
 
 export function GuestAuthPanel({
   initialTab = "signin",
   onAuthSuccess,
 }: {
-  initialTab?: "signin" | "signup";
+  initialTab?: "signin" | "signup" | "forgot";
   onAuthSuccess?: (profile: UserProfile) => void;
 }) {
   const { signIn, signUp, sendMagicLinkEmail } = useAuth();
@@ -162,10 +167,18 @@ export function GuestAuthPanel({
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [avatarColor, setAvatarColor] = useState<AvatarColor>("#F9D423");
+  const [rememberMe, setRememberMe] = useState(true);
+  const [showSignInPassword, setShowSignInPassword] = useState(false);
+  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  // Unified error mode states for interactive buttons
+  const [signInInvalidMode, setSignInInvalidMode] = useState(false);
+  const [signUpDuplicateMode, setSignUpDuplicateMode] = useState(false);
+
+  // Live on-device guest stats
   const [guestC5Stats, setGuestC5Stats] = useState<GameStats>(() =>
     getGameStats("connect-5")
   );
@@ -196,28 +209,44 @@ export function GuestAuthPanel({
     guest21Stats.currentStreak
   );
 
-  const handleSignInSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const resetBanners = () => {
     setErrorMessage(null);
     setStatusMessage(null);
+    setSignInInvalidMode(false);
+    setSignUpDuplicateMode(false);
+  };
 
-    if (!email.trim() || !email.includes("@")) {
+  const handleSignInSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetBanners();
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
       setErrorMessage("Please enter a valid email address.");
+      return;
+    }
+
+    const cleanPassword = password.trim();
+    if (!cleanPassword) {
+      setErrorMessage("Please enter your password.");
       return;
     }
 
     setIsSubmitting(true);
     try {
+      // Synchronize Remember My Login preference to storage adapter
+      setRememberLogin(rememberMe);
+
       const res = await signIn({
-        email: email.trim(),
-        password: password.trim() || undefined,
+        email: cleanEmail,
+        password: cleanPassword,
       });
+
       if (!res.ok || !res.profile) {
-        setErrorMessage(
-          res.error || "Unable to sign in. Please check your credentials."
-        );
+        setSignInInvalidMode(true);
         return;
       }
+
       toast({
         title: "Signed In to SOL Theory Games",
         description:
@@ -231,17 +260,20 @@ export function GuestAuthPanel({
 
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setStatusMessage(null);
+    resetBanners();
 
-    if (!email.trim() || !email.includes("@")) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
       setErrorMessage("Please enter a valid email address.");
       return;
     }
-    if (password.trim().length > 0 && password.trim().length < 6) {
-      setErrorMessage("Password must be at least 6 characters.");
+
+    const cleanPassword = password.trim();
+    if (cleanPassword.length < 8) {
+      setErrorMessage("Password must be at least 8 characters.");
       return;
     }
+
     if (displayName.trim()) {
       const mod = checkContentModeration(displayName.trim(), {
         mode: "public",
@@ -256,17 +288,29 @@ export function GuestAuthPanel({
     setIsSubmitting(true);
     try {
       const res = await signUp({
-        email: email.trim(),
-        password: password.trim() || undefined,
+        email: cleanEmail,
+        password: cleanPassword,
         displayName: displayName.trim() || undefined,
         avatarColor,
       });
+
       if (!res.ok || !res.profile) {
-        setErrorMessage(
-          res.error || "Unable to create account. Please try again."
-        );
+        const err = (res.error || "").toLowerCase();
+        if (
+          err.includes("already registered") ||
+          err.includes("already exists") ||
+          err.includes("registered") ||
+          err.includes("duplicate")
+        ) {
+          setSignUpDuplicateMode(true);
+        } else {
+          setErrorMessage(
+            res.error || "Unable to create account. Please try again."
+          );
+        }
         return;
       }
+
       toast({
         title: "Welcome to SOL Theory Games!",
         description:
@@ -281,29 +325,75 @@ export function GuestAuthPanel({
 
   const handleMagicLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage(null);
-    setStatusMessage(null);
+    resetBanners();
 
-    if (!email.trim() || !email.includes("@")) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
       setErrorMessage("Please enter a valid email address.");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const res = await sendMagicLinkEmail(email.trim());
+      const res = await sendMagicLinkEmail(cleanEmail);
       if (!res.ok) {
         setErrorMessage(res.message || "Could not send magic link.");
         return;
       }
       setStatusMessage(res.message);
       toast({
-        title: "Magic Link Activated",
+        title: "Magic Link Sent",
         description: res.message,
       });
-      if (res.profile) {
-        onAuthSuccess?.(res.profile);
+      // Do NOT activate profile locally. It activates strictly upon verified URL link click.
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    resetBanners();
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setErrorMessage("Please enter a valid email address.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setErrorMessage("Authentication service unavailable.");
+        return;
       }
+
+      const origin =
+        typeof window !== "undefined" && window.location?.origin
+          ? window.location.origin
+          : "https://21games.ai";
+      const redirectTo = `${origin}/account?recovery=true`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo,
+      });
+
+      if (error) {
+        setErrorMessage(error.message || "Unable to send reset instructions.");
+        return;
+      }
+
+      setStatusMessage(
+        "If an account exists for this email, password reset instructions have been sent. Please check your inbox."
+      );
+      toast({
+        title: "Password Reset Sent",
+        description:
+          "Check your inbox for a secure link to choose a new password.",
+      });
+    } catch {
+      setErrorMessage("Could not send password reset email. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -344,11 +434,10 @@ export function GuestAuthPanel({
           aria-selected={activeTab === "signin"}
           onClick={() => {
             setActiveTab("signin");
-            setErrorMessage(null);
-            setStatusMessage(null);
+            resetBanners();
           }}
           className={cn(
-            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all",
+            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all cursor-pointer",
             activeTab === "signin"
               ? "bg-black text-white shadow-2xs"
               : "text-gray-700 hover:text-black"
@@ -362,11 +451,10 @@ export function GuestAuthPanel({
           aria-selected={activeTab === "signup"}
           onClick={() => {
             setActiveTab("signup");
-            setErrorMessage(null);
-            setStatusMessage(null);
+            resetBanners();
           }}
           className={cn(
-            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all",
+            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all cursor-pointer",
             activeTab === "signup"
               ? "bg-black text-white shadow-2xs"
               : "text-gray-700 hover:text-black"
@@ -380,11 +468,10 @@ export function GuestAuthPanel({
           aria-selected={activeTab === "magic"}
           onClick={() => {
             setActiveTab("magic");
-            setErrorMessage(null);
-            setStatusMessage(null);
+            resetBanners();
           }}
           className={cn(
-            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all",
+            "rounded-lg py-2 px-2 text-xs sm:text-sm font-black transition-all cursor-pointer",
             activeTab === "magic"
               ? "bg-black text-white shadow-2xs"
               : "text-gray-700 hover:text-black"
@@ -394,7 +481,61 @@ export function GuestAuthPanel({
         </button>
       </div>
 
-      {errorMessage && (
+      {/* Unified Invalid Login Error Banner */}
+      {signInInvalidMode && (
+        <div
+          role="alert"
+          className="rounded-xl border-2 border-red-600 bg-red-50 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-red-700 leading-relaxed"
+        >
+          Login is invalid. Check email or password and retry, or{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("signup");
+              resetBanners();
+            }}
+            className="font-black underline text-red-950 hover:text-black uppercase tracking-wider transition-colors inline cursor-pointer"
+          >
+            CREATE AN ACCOUNT
+          </button>
+          .
+        </div>
+      )}
+
+      {/* Unified Duplicate Email Error Banner */}
+      {signUpDuplicateMode && (
+        <div
+          role="alert"
+          className="rounded-xl border-2 border-amber-600 bg-amber-50 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-amber-900 leading-relaxed"
+        >
+          An account with this email already exists. Please{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("signin");
+              resetBanners();
+            }}
+            className="font-black underline text-amber-950 hover:text-black uppercase tracking-wider transition-colors inline cursor-pointer"
+          >
+            LOG IN
+          </button>{" "}
+          or use{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("forgot");
+              resetBanners();
+            }}
+            className="font-black underline text-amber-950 hover:text-black transition-colors inline cursor-pointer"
+          >
+            Forgot Password
+          </button>
+          .
+        </div>
+      )}
+
+      {/* Standard Error / Status Banners */}
+      {!signInInvalidMode && !signUpDuplicateMode && errorMessage && (
         <div
           role="alert"
           className="rounded-xl border-2 border-red-600 bg-red-50 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-red-700"
@@ -425,37 +566,87 @@ export function GuestAuthPanel({
             <Input
               id={`${formId}-signin-email`}
               type="email"
-              autoComplete="email"
+              autoComplete="username"
               required
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (signInInvalidMode) setSignInInvalidMode(false);
+              }}
               className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor={`${formId}-signin-password`}
-              className="block text-xs font-black uppercase tracking-wider text-gray-700"
-            >
-              Password
-            </label>
-            <Input
-              id={`${formId}-signin-password`}
-              type="password"
-              autoComplete="current-password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor={`${formId}-signin-password`}
+                className="block text-xs font-black uppercase tracking-wider text-gray-700"
+              >
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("forgot");
+                  resetBanners();
+                }}
+                className="text-xs font-bold text-gray-600 underline hover:text-black cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <div className="relative">
+              <Input
+                id={`${formId}-signin-password`}
+                type={showSignInPassword ? "text" : "password"}
+                autoComplete="current-password"
+                required
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (signInInvalidMode) setSignInInvalidMode(false);
+                }}
+                className="h-11 border-2 border-black bg-white pr-10 text-base sm:text-sm font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSignInPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black p-1 cursor-pointer"
+                aria-label={showSignInPassword ? "Hide password" : "Show password"}
+              >
+                {showSignInPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* [✓] Remember my login Checkbox */}
+          <div className="flex items-center gap-2 pt-0.5">
+            <input
+              id={`${formId}-signin-remember`}
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-4 w-4 rounded border-2 border-black accent-black focus:ring-0 focus:outline-hidden cursor-pointer"
             />
+            <label
+              htmlFor={`${formId}-signin-remember`}
+              className="text-xs font-bold text-gray-700 cursor-pointer select-none"
+            >
+              Remember my login
+            </label>
           </div>
 
           <Button
             type="submit"
             disabled={isSubmitting}
-            className="w-full h-11 rounded-xl border-2 border-black bg-black text-white font-black text-sm hover:bg-gray-900 shadow-[3px_3px_0px_#F9D423]"
+            className="w-full h-11 rounded-xl border-2 border-black bg-black text-white font-black text-sm hover:bg-gray-900 shadow-[3px_3px_0px_#F9D423] cursor-pointer"
           >
             {isSubmitting ? "Signing In & Syncing..." : "Log In & Sync Stats"}
           </Button>
@@ -464,8 +655,11 @@ export function GuestAuthPanel({
             New to SOL Theory Games?{" "}
             <button
               type="button"
-              onClick={() => setActiveTab("signup")}
-              className="font-black text-black underline hover:text-[#9D50BB]"
+              onClick={() => {
+                setActiveTab("signup");
+                resetBanners();
+              }}
+              className="font-black text-black underline hover:text-[#9D50BB] cursor-pointer"
             >
               Create a free account
             </button>
@@ -504,31 +698,61 @@ export function GuestAuthPanel({
             <Input
               id={`${formId}-signup-email`}
               type="email"
-              autoComplete="email"
+              autoComplete="username"
               required
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (signUpDuplicateMode) setSignUpDuplicateMode(false);
+              }}
               className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label
-              htmlFor={`${formId}-signup-password`}
-              className="block text-xs font-black uppercase tracking-wider text-gray-700"
-            >
-              Password (6+ characters)
-            </label>
-            <Input
-              id={`${formId}-signup-password`}
-              type="password"
-              autoComplete="new-password"
-              placeholder="Create a password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
-            />
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor={`${formId}-signup-password`}
+                className="block text-xs font-black uppercase tracking-wider text-gray-700"
+              >
+                Password (min 8 characters)
+              </label>
+              {password.length > 0 && (
+                <span
+                  className={cn(
+                    "text-[11px] font-black",
+                    password.length >= 8 ? "text-emerald-600" : "text-amber-600"
+                  )}
+                >
+                  {password.length >= 8 ? "✓ 8+ chars" : `${password.length}/8 chars`}
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <Input
+                id={`${formId}-signup-password`}
+                type={showSignUpPassword ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                placeholder="Create a password (min 8 characters)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="h-11 border-2 border-black bg-white pr-10 text-base sm:text-sm font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSignUpPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black p-1 cursor-pointer"
+                aria-label={showSignUpPassword ? "Hide password" : "Show password"}
+              >
+                {showSignUpPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
 
           {/* 5 SOL Theory Avatar Color Swatches */}
@@ -550,7 +774,7 @@ export function GuestAuthPanel({
                       aria-pressed={selected}
                       style={{ backgroundColor: option.color }}
                       className={cn(
-                        "h-8 w-8 rounded-full border-2 border-black flex items-center justify-center transition-transform",
+                        "h-8 w-8 rounded-full border-2 border-black flex items-center justify-center transition-transform cursor-pointer",
                         option.textClass,
                         selected
                           ? "scale-110 ring-2 ring-black ring-offset-2"
@@ -577,22 +801,35 @@ export function GuestAuthPanel({
           <Button
             type="submit"
             disabled={isSubmitting}
-            className="w-full h-11 rounded-xl border-2 border-black bg-[#2ECC71] text-black font-black text-sm hover:bg-[#27ae60] shadow-[3px_3px_0px_#000]"
+            className="w-full h-11 rounded-xl border-2 border-black bg-[#2ECC71] text-black font-black text-sm hover:bg-[#27ae60] shadow-[3px_3px_0px_#000] cursor-pointer"
           >
             {isSubmitting
               ? "Creating Account..."
               : "Create Free Account & Save Streaks"}
           </Button>
+
+          <p className="text-center text-xs text-gray-600">
+            Already have an account?{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("signin");
+                resetBanners();
+              }}
+              className="font-black text-black underline hover:text-[#9D50BB] cursor-pointer"
+            >
+              Log in instead
+            </button>
+          </p>
         </form>
       )}
 
       {/* TAB 3: MAGIC LINK */}
       {activeTab === "magic" && (
         <form onSubmit={handleMagicLinkSubmit} className="space-y-3.5">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
-            <strong>1-Click Passwordless Sign-In:</strong> Enter your email to
-            instantly activate and sync your SOL Theory profile across devices
-            without a password.
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 leading-relaxed">
+            <strong>Passwordless Sign-In:</strong> We&apos;ll email you a secure
+            sign-in link. Click the link in your inbox to complete sign in.
           </div>
 
           <div className="space-y-1.5">
@@ -605,7 +842,7 @@ export function GuestAuthPanel({
             <Input
               id={`${formId}-magic-email`}
               type="email"
-              autoComplete="email"
+              autoComplete="username"
               required
               placeholder="you@example.com"
               value={email}
@@ -617,16 +854,249 @@ export function GuestAuthPanel({
           <Button
             type="submit"
             disabled={isSubmitting}
-            className="w-full h-11 rounded-xl border-2 border-black bg-[#F9D423] text-black font-black text-sm hover:bg-[#f0c808] shadow-[3px_3px_0px_#000]"
+            className="w-full h-11 rounded-xl border-2 border-black bg-[#F9D423] text-black font-black text-sm hover:bg-[#f0c808] shadow-[3px_3px_0px_#000] cursor-pointer"
           >
             <Mail className="h-4 w-4 mr-2" />
             {isSubmitting
-              ? "Sending Magic Link..."
-              : "Send 1-Click Magic Link"}
+              ? "Sending Sign-In Link..."
+              : "Send Secure Sign-In Link"}
           </Button>
         </form>
       )}
+
+      {/* TAB 4: FORGOT PASSWORD */}
+      {activeTab === "forgot" && (
+        <form onSubmit={handleForgotPasswordSubmit} className="space-y-3.5">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700 leading-relaxed">
+            <strong>Reset Your Password:</strong> Enter your email address and
+            we will send you a secure link to choose a new password.
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor={`${formId}-forgot-email`}
+              className="block text-xs font-black uppercase tracking-wider text-gray-700"
+            >
+              Email Address
+            </label>
+            <Input
+              id={`${formId}-forgot-email`}
+              type="email"
+              autoComplete="username"
+              required
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="h-11 border-2 border-black bg-white text-base sm:text-sm font-medium"
+            />
+          </div>
+
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full h-11 rounded-xl border-2 border-black bg-[#9D50BB] text-white font-black text-sm hover:bg-[#8338a0] shadow-[3px_3px_0px_#000] cursor-pointer"
+          >
+            <KeyRound className="h-4 w-4 mr-2" />
+            {isSubmitting ? "Sending Reset Link..." : "Send Reset Instructions"}
+          </Button>
+
+          <p className="text-center text-xs text-gray-600">
+            Remembered your password?{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("signin");
+                resetBanners();
+              }}
+              className="font-black text-black underline hover:text-[#9D50BB] cursor-pointer"
+            >
+              Back to Sign In
+            </button>
+          </p>
+        </form>
+      )}
     </div>
+  );
+}
+
+export function SetNewPasswordModal({
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
+}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { toast } = useToast();
+  const formId = useId();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+
+    const cleanPassword = newPassword.trim();
+    if (cleanPassword.length < 8) {
+      setErrorMessage("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (cleanPassword !== confirmPassword.trim()) {
+      setErrorMessage("Passwords do not match. Please re-enter.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setErrorMessage("Authentication service unavailable.");
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({
+        password: cleanPassword,
+      });
+
+      if (error) {
+        setErrorMessage(
+          error.message ||
+            "Unable to set new password. The recovery link may have expired."
+        );
+        return;
+      }
+
+      toast({
+        title: "Password Set Successfully",
+        description:
+          "Your new password has been saved. You are now logged in.",
+      });
+
+      // Clear recovery tokens from the URL cleanly
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+
+      onSuccess?.();
+      onOpenChange(false);
+    } catch {
+      setErrorMessage("Failed to update password. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md p-5 sm:p-6">
+        <DialogHeader className="text-left">
+          <div className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-[#9D50BB] mb-1">
+            <Lock className="h-3.5 w-3.5" />
+            SOL Theory Games · Security
+          </div>
+          <DialogTitle className="font-headline text-xl sm:text-2xl font-black text-black">
+            Set New Password
+          </DialogTitle>
+          <DialogDescription className="text-xs sm:text-sm text-gray-600">
+            Enter a new secure password (minimum 8 characters) for your SOL Theory account.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {errorMessage && (
+            <div
+              role="alert"
+              className="rounded-xl border-2 border-red-600 bg-red-50 px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-red-700"
+            >
+              {errorMessage}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor={`${formId}-new-password`}
+                className="block text-xs font-black uppercase tracking-wider text-gray-700"
+              >
+                New Password (min 8 chars)
+              </label>
+              {newPassword.length > 0 && (
+                <span
+                  className={cn(
+                    "text-[11px] font-black",
+                    newPassword.length >= 8
+                      ? "text-emerald-600"
+                      : "text-amber-600"
+                  )}
+                >
+                  {newPassword.length >= 8
+                    ? "✓ 8+ chars"
+                    : `${newPassword.length}/8 chars`}
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <Input
+                id={`${formId}-new-password`}
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="h-11 border-2 border-black bg-white pr-10 text-base sm:text-sm font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black p-1 cursor-pointer"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor={`${formId}-confirm-password`}
+              className="block text-xs font-black uppercase tracking-wider text-gray-700"
+            >
+              Confirm New Password
+            </label>
+            <div className="relative">
+              <Input
+                id={`${formId}-confirm-password`}
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                placeholder="Re-enter new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="h-11 border-2 border-black bg-white pr-10 text-base sm:text-sm font-medium"
+              />
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full h-11 rounded-xl border-2 border-black bg-black text-white font-black text-sm hover:bg-gray-900 shadow-[3px_3px_0px_#F9D423] cursor-pointer"
+          >
+            {isSubmitting ? "Updating Password..." : "Update Password & Sign In"}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

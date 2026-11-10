@@ -29,7 +29,11 @@ import {
   initRealtimePuzzleSync,
   syncAllRemoteDailyPuzzles,
 } from "@/lib/game-storage";
-import { ProfileViewerModal } from "@/components/account/profile-viewer-modal";
+import {
+  ProfileViewerModal,
+  SetNewPasswordModal,
+} from "@/components/account/profile-viewer-modal";
+import { getSupabaseClient } from "@/lib/supabase";
 
 export type AccountModalTab = "signin" | "signup" | "profile";
 
@@ -52,6 +56,9 @@ export interface AuthContextValue {
   signOut: () => Promise<void>;
   updateProfile: (updates: UpdateProfileInput) => Promise<AuthResult>;
   refreshProfile: () => Promise<UserProfile | null>;
+  isRecoveryOpen: boolean;
+  openSetNewPasswordModal: () => void;
+  closeSetNewPasswordModal: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,6 +67,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isRecoveryOpen, setIsRecoveryOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    return (
+      hash.includes("type=recovery") ||
+      search.includes("recovery=true") ||
+      search.includes("type=recovery")
+    );
+  });
   const [modalInitialTab, setModalInitialTab] =
     useState<AccountModalTab>("signin");
 
@@ -86,10 +103,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(nextProfile);
     });
 
+    const supabase = getSupabaseClient();
+    let authListener: { subscription: { unsubscribe: () => void } } | null = null;
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY") {
+          setIsRecoveryOpen(true);
+        }
+      });
+      authListener = data;
+    }
+
     return () => {
       isMounted = false;
       unsubscribeRealtime();
       unsubscribe();
+      authListener?.subscription.unsubscribe();
     };
   }, []);
 
@@ -107,6 +136,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const closeAccountModal = useCallback(() => {
     setIsModalOpen(false);
+  }, []);
+
+  const openSetNewPasswordModal = useCallback(() => {
+    setIsRecoveryOpen(true);
+  }, []);
+
+  const closeSetNewPasswordModal = useCallback(() => {
+    setIsRecoveryOpen(false);
   }, []);
 
   const handleSignIn = useCallback(
@@ -146,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         result.message ||
         result.error ||
         (result.ok
-          ? "Magic link sent! Your profile and streaks are synced."
+          ? "Check your inbox for your sign-in link."
           : "Could not send magic link.");
       return {
         ...result,
@@ -190,8 +227,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isModalOpen,
       modalInitialTab,
+      isRecoveryOpen,
       openAccountModal,
       closeAccountModal,
+      openSetNewPasswordModal,
+      closeSetNewPasswordModal,
       signIn: handleSignIn,
       signUp: handleSignUp,
       sendMagicLinkEmail: handleSendMagicLinkEmail,
@@ -204,8 +244,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isModalOpen,
       modalInitialTab,
+      isRecoveryOpen,
       openAccountModal,
       closeAccountModal,
+      openSetNewPasswordModal,
+      closeSetNewPasswordModal,
       handleSignIn,
       handleSignUp,
       handleSendMagicLinkEmail,
@@ -219,6 +262,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={value}>
       {children}
       <ProfileViewerModal />
+      <SetNewPasswordModal
+        open={isRecoveryOpen}
+        onOpenChange={setIsRecoveryOpen}
+        onSuccess={() => {
+          void handleRefreshProfile();
+        }}
+      />
     </AuthContext.Provider>
   );
 }

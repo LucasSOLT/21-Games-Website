@@ -16,11 +16,24 @@ import {
   type GameStats,
 } from "@/lib/game-storage";
 import { assetPath } from "@/lib/asset-path";
-import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  clearAuthStorage,
+  getRememberLogin,
+  getSupabaseClient,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
 import { checkContentModeration } from "@/lib/moderation";
 
-export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
 export const ACTIVE_USER_KEY = "solgames_v1_active_user";
+
+// Startup scrubber to purge legacy plaintext password database
+if (typeof window !== "undefined") {
+  try {
+    window.localStorage.removeItem("solgames_v1_accounts_db");
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 export type UserRole = "game_master" | "admin" | "user";
 
@@ -91,10 +104,6 @@ export interface UserProfile {
   lastSyncedAt: string;
 }
 
-export interface StoredLocalAccount {
-  profile: UserProfile;
-  password?: string;
-}
 
 export interface SignUpInput {
   email: string;
@@ -123,26 +132,6 @@ export interface AuthResult {
   magicLinkSent?: boolean;
 }
 
-function safeReadStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function safeWriteStorage<T>(key: string, value: T): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Ignore storage quota errors
-  }
-}
-
 export function isValidAvatarColor(value: unknown): value is AvatarColor {
   return (
     typeof value === "string" &&
@@ -150,7 +139,8 @@ export function isValidAvatarColor(value: unknown): value is AvatarColor {
   );
 }
 
-export function normalizeEmail(email: string): string {
+export function normalizeEmail(email?: string | null): string {
+  if (!email || typeof email !== "string") return "";
   return email.trim().toLowerCase();
 }
 
@@ -167,9 +157,59 @@ export function isValidUserRole(value: unknown): value is UserRole {
   );
 }
 
+let activeVerifiedJwtEmail: string | null = null;
+let activeVerifiedJwtToken: string | null = null;
+
+export function getVerifiedJwtEmail(): string | null {
+  return activeVerifiedJwtEmail;
+}
+
+export function getVerifiedJwtToken(): string | null {
+  return activeVerifiedJwtToken;
+}
+
+export function setVerifiedJwtEmailForTesting(email: string | null): void {
+  activeVerifiedJwtEmail = email ? normalizeEmail(email) : null;
+}
+
+export async function verifyGameMasterSession(): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+  try {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+    if (error || !session?.user?.email || !session?.access_token) {
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      return false;
+    }
+    const email = normalizeEmail(session.user.email);
+    activeVerifiedJwtEmail = email;
+    activeVerifiedJwtToken = session.access_token;
+    return isInitialGameMaster(email);
+  } catch {
+    activeVerifiedJwtEmail = null;
+    activeVerifiedJwtToken = null;
+    return false;
+  }
+}
+
 export function isGameMaster(profile: UserProfile | null): boolean {
   if (!profile || profile.isBanned) return false;
-  return isInitialGameMaster(profile.email);
+  if (!profile.email || typeof profile.email !== "string") return false;
+  const email = normalizeEmail(profile.email);
+  if (!email || !isInitialGameMaster(email)) return false;
+
+  if (typeof window !== "undefined") {
+    if (profile.authMode !== "supabase") return false;
+    if (!activeVerifiedJwtEmail || activeVerifiedJwtEmail !== email) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function isAdmin(profile: UserProfile | null): boolean {
@@ -287,16 +327,6 @@ export function formatMemberSince(isoOrLabel: string): string {
   }).format(parsed);
 }
 
-function readLocalAccountsDb(): Record<string, StoredLocalAccount> {
-  return safeReadStorage<Record<string, StoredLocalAccount>>(
-    ACCOUNTS_DB_KEY,
-    {}
-  );
-}
-
-function writeLocalAccountsDb(db: Record<string, StoredLocalAccount>): void {
-  safeWriteStorage(ACCOUNTS_DB_KEY, db);
-}
 
 function resolveBoardMetadata(boardId: string): {
   boardTitle: string;
@@ -446,12 +476,19 @@ export function normalizeUserProfile(
 }
 
 export function getActiveUserProfile(): UserProfile | null {
-  const raw = safeReadStorage< (Partial<UserProfile> & { email?: string }) | null >(
-    ACTIVE_USER_KEY,
-    null
-  );
-  if (!raw || !raw.email) return null;
-  return normalizeUserProfile(raw as Partial<UserProfile> & { email: string });
+  if (typeof window === "undefined") return null;
+  try {
+    let raw = window.sessionStorage.getItem(ACTIVE_USER_KEY);
+    if (!raw) {
+      raw = window.localStorage.getItem(ACTIVE_USER_KEY);
+    }
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.email) return null;
+    return normalizeUserProfile(parsed as Partial<UserProfile> & { email: string });
+  } catch {
+    return null;
+  }
 }
 
 function emitAuthChanged(profile: UserProfile | null): void {
@@ -465,15 +502,14 @@ function emitAuthChanged(profile: UserProfile | null): void {
   }
 }
 
-export function saveActiveUserProfile(
-  profile: UserProfile | null,
-  passwordToPersist?: string
-): void {
+export function saveActiveUserProfile(profile: UserProfile | null): void {
   if (typeof window === "undefined") return;
 
   if (!profile) {
+    clearAuthStorage();
     try {
       window.localStorage.removeItem(ACTIVE_USER_KEY);
+      window.sessionStorage.removeItem(ACTIVE_USER_KEY);
     } catch {
       // Ignore storage errors
     }
@@ -482,15 +518,20 @@ export function saveActiveUserProfile(
   }
 
   const normalized = normalizeUserProfile(profile);
-  safeWriteStorage(ACTIVE_USER_KEY, normalized);
+  const remember = getRememberLogin();
+  const raw = JSON.stringify(normalized);
 
-  const db = readLocalAccountsDb();
-  const existingRecord = db[normalized.email];
-  db[normalized.email] = {
-    profile: normalized,
-    password: passwordToPersist ?? existingRecord?.password,
-  };
-  writeLocalAccountsDb(db);
+  try {
+    if (remember) {
+      window.localStorage.setItem(ACTIVE_USER_KEY, raw);
+      window.sessionStorage.removeItem(ACTIVE_USER_KEY);
+    } else {
+      window.sessionStorage.setItem(ACTIVE_USER_KEY, raw);
+      window.localStorage.removeItem(ACTIVE_USER_KEY);
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
 
   emitAuthChanged(normalized);
 }
@@ -688,17 +729,7 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
     }
   }
 
-  // 3. Merge local accounts
-  const localDb = readLocalAccountsDb();
-  for (const account of Object.values(localDb)) {
-    if (!account?.profile?.email) continue;
-    const email = normalizeEmail(account.profile.email);
-    if (!profileMap.has(email)) {
-      profileMap.set(email, normalizeUserProfile(account.profile));
-    }
-  }
-
-  // 4. Merge active user
+  // 3. Merge active user
   const active = getActiveUserProfile();
   if (active?.email) {
     const email = normalizeEmail(active.email);
@@ -754,16 +785,6 @@ export async function updateUserRole(
     };
   }
 
-  const db = readLocalAccountsDb();
-  if (db[normalizedTarget]) {
-    db[normalizedTarget].profile = normalizeUserProfile({
-      ...db[normalizedTarget].profile,
-      role: newRole,
-      lastSyncedAt: new Date().toISOString(),
-    });
-    writeLocalAccountsDb(db);
-  }
-
   const active = getActiveUserProfile();
   if (active && normalizeEmail(active.email) === normalizedTarget) {
     const updated = normalizeUserProfile({
@@ -771,8 +792,7 @@ export async function updateUserRole(
       role: newRole,
       lastSyncedAt: new Date().toISOString(),
     });
-    safeWriteStorage(ACTIVE_USER_KEY, updated);
-    emitAuthChanged(updated);
+    saveActiveUserProfile(updated);
   }
 
   if (isSupabaseConfigured) {
@@ -829,18 +849,6 @@ export async function setUserBannedStatus(
     ? (reason?.trim() || "Account suspended by Game Master.")
     : null;
 
-  const db = readLocalAccountsDb();
-  if (db[normalizedTarget]) {
-    db[normalizedTarget].profile = normalizeUserProfile({
-      ...db[normalizedTarget].profile,
-      isBanned,
-      bannedAt,
-      bannedReason,
-      lastSyncedAt: new Date().toISOString(),
-    });
-    writeLocalAccountsDb(db);
-  }
-
   const active = getActiveUserProfile();
   if (active && normalizeEmail(active.email) === normalizedTarget) {
     const updated = normalizeUserProfile({
@@ -850,8 +858,7 @@ export async function setUserBannedStatus(
       bannedReason,
       lastSyncedAt: new Date().toISOString(),
     });
-    safeWriteStorage(ACTIVE_USER_KEY, updated);
-    emitAuthChanged(updated);
+    saveActiveUserProfile(updated);
   }
 
   if (isSupabaseConfigured) {
@@ -918,26 +925,11 @@ export async function syncProfileAndMergeGuestStats(
   try {
     const normalizedBase = normalizeUserProfile(baseProfile);
 
-    // Also merge with any stored local account record for this email so no prior stats are lost
-    const localDb = readLocalAccountsDb();
-    const existingStored = localDb[normalizedBase.email]?.profile;
-
     const localC5 = getGameStats("connect-5");
     const local21 = getGameStats("21-things");
 
-    const mergedC5 = existingStored
-      ? mergeTwoGameStats(
-          mergeTwoGameStats(normalizedBase.connect5Stats, existingStored.connect5Stats),
-          localC5
-        )
-      : mergeTwoGameStats(normalizedBase.connect5Stats, localC5);
-
-    const merged21 = existingStored
-      ? mergeTwoGameStats(
-          mergeTwoGameStats(normalizedBase.twentyOneStats, existingStored.twentyOneStats),
-          local21
-        )
-      : mergeTwoGameStats(normalizedBase.twentyOneStats, local21);
+    const mergedC5 = mergeTwoGameStats(normalizedBase.connect5Stats, localC5);
+    const merged21 = mergeTwoGameStats(normalizedBase.twentyOneStats, local21);
 
     // Write merged stats back to localStorage so GameShell and game boards reflect merged streaks
     setGameStats("connect-5", mergedC5);
@@ -949,16 +941,12 @@ export async function syncProfileAndMergeGuestStats(
       new Set([
         ...localCreatedBoards.map((b) => b.id),
         ...normalizedBase.createdBoardIds,
-        ...(existingStored?.createdBoardIds ?? []),
       ])
     ).filter(Boolean);
 
     // Merge recent #1 resonance picks from local journeys
     const localJourneys = getAllLocalPlayerJourneys();
-    const priorPicks = [
-      ...normalizedBase.recentPicks,
-      ...(existingStored?.recentPicks ?? []),
-    ];
+    const priorPicks = normalizedBase.recentPicks;
     const mergedRecentPicks = mergeRecentPicks(priorPicks, localJourneys);
 
     syncedProfile = {
@@ -991,66 +979,93 @@ export async function syncProfileAndMergeGuestStats(
 export async function restoreUserSession(): Promise<UserProfile | null> {
   ensureProfileSyncListenerRegistered();
 
-  if (isSupabaseConfigured) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data } = await supabase.auth.getSession();
-        const sessionUser = data?.session?.user;
-        if (sessionUser && sessionUser.email) {
-          const email = normalizeEmail(sessionUser.email);
-          const remoteRow = await fetchSupabaseUserProfileRow(
-            sessionUser.id,
-            email
-          );
-          const localActive = getActiveUserProfile();
-          const meta = sessionUser.user_metadata ?? {};
+  if (!isSupabaseConfigured) {
+    activeVerifiedJwtEmail = null;
+    activeVerifiedJwtToken = null;
+    saveActiveUserProfile(null);
+    return null;
+  }
 
-          const baseProfile = normalizeUserProfile({
-            id: sessionUser.id,
-            email,
-            displayName:
-              remoteRow?.displayName ||
-              (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
-              localActive?.displayName ||
-              deriveDisplayNameFromEmail(email),
-            handle:
-              remoteRow?.handle ||
-              (typeof meta.handle === "string" ? meta.handle : undefined) ||
-              localActive?.handle ||
-              normalizeHandle(undefined, email),
-            avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
-              ? remoteRow.avatarColor
-              : isValidAvatarColor(meta.avatar_color)
-              ? meta.avatar_color
-              : localActive?.avatarColor ?? "#F9D423",
-            memberSince:
-              remoteRow?.memberSince ||
-              sessionUser.created_at ||
-              localActive?.memberSince ||
-              new Date().toISOString(),
-            connect5Stats: remoteRow?.connect5Stats ?? localActive?.connect5Stats,
-            twentyOneStats: remoteRow?.twentyOneStats ?? localActive?.twentyOneStats,
-            createdBoardIds:
-              remoteRow?.createdBoardIds ?? localActive?.createdBoardIds ?? [],
-            recentPicks: remoteRow?.recentPicks ?? localActive?.recentPicks ?? [],
-            authMode: "supabase",
-          });
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    activeVerifiedJwtEmail = null;
+    activeVerifiedJwtToken = null;
+    saveActiveUserProfile(null);
+    return null;
+  }
 
-          return await syncProfileAndMergeGuestStats(baseProfile);
-        }
-      } catch {
-        // Fallback cleanly to local session
-      }
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    const session = data?.session;
+    const sessionUser = session?.user;
+
+    if (error || !sessionUser || !sessionUser.email || !session?.access_token) {
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      saveActiveUserProfile(null);
+      return null;
     }
-  }
 
-  const localProfile = getActiveUserProfile();
-  if (localProfile) {
-    return await syncProfileAndMergeGuestStats(localProfile);
-  }
+    const email = normalizeEmail(sessionUser.email);
+    activeVerifiedJwtEmail = email;
+    activeVerifiedJwtToken = session.access_token;
 
-  return null;
+    const remoteRow = await fetchSupabaseUserProfileRow(
+      sessionUser.id,
+      email
+    );
+
+    if (remoteRow?.isBanned) {
+      await supabase.auth.signOut();
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      saveActiveUserProfile(null);
+      return null;
+    }
+
+    const meta = sessionUser.user_metadata ?? {};
+    const localActive = getActiveUserProfile();
+
+    const baseProfile = normalizeUserProfile({
+      id: sessionUser.id,
+      email,
+      displayName:
+        remoteRow?.displayName ||
+        (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
+        localActive?.displayName ||
+        deriveDisplayNameFromEmail(email),
+      handle:
+        remoteRow?.handle ||
+        (typeof meta.handle === "string" ? meta.handle : undefined) ||
+        localActive?.handle ||
+        normalizeHandle(undefined, email),
+      avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
+        ? remoteRow.avatarColor
+        : isValidAvatarColor(meta.avatar_color)
+        ? meta.avatar_color
+        : localActive?.avatarColor ?? "#F9D423",
+      memberSince:
+        remoteRow?.memberSince ||
+        sessionUser.created_at ||
+        localActive?.memberSince ||
+        new Date().toISOString(),
+      connect5Stats: remoteRow?.connect5Stats ?? localActive?.connect5Stats,
+      twentyOneStats: remoteRow?.twentyOneStats ?? localActive?.twentyOneStats,
+      createdBoardIds:
+        remoteRow?.createdBoardIds ?? localActive?.createdBoardIds ?? [],
+      recentPicks: remoteRow?.recentPicks ?? localActive?.recentPicks ?? [],
+      authMode: "supabase",
+    });
+
+    const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    saveActiveUserProfile(synced);
+    return synced;
+  } catch {
+    activeVerifiedJwtEmail = null;
+    activeVerifiedJwtToken = null;
+    saveActiveUserProfile(null);
+    return null;
+  }
 }
 
 export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
@@ -1064,11 +1079,11 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
   }
 
   const password = input.password?.trim() || "";
-  if (password && password.length < 6) {
+  if (!password || password.length < 8) {
     return {
       ok: false,
       profile: null,
-      error: "Password must be at least 6 characters.",
+      error: "Password must be at least 8 characters.",
     };
   }
 
@@ -1101,98 +1116,110 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     ? input.avatarColor
     : "#F9D423";
 
-  if (isSupabaseConfigured) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: password || `solgames_${email.slice(0, 8)}_2026`,
-          options: {
-            data: {
-              display_name: displayName,
-              handle,
-              avatar_color: avatarColor,
-            },
-          },
-        });
-
-        if (!error && data?.user) {
-          const remoteRow = await fetchSupabaseUserProfileRow(
-            data.user.id,
-            email
-          );
-          const baseProfile = normalizeUserProfile({
-            id: data.user.id,
-            email,
-            displayName: remoteRow?.displayName || displayName,
-            handle: remoteRow?.handle || handle,
-            avatarColor: remoteRow?.avatarColor || avatarColor,
-            memberSince: data.user.created_at || new Date().toISOString(),
-            connect5Stats: remoteRow?.connect5Stats,
-            twentyOneStats: remoteRow?.twentyOneStats,
-            createdBoardIds: remoteRow?.createdBoardIds,
-            recentPicks: remoteRow?.recentPicks,
-            authMode: "supabase",
-          });
-
-          const synced = await syncProfileAndMergeGuestStats(baseProfile);
-          if (password) {
-            saveActiveUserProfile(synced, password);
-          }
-          return {
-            ok: true,
-            profile: synced,
-            message:
-              "Account created! Your stats and daily streaks are now backed up.",
-          };
-        }
-      } catch {
-        // Fall through to local persistence so user is never blocked
-      }
-    }
-  }
-
-  // Local fallback (or when Supabase is unconfigured / rate-limited / confirmation-pending)
-  const db = readLocalAccountsDb();
-  const existing = db[email];
-  if (existing?.password && existing.password !== password) {
+  if (!isSupabaseConfigured) {
     return {
       ok: false,
       profile: null,
-      error:
-        "An account with this email already exists. Please sign in with your password.",
+      error: "Authentication service is temporarily unavailable.",
     };
   }
 
-  const baseProfile = normalizeUserProfile({
-    id: existing?.profile.id || `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
-    email,
-    displayName: input.displayName?.trim() || existing?.profile.displayName || displayName,
-    handle: input.handle?.trim()
-      ? normalizeHandle(input.handle, email)
-      : existing?.profile.handle || handle,
-    avatarColor: isValidAvatarColor(input.avatarColor)
-      ? input.avatarColor
-      : existing?.profile.avatarColor || avatarColor,
-    memberSince: existing?.profile.memberSince || new Date().toISOString(),
-    connect5Stats: existing?.profile.connect5Stats,
-    twentyOneStats: existing?.profile.twentyOneStats,
-    createdBoardIds: existing?.profile.createdBoardIds,
-    recentPicks: existing?.profile.recentPicks,
-    authMode: isSupabaseConfigured ? "supabase" : "local",
-  });
-
-  const synced = await syncProfileAndMergeGuestStats(baseProfile);
-  if (password) {
-    saveActiveUserProfile(synced, password);
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Unable to initialize authentication client.",
+    };
   }
 
-  return {
-    ok: true,
-    profile: synced,
-    message: "Account created! Your stats and daily streaks are synced.",
-  };
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: displayName,
+          handle,
+          avatar_color: avatarColor,
+        },
+      },
+    });
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (
+        msg.includes("already registered") ||
+        msg.includes("already exists") ||
+        msg.includes("registered") ||
+        msg.includes("duplicate") ||
+        error.status === 422
+      ) {
+        return {
+          ok: false,
+          profile: null,
+          error: "An account with this email already exists. Please log in or use Forgot Password.",
+        };
+      }
+      return {
+        ok: false,
+        profile: null,
+        error: error.message || "Unable to create account. Please try again.",
+      };
+    }
+
+    if (!data?.user) {
+      return {
+        ok: false,
+        profile: null,
+        error: "Unable to create account. Please try again.",
+      };
+    }
+
+    if (data.user && !data.session) {
+      return {
+        ok: true,
+        profile: null,
+        message: "Account created! Check your inbox for a confirmation link to activate your account.",
+      };
+    }
+
+    activeVerifiedJwtEmail = normalizeEmail(data.user.email || email);
+    activeVerifiedJwtToken = data.session?.access_token || null;
+
+    const remoteRow = await fetchSupabaseUserProfileRow(
+      data.user.id,
+      email
+    );
+    const baseProfile = normalizeUserProfile({
+      id: data.user.id,
+      email,
+      displayName: remoteRow?.displayName || displayName,
+      handle: remoteRow?.handle || handle,
+      avatarColor: remoteRow?.avatarColor || avatarColor,
+      memberSince: data.user.created_at || new Date().toISOString(),
+      connect5Stats: remoteRow?.connect5Stats,
+      twentyOneStats: remoteRow?.twentyOneStats,
+      createdBoardIds: remoteRow?.createdBoardIds,
+      recentPicks: remoteRow?.recentPicks,
+      authMode: "supabase",
+    });
+
+    const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    saveActiveUserProfile(synced);
+    return {
+      ok: true,
+      profile: synced,
+      message:
+        "Account created! Your stats and daily streaks are now backed up.",
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      profile: null,
+      error: err instanceof Error ? err.message : "Unable to create account.",
+    };
+  }
 }
 
 export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
@@ -1206,132 +1233,135 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
   }
 
   const password = input.password?.trim() || "";
-  const db = readLocalAccountsDb();
-  const localRecord = db[email];
-
-  if (isSupabaseConfigured && password) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (!error && data?.user) {
-          const remoteRow = await fetchSupabaseUserProfileRow(
-            data.user.id,
-            email
-          );
-          const meta = data.user.user_metadata ?? {};
-          const baseProfile = normalizeUserProfile({
-            id: data.user.id,
-            email,
-            displayName:
-              remoteRow?.displayName ||
-              (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
-              localRecord?.profile.displayName ||
-              deriveDisplayNameFromEmail(email),
-            handle:
-              remoteRow?.handle ||
-              (typeof meta.handle === "string" ? meta.handle : undefined) ||
-              localRecord?.profile.handle ||
-              normalizeHandle(undefined, email),
-            avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
-              ? remoteRow.avatarColor
-              : isValidAvatarColor(meta.avatar_color)
-              ? meta.avatar_color
-              : localRecord?.profile.avatarColor ?? "#F9D423",
-            memberSince:
-              remoteRow?.memberSince ||
-              data.user.created_at ||
-              localRecord?.profile.memberSince ||
-              new Date().toISOString(),
-            connect5Stats:
-              remoteRow?.connect5Stats ?? localRecord?.profile.connect5Stats,
-            twentyOneStats:
-              remoteRow?.twentyOneStats ?? localRecord?.profile.twentyOneStats,
-            createdBoardIds:
-              remoteRow?.createdBoardIds ?? localRecord?.profile.createdBoardIds,
-            recentPicks:
-              remoteRow?.recentPicks ?? localRecord?.profile.recentPicks,
-            authMode: "supabase",
-          });
-
-          const synced = await syncProfileAndMergeGuestStats(baseProfile);
-          saveActiveUserProfile(synced, password);
-          return {
-            ok: true,
-            profile: synced,
-            message: "Welcome back! Your stats and streaks have been synced.",
-          };
-        }
-
-        if (
-          error &&
-          error.message.toLowerCase().includes("invalid login credentials")
-        ) {
-          if (!localRecord?.password || localRecord.password !== password) {
-            return {
-              ok: false,
-              profile: null,
-              error: "Incorrect email or password. Please try again.",
-            };
-          }
-        }
-      } catch {
-        // Fall through to local account check
-      }
-    }
+  if (!password) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Please enter your password.",
+    };
   }
 
-  // Check local accounts DB password if account exists locally
-  if (localRecord) {
-    if (localRecord.password && localRecord.password !== password) {
+  if (!isSupabaseConfigured) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Authentication service is temporarily unavailable.",
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Unable to initialize authentication client.",
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (
+        msg.includes("invalid login credentials") ||
+        msg.includes("invalid_credentials") ||
+        error.status === 400
+      ) {
+        return {
+          ok: false,
+          profile: null,
+          error: "Invalid email or password. Please try again or create an account.",
+        };
+      }
+      if (msg.includes("email not confirmed")) {
+        return {
+          ok: false,
+          profile: null,
+          error: "Please verify your email address before signing in.",
+        };
+      }
       return {
         ok: false,
         profile: null,
-        error: "Incorrect email or password. Please try again.",
+        error: error.message || "Unable to sign in. Please check your credentials.",
       };
     }
 
-    const synced = await syncProfileAndMergeGuestStats(localRecord.profile);
-    if (password && !localRecord.password) {
-      saveActiveUserProfile(synced, password);
+    if (!data?.user) {
+      return {
+        ok: false,
+        profile: null,
+        error: "Sign in failed. No user returned.",
+      };
     }
-    return {
-      ok: true,
-      profile: synced,
-      message: "Welcome back! Your stats and streaks are synced.",
-    };
-  }
 
-  // Also check if public.user_profiles has a row for this email in Supabase
-  const remoteByEmail = await fetchSupabaseUserProfileRow(
-    `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
-    email
-  );
-  if (remoteByEmail) {
+    activeVerifiedJwtEmail = normalizeEmail(data.user.email || email);
+    activeVerifiedJwtToken = data.session?.access_token || null;
+
+    const remoteRow = await fetchSupabaseUserProfileRow(
+      data.user.id,
+      email
+    );
+
+    if (remoteRow?.isBanned) {
+      await supabase.auth.signOut();
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      saveActiveUserProfile(null);
+      return {
+        ok: false,
+        profile: null,
+        error: `Account suspended: ${remoteRow.bannedReason || "Access revoked."}`,
+      };
+    }
+
+    const meta = data.user.user_metadata ?? {};
     const baseProfile = normalizeUserProfile({
-      ...remoteByEmail,
+      id: data.user.id,
       email,
+      displayName:
+        remoteRow?.displayName ||
+        (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
+        deriveDisplayNameFromEmail(email),
+      handle:
+        remoteRow?.handle ||
+        (typeof meta.handle === "string" ? meta.handle : undefined) ||
+        normalizeHandle(undefined, email),
+      avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
+        ? remoteRow.avatarColor
+        : isValidAvatarColor(meta.avatar_color)
+        ? meta.avatar_color
+        : "#F9D423",
+      memberSince:
+        remoteRow?.memberSince ||
+        data.user.created_at ||
+        new Date().toISOString(),
+      connect5Stats: remoteRow?.connect5Stats,
+      twentyOneStats: remoteRow?.twentyOneStats,
+      createdBoardIds: remoteRow?.createdBoardIds,
+      recentPicks: remoteRow?.recentPicks,
+      authMode: "supabase",
     });
+
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
-    if (password) {
-      saveActiveUserProfile(synced, password);
-    }
+    saveActiveUserProfile(synced);
+
     return {
       ok: true,
       profile: synced,
-      message: "Welcome back! Your profile and streaks have been restored.",
+      message: "Welcome back! Your stats and streaks have been synced.",
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      profile: null,
+      error: err instanceof Error ? err.message : "Unable to sign in.",
     };
   }
-
-  // Seamless 1-step sign-in/account creation on new device when no prior account exists
-  return await signUpWithEmail({
-    email,
-    password: password || undefined,
-  });
 }
 
 export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
@@ -1344,67 +1374,117 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
     };
   }
 
-  if (isSupabaseConfigured) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            emailRedirectTo:
-              typeof window !== "undefined"
-                ? `${window.location.origin}${assetPath("/")}`
-                : undefined,
-          },
-        });
-      } catch {
-        // Fall back cleanly if rate-limited
-      }
-    }
+  if (!isSupabaseConfigured) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Authentication service is temporarily unavailable.",
+    };
   }
 
-  const db = readLocalAccountsDb();
-  const existing = db[email]?.profile;
-  const remoteRow = await fetchSupabaseUserProfileRow(
-    existing?.id || `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
-    email
-  );
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return {
+      ok: false,
+      profile: null,
+      error: "Unable to initialize authentication client.",
+    };
+  }
 
-  const baseProfile = normalizeUserProfile({
-    id:
-      remoteRow?.id ||
-      existing?.id ||
-      `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
-    email,
-    displayName:
-      remoteRow?.displayName ||
-      existing?.displayName ||
-      deriveDisplayNameFromEmail(email),
-    handle:
-      remoteRow?.handle || existing?.handle || normalizeHandle(undefined, email),
-    avatarColor:
-      remoteRow?.avatarColor || existing?.avatarColor || "#F9D423",
-    memberSince:
-      remoteRow?.memberSince ||
-      existing?.memberSince ||
-      new Date().toISOString(),
-    connect5Stats: remoteRow?.connect5Stats ?? existing?.connect5Stats,
-    twentyOneStats: remoteRow?.twentyOneStats ?? existing?.twentyOneStats,
-    createdBoardIds: remoteRow?.createdBoardIds ?? existing?.createdBoardIds,
-    recentPicks: remoteRow?.recentPicks ?? existing?.recentPicks,
-    authMode: isSupabaseConfigured ? "supabase" : "local",
-  });
+  try {
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}${assetPath("/")}`
+        : undefined;
 
-  const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo,
+      },
+    });
 
-  return {
-    ok: true,
-    profile: synced,
-    magicLinkSent: true,
-    message: isSupabaseConfigured
-      ? "Magic link sent & your profile is active! Your stats and streaks are synced."
-      : "Signed in via instant Magic Link! Your stats and streaks are synced.",
-  };
+    if (error) {
+      return {
+        ok: false,
+        profile: null,
+        error: error.message || "Failed to send magic link. Please try again.",
+      };
+    }
+
+    return {
+      ok: true,
+      profile: null,
+      magicLinkSent: true,
+      message: "Check your inbox for your sign-in link.",
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      profile: null,
+      error: err instanceof Error ? err.message : "Failed to send magic link.",
+    };
+  }
+}
+
+export async function requestPasswordReset(
+  emailInput: string
+): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const email = normalizeEmail(emailInput || "");
+  if (!email || !email.includes("@") || !email.includes(".")) {
+    return {
+      ok: false,
+      error: "Please enter a valid email address.",
+    };
+  }
+
+  if (!isSupabaseConfigured) {
+    return {
+      ok: false,
+      error: "Authentication service is temporarily unavailable.",
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return {
+      ok: false,
+      error: "Unable to initialize authentication client.",
+    };
+  }
+
+  try {
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "https://21games.ai";
+    const redirectTo = `${origin}${assetPath("/account?recovery=true")}`;
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "Unable to send password reset email.",
+      };
+    }
+
+    return {
+      ok: true,
+      message:
+        "If an account exists for this email, password reset instructions have been sent. Please check your inbox.",
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "Unable to send password reset email.",
+    };
+  }
 }
 
 export async function signOutUser(): Promise<void> {
@@ -1560,5 +1640,6 @@ export const signUp = signUpWithEmail;
 export const signIn = signInWithEmail;
 export const signInWithMagicLink = sendMagicLink;
 export const signOut = signOutUser;
+export const resetPassword = requestPasswordReset;
 export const updateProfile = updateUserProfile;
 

@@ -2,6 +2,7 @@
 -- SOL GaMES (21games.ai) — Supabase Postgres Schema
 -- Architecture: Vercel (Static/Edge Frontend) + Supabase Postgres
 -- Zero Firebase/Firestore dependencies.
+-- Updated for Milestone M2.5-B2 (P0 Auth & Login Security Lockdown)
 -- =============================================================================
 
 create extension if not exists "pgcrypto";
@@ -62,18 +63,45 @@ create table if not exists public.twenty_one_responses (
 create index if not exists idx_twenty_one_responses_board
   on public.twenty_one_responses (board_id, created_at desc);
 
--- Row Level Security (Public read, anon insert/upsert for MVP social gameplay)
+-- Row Level Security
 alter table public.daily_puzzles enable row level security;
 alter table public.twenty_one_boards enable row level security;
 alter table public.twenty_one_responses enable row level security;
 
+-- Row Level Security on daily_puzzles: Public SELECT, Game Master INSERT/UPDATE/DELETE
 drop policy if exists "Public read daily_puzzles" on public.daily_puzzles;
 create policy "Public read daily_puzzles"
   on public.daily_puzzles for select using (true);
 
 drop policy if exists "Admin upsert daily_puzzles" on public.daily_puzzles;
-create policy "Admin upsert daily_puzzles"
-  on public.daily_puzzles for all using (true) with check (true);
+drop policy if exists "Game masters insert daily_puzzles" on public.daily_puzzles;
+drop policy if exists "Game masters update daily_puzzles" on public.daily_puzzles;
+drop policy if exists "Game masters delete daily_puzzles" on public.daily_puzzles;
+drop policy if exists "Game masters write daily_puzzles" on public.daily_puzzles;
+
+create policy "Game masters insert daily_puzzles"
+  on public.daily_puzzles
+  for insert
+  with check (
+    lower(auth.jwt() ->> 'email') in ('lucas@soltheory.com', 'steve@soltheory.com')
+  );
+
+create policy "Game masters update daily_puzzles"
+  on public.daily_puzzles
+  for update
+  using (
+    lower(auth.jwt() ->> 'email') in ('lucas@soltheory.com', 'steve@soltheory.com')
+  )
+  with check (
+    lower(auth.jwt() ->> 'email') in ('lucas@soltheory.com', 'steve@soltheory.com')
+  );
+
+create policy "Game masters delete daily_puzzles"
+  on public.daily_puzzles
+  for delete
+  using (
+    lower(auth.jwt() ->> 'email') in ('lucas@soltheory.com', 'steve@soltheory.com')
+  );
 
 drop policy if exists "Public read twenty_one_boards" on public.twenty_one_boards;
 create policy "Public read twenty_one_boards"
@@ -95,10 +123,10 @@ drop policy if exists "Anyone can submit twenty_one_responses" on public.twenty_
 create policy "Anyone can submit twenty_one_responses"
   on public.twenty_one_responses for insert with check (true);
 
--- 4. User Profiles & Synced Game Stats (NYT Games-Style Account & Profile Viewer)
+-- 4. User Profiles & Synced Game Stats (uuid PK 1:1 with auth.users)
 create table if not exists public.user_profiles (
-  id text primary key,
-  email text unique not null,
+  id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+  email text not null constraint user_profiles_email_trimmed_lower_check check (email = lower(btrim(email))),
   display_name text not null,
   handle text not null,
   avatar_color text not null default '#F9D423',
@@ -114,16 +142,43 @@ create table if not exists public.user_profiles (
   updated_at timestamptz not null default now()
 );
 
--- Idempotent column additions for existing installations
-alter table public.user_profiles
-  add column if not exists role text not null default 'user'
-    check (role in ('game_master', 'admin', 'user')),
-  add column if not exists is_banned boolean not null default false,
-  add column if not exists banned_at timestamptz,
-  add column if not exists banned_reason text;
+-- Idempotent adjustments for existing installations
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'user_profiles'
+      and column_name = 'id'
+      and data_type <> 'uuid'
+  ) then
+    alter table public.user_profiles
+      alter column id type uuid using id::uuid;
+  end if;
+end;
+$$;
 
-create index if not exists idx_user_profiles_email
-  on public.user_profiles (email);
+alter table public.user_profiles
+  alter column id set default auth.uid();
+
+alter table public.user_profiles
+  drop constraint if exists user_profiles_id_fkey;
+
+alter table public.user_profiles
+  add constraint user_profiles_id_fkey
+  foreign key (id) references auth.users(id) on delete cascade;
+
+alter table public.user_profiles
+  drop constraint if exists user_profiles_email_trimmed_lower_check;
+
+alter table public.user_profiles
+  add constraint user_profiles_email_trimmed_lower_check
+  check (email = lower(btrim(email)));
+
+drop index if exists public.idx_user_profiles_lower_email;
+create unique index if not exists idx_user_profiles_lower_email
+  on public.user_profiles (lower(email));
 
 create index if not exists idx_user_profiles_role
   on public.user_profiles (role);
@@ -136,6 +191,7 @@ update public.user_profiles
   set role = 'game_master', is_banned = false, banned_at = null, banned_reason = null
   where lower(email) in ('lucas@soltheory.com', 'steve@soltheory.com', 'luke@soltheory.com');
 
+-- Row Level Security on user_profiles: Public SELECT, User-Owned INSERT/UPDATE/DELETE
 alter table public.user_profiles enable row level security;
 
 drop policy if exists "Public read user_profiles" on public.user_profiles;
@@ -143,12 +199,22 @@ create policy "Public read user_profiles"
   on public.user_profiles for select using (true);
 
 drop policy if exists "Anyone can insert user_profiles" on public.user_profiles;
-create policy "Anyone can insert user_profiles"
-  on public.user_profiles for insert with check (true);
+drop policy if exists "Users can insert own profile" on public.user_profiles;
+create policy "Users can insert own profile"
+  on public.user_profiles for insert
+  with check (auth.uid() = id);
 
 drop policy if exists "Anyone can update user_profiles" on public.user_profiles;
-create policy "Anyone can update user_profiles"
-  on public.user_profiles for update using (true) with check (true);
+drop policy if exists "Users can update own profile" on public.user_profiles;
+create policy "Users can update own profile"
+  on public.user_profiles for update
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
+
+drop policy if exists "Users can delete own profile" on public.user_profiles;
+create policy "Users can delete own profile"
+  on public.user_profiles for delete
+  using (auth.uid() = id);
 
 -- 5. Table & Schema Grants for Supabase Publishable / Anon / Authenticated Roles
 grant usage on schema public to anon, authenticated;
@@ -193,5 +259,44 @@ begin
 end;
 $$;
 
+-- 7. Trigger to automatically create and sync user_profiles on auth.users insert
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.user_profiles (
+    id,
+    email,
+    display_name,
+    handle,
+    avatar_color,
+    role
+  )
+  values (
+    new.id,
+    lower(btrim(new.email)),
+    coalesce(new.raw_user_meta_data->>'display_name', split_part(new.email, '@', 1)),
+    coalesce(new.raw_user_meta_data->>'handle', '@' || lower(regexp_replace(split_part(new.email, '@', 1), '[^a-z0-9_]', '_', 'g'))),
+    coalesce(new.raw_user_meta_data->>'avatar_color', '#F9D423'),
+    case
+      when lower(btrim(new.email)) in ('lucas@soltheory.com', 'steve@soltheory.com', 'luke@soltheory.com') then 'game_master'
+      else 'user'
+    end
+  )
+  on conflict (id) do update set
+    email = lower(btrim(excluded.email)),
+    role = case
+      when lower(btrim(excluded.email)) in ('lucas@soltheory.com', 'steve@soltheory.com', 'luke@soltheory.com') then 'game_master'
+      else public.user_profiles.role
+    end;
+  return new;
+end;
+$$;
 
-
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
