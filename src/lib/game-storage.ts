@@ -7,6 +7,7 @@ import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import type { PlayableGameSlug } from "@/lib/games-config";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   check21ThingsBoardModeration,
   checkMultipleFields,
@@ -962,18 +963,26 @@ function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
   if (!detail) return;
   puzzlesStoreRevision += 1;
 
+  const payload = detail.payload ?? detail.puzzle ?? detail.board;
+
   // If this update contained puzzle data, ensure local storage has it
-  if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && detail.puzzle) {
+  if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && payload) {
+    const puzzle = payload as Connect5Puzzle;
+    detail.puzzle = puzzle;
     const current = getAdminConnect5Overrides();
-    current[detail.dateKey] = detail.puzzle as Connect5Puzzle;
+    current[detail.dateKey] = puzzle;
     safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
-  } else if (detail.gameSlug === "21-things" && typeof detail.dateKey === "string" && detail.board) {
+  } else if (detail.gameSlug === "21-things" && typeof detail.dateKey === "string" && payload) {
+    const board = payload as TwentyOneThingsBoard;
+    detail.board = board;
     const current = getAdmin21ThingsOverrides();
-    current[detail.dateKey] = detail.board as TwentyOneThingsBoard;
+    current[detail.dateKey] = board;
     safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
-  } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && detail.puzzle) {
+  } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && payload) {
+    const puzzle = payload as SeventeenSyllablesPuzzle;
+    detail.puzzle = puzzle;
     const current = getAdmin17SyllablesOverrides();
-    current[detail.dateKey] = detail.puzzle as SeventeenSyllablesPuzzle;
+    current[detail.dateKey] = puzzle;
     safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
   }
 
@@ -1013,8 +1022,40 @@ function setupCrossTabSync(): void {
   });
 }
 
+export let activeRealtimeChannel: RealtimeChannel | null = null;
 let realtimeChannelInitialized = false;
 let realtimeChannelUnsubscribe: (() => void) | null = null;
+
+export function getActiveRealtimeChannel(): RealtimeChannel | null {
+  return activeRealtimeChannel;
+}
+
+export function broadcastRemotePuzzleUpdate(detail: {
+  gameSlug: string;
+  dateKey: string;
+  hash?: string;
+  payload?: unknown;
+}): void {
+  if (!activeRealtimeChannel && typeof window !== "undefined" && isSupabaseConfigured) {
+    initRealtimePuzzleSync();
+  }
+  if (activeRealtimeChannel) {
+    try {
+      void activeRealtimeChannel.send({
+        type: "broadcast",
+        event: "puzzle_updated",
+        payload: {
+          gameSlug: detail.gameSlug,
+          dateKey: detail.dateKey,
+          hash: detail.hash,
+          payload: detail.payload,
+        },
+      });
+    } catch {
+      // Non-fatal broadcast send error
+    }
+  }
+}
 
 export function initRealtimePuzzleSync(): () => void {
   if (typeof window === "undefined") {
@@ -1050,7 +1091,24 @@ export function initRealtimePuzzleSync(): () => void {
     if (supabase) {
       try {
         const channel = supabase
-          .channel("daily_puzzles_live")
+          .channel("daily_puzzles_live", {
+            config: {
+              broadcast: { self: false },
+            },
+          })
+          .on(
+            "broadcast",
+            { event: "puzzle_updated" },
+            (eventPayload: { payload?: Record<string, unknown> } | Record<string, unknown>) => {
+              const broadcastData =
+                eventPayload && typeof eventPayload === "object" && "payload" in eventPayload && eventPayload.payload
+                  ? (eventPayload.payload as Record<string, unknown>)
+                  : (eventPayload as Record<string, unknown>);
+              if (broadcastData && typeof broadcastData === "object") {
+                handleReceivedPuzzleUpdate(broadcastData);
+              }
+            }
+          )
           .on(
             "postgres_changes",
             {
@@ -1115,8 +1173,10 @@ export function initRealtimePuzzleSync(): () => void {
                 void syncAllRemoteDailyPuzzles();
               }
             }
-          )
-          .subscribe();
+          );
+
+        activeRealtimeChannel = channel;
+        channel.subscribe();
 
         realtimeChannelInitialized = true;
         realtimeChannelUnsubscribe = () => {
@@ -1125,6 +1185,7 @@ export function initRealtimePuzzleSync(): () => void {
           } catch {
             // Ignore channel cleanup errors
           }
+          activeRealtimeChannel = null;
           window.removeEventListener("focus", handleWakeupSync);
           document.removeEventListener("visibilitychange", handleVisibility);
           realtimeChannelInitialized = false;
@@ -1309,6 +1370,15 @@ export async function saveAdminConnect5Override(
     puzzle,
   });
 
+  if (remotePersisted) {
+    broadcastRemotePuzzleUpdate({
+      gameSlug: "connect-5",
+      dateKey,
+      hash,
+      payload: puzzle,
+    });
+  }
+
   return {
     ok: true,
     remotePersisted,
@@ -1438,6 +1508,15 @@ export async function saveAdmin21ThingsOverride(
     hash,
     board,
   });
+
+  if (remotePersisted) {
+    broadcastRemotePuzzleUpdate({
+      gameSlug: "21-things",
+      dateKey,
+      hash,
+      payload: board,
+    });
+  }
 
   return {
     ok: true,
@@ -1575,6 +1654,15 @@ export async function saveAdmin17SyllablesOverride(
     hash,
     puzzle,
   });
+
+  if (remotePersisted) {
+    broadcastRemotePuzzleUpdate({
+      gameSlug: "17-syllables",
+      dateKey,
+      hash,
+      payload: puzzle,
+    });
+  }
 
   return {
     ok: true,

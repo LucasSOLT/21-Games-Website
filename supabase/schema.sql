@@ -162,4 +162,36 @@ alter default privileges in schema public
 alter default privileges in schema public
   grant usage, select on sequences to anon, authenticated;
 
+-- 6. Enable Realtime Publication & Replica Identity
+do $$
+begin
+  if exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'daily_puzzles') then
+    alter table public.daily_puzzles replica identity full;
+  end if;
+
+  if exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'twenty_one_boards') then
+    alter table public.twenty_one_boards replica identity full;
+  end if;
+
+  if exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'twenty_one_responses') then
+    alter table public.twenty_one_responses replica identity full;
+  end if;
+
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_puzzles') then
+      alter publication supabase_realtime add table public.daily_puzzles;
+    end if;
+
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'twenty_one_boards') then
+      alter publication supabase_realtime add table public.twenty_one_boards;
+    end if;
+
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'twenty_one_responses') then
+      alter publication supabase_realtime add table public.twenty_one_responses;
+    end if;
+  end if;
+end;
+$$;
+
+
 
