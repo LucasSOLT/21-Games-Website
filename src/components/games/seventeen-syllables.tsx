@@ -334,7 +334,14 @@ export function SeventeenSyllablesGame() {
     }
   }, []);
 
+  const waitingForAuthToCreateRef = useRef(false);
+
   const requestOpenCreatorModal = useCallback(() => {
+    if (authLoading) {
+      waitingForAuthToCreateRef.current = true;
+      setPendingCreatorAfterAuth(true);
+      return;
+    }
     if (profile?.isBanned) {
       toast({
         title: "Account Suspended",
@@ -356,7 +363,29 @@ export function SeventeenSyllablesGame() {
     }
     setCreatorErrors([]);
     setCreatorModalOpen(true);
-  }, [isAuthenticated, openAccountModal, profile]);
+  }, [authLoading, isAuthenticated, openAccountModal, profile]);
+
+  useEffect(() => {
+    if (!waitingForAuthToCreateRef.current || authLoading) return;
+    waitingForAuthToCreateRef.current = false;
+    if (profile?.isBanned) {
+      toast({
+        title: "Account Suspended",
+        description:
+          "Your account has been suspended from creating custom haikus.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!isAuthenticated || !profile) {
+      toast({
+        title: "Sign In Required",
+        description:
+          "Please sign in or create a free account to compose and share custom 17 Syllables haikus.",
+      });
+      openAccountModal("signin");
+    }
+  }, [authLoading, isAuthenticated, openAccountModal, profile]);
 
   // Real-Time Propagation: update board when puzzle is modified by Game Master
   const applyRemotePuzzleIfChanged = useCallback(

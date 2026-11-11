@@ -53,12 +53,33 @@ import {
 } from "../src/lib/game-storage.ts";
 
 import {
+  getSupabaseClient,
+  // @ts-expect-error Node ESM type-stripping requires explicit .ts extension
+} from "../src/lib/supabase.ts";
+
+import {
   signUpWithEmail,
   updateUserProfile,
   saveActiveUserProfile,
   normalizeUserProfile,
   // @ts-expect-error Node ESM type-stripping requires explicit .ts extension
 } from "../src/lib/user-auth.ts";
+
+// Stub Supabase PostgREST writes in this offline unit-test harness so touchpoint tests
+// never persist synthetic fixture rows to live production Supabase.
+const offlineSupabase = getSupabaseClient();
+if (offlineSupabase) {
+  (offlineSupabase as unknown as Record<string, unknown>).from = () => {
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "order", "limit", "update", "delete"]) {
+      chain[method] = () => chain;
+    }
+    chain.maybeSingle = async () => ({ data: null, error: null });
+    chain.insert = async () => ({ data: null, error: null });
+    chain.upsert = async () => ({ data: null, error: null });
+    return chain;
+  };
+}
 
 let totalTests = 0;
 let passedTests = 0;

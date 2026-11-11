@@ -21,8 +21,10 @@ import {
   getRememberLogin,
   getSupabaseClient,
   isSupabaseConfigured,
+  SUPABASE_AUTH_STORAGE_KEY,
 } from "@/lib/supabase";
 import { checkContentModeration } from "@/lib/moderation";
+import type { Session, User } from "@supabase/supabase-js";
 
 export const ACTIVE_USER_KEY = "solgames_v1_active_user";
 export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
@@ -174,9 +176,72 @@ export function getVerifiedJwtToken(): string | null {
   return activeVerifiedJwtToken;
 }
 
-export function setVerifiedJwtEmailForTesting(email: string | null): void {
-  activeVerifiedJwtEmail =
-    email && typeof email === "string" ? normalizeEmail(email) : null;
+/** How long a server-side verification (auth.getUser + profile/ban lookup) stays fresh. */
+const VERIFICATION_TTL_MS = 60_000;
+let lastServerVerifiedAt = 0;
+
+function markServerVerified(profile: UserProfile): void {
+  lastVerifiedSessionProfile = profile;
+  lastServerVerifiedAt = Date.now();
+}
+
+function clearServerVerifiedState(): void {
+  activeVerifiedJwtEmail = null;
+  activeVerifiedJwtToken = null;
+  lastVerifiedSessionProfile = null;
+  lastServerVerifiedAt = 0;
+}
+
+function purgeSupabaseAuthTokenStorage(): void {
+  try {
+    getSafeLocalStorage()?.removeItem(SUPABASE_AUTH_STORAGE_KEY);
+    getSafeSessionStorage()?.removeItem(SUPABASE_AUTH_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+type SupabaseBrowserClient = NonNullable<ReturnType<typeof getSupabaseClient>>;
+
+/**
+ * Returns the current session ONLY if GoTrue itself confirms it. `getSession()` alone
+ * reads local storage and cannot detect a forged/unsigned or revoked token;
+ * `getUser(jwt)` performs a server round-trip and validates the JWT signature/expiry.
+ */
+async function getServerVerifiedSession(
+  supabase: SupabaseBrowserClient
+): Promise<{ user: User; session: Session } | null> {
+  const { data: sessionData, error: sessionError } =
+    await supabase.auth.getSession();
+  const session = sessionData?.session;
+  if (sessionError || !session?.access_token) return null;
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(
+    session.access_token
+  );
+  const user = userData?.user;
+  if (userError || !user?.email) return null;
+  if (session.user?.id && session.user.id !== user.id) return null;
+  return { user, session };
+}
+
+async function failClosedAfterProfileLookupError(
+  supabase: SupabaseBrowserClient
+): Promise<AuthResult> {
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // Ignore signOut network errors
+  }
+  clearServerVerifiedState();
+  purgeSupabaseAuthTokenStorage();
+  purgeActiveUserStorageSilently();
+  return {
+    ok: false,
+    profile: null,
+    error:
+      "We couldn't verify your account status. Please check your connection and try again.",
+  };
 }
 
 export async function verifyGameMasterSession(): Promise<boolean> {
@@ -184,18 +249,15 @@ export async function verifyGameMasterSession(): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   try {
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession();
-    if (error || !session?.user?.email || !session?.access_token) {
+    const verified = await getServerVerifiedSession(supabase);
+    if (!verified?.user.email) {
       activeVerifiedJwtEmail = null;
       activeVerifiedJwtToken = null;
       return false;
     }
-    const email = normalizeEmail(session.user.email);
+    const email = normalizeEmail(verified.user.email);
     activeVerifiedJwtEmail = email;
-    activeVerifiedJwtToken = session.access_token;
+    activeVerifiedJwtToken = verified.session.access_token;
     return isInitialGameMaster(email);
   } catch {
     activeVerifiedJwtEmail = null;
@@ -654,12 +716,31 @@ export function getActiveUserProfile(): UserProfile | null {
     if (!parsed || typeof parsed.email !== "string" || !parsed.email.trim()) {
       return null;
     }
-    return normalizeUserProfile(
-      parsed as Partial<UserProfile> & { email: string }
+    return clampStoredRole(
+      normalizeUserProfile(parsed as Partial<UserProfile> & { email: string })
     );
   } catch {
     return null;
   }
+}
+
+/**
+ * Browser storage is attacker-editable, so the role it carries is never trusted:
+ * only the hard-coded root Game Master roster or the role from the last
+ * server-verified profile for the SAME email is honoured; everything else is 'user'.
+ */
+function clampStoredRole(profile: UserProfile): UserProfile {
+  const verified =
+    lastVerifiedSessionProfile &&
+    normalizeEmail(lastVerifiedSessionProfile.email) === profile.email
+      ? lastVerifiedSessionProfile
+      : null;
+  const role: UserRole = isInitialGameMaster(profile.email)
+    ? "game_master"
+    : verified
+    ? verified.role
+    : "user";
+  return role === profile.role ? profile : { ...profile, role };
 }
 
 function emitAuthChanged(profile: UserProfile | null): void {
@@ -721,74 +802,78 @@ async function fetchSupabaseUserProfileRow(
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  try {
-    const normalizedEmail = normalizeEmail(email);
-    let data: Record<string, unknown> | null = null;
+  // NOTE: any query error THROWS. Callers treat that as "no verified profile" (fail
+  // closed). A genuinely missing row (no error, no data) still returns null.
+  const normalizedEmail = normalizeEmail(email);
+  let data: Record<string, unknown> | null = null;
 
-    if (userId) {
-      const byId = await supabase
-        .from("user_profiles")
-        .select("*")
-        .eq("id", userId)
-        .maybeSingle();
-      if (!byId.error && byId.data) {
-        data = byId.data as Record<string, unknown>;
-      }
+  if (userId) {
+    const byId = await supabase
+      .from("user_profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+    if (byId.error) {
+      throw new Error(`Profile lookup failed: ${byId.error.message}`);
     }
-
-    if (!data && normalizedEmail) {
-      const byEmail = await supabase
-        .from("user_profiles")
-        .select("*")
-        .eq("email", normalizedEmail)
-        .maybeSingle();
-      if (!byEmail.error && byEmail.data) {
-        data = byEmail.data as Record<string, unknown>;
-      }
+    if (byId.data) {
+      data = byId.data as Record<string, unknown>;
     }
-
-    if (!data) return null;
-
-    return {
-      id: String(data.id || userId),
-      email: normalizeEmail(String(data.email || email)),
-      displayName: String(
-        data.display_name || deriveDisplayNameFromEmail(email)
-      ),
-      handle: normalizeHandle(String(data.handle || ""), email),
-      avatarColor: isValidAvatarColor(data.avatar_color)
-        ? data.avatar_color
-        : "#F9D423",
-      role: isValidUserRole(data.role)
-        ? data.role
-        : isInitialGameMaster(email)
-        ? "game_master"
-        : "user",
-      isBanned: Boolean(data.is_banned ?? false),
-      bannedAt: data.banned_at ? String(data.banned_at) : null,
-      bannedReason: data.banned_reason ? String(data.banned_reason) : null,
-      memberSince: String(data.created_at || new Date().toISOString()),
-      connect5Stats: normalizeGameStats(
-        (data.connect5_stats as Partial<GameStats>) ?? DEFAULT_STATS
-      ),
-      twentyOneStats: normalizeGameStats(
-        (data.twenty_one_stats as Partial<GameStats>) ?? DEFAULT_STATS
-      ),
-      recentPicks: Array.isArray(data.recent_picks)
-        ? (data.recent_picks as RecentResonancePick[])
-        : [],
-      createdBoardIds: Array.isArray(data.created_board_ids)
-        ? data.created_board_ids.map(String)
-        : [],
-      boardsCreatedCount: Array.isArray(data.created_board_ids)
-        ? data.created_board_ids.length
-        : 0,
-      authMode: "supabase",
-      lastSyncedAt: String(data.updated_at || new Date().toISOString()),
-    };
-  } catch {
-    return null;
   }
+
+  if (!data && normalizedEmail) {
+    const byEmail = await supabase
+      .from("user_profiles")
+      .select("*")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+    if (byEmail.error) {
+      throw new Error(`Profile lookup failed: ${byEmail.error.message}`);
+    }
+    if (byEmail.data) {
+      data = byEmail.data as Record<string, unknown>;
+    }
+  }
+
+  if (!data) return null;
+
+  return {
+    id: String(data.id || userId),
+    email: normalizeEmail(String(data.email || email)),
+    displayName: String(
+      data.display_name || deriveDisplayNameFromEmail(email)
+    ),
+    handle: normalizeHandle(String(data.handle || ""), email),
+    avatarColor: isValidAvatarColor(data.avatar_color)
+      ? data.avatar_color
+      : "#F9D423",
+    role: isValidUserRole(data.role)
+      ? data.role
+      : isInitialGameMaster(email)
+      ? "game_master"
+      : "user",
+    isBanned: Boolean(data.is_banned ?? false),
+    bannedAt: data.banned_at ? String(data.banned_at) : null,
+    bannedReason: data.banned_reason ? String(data.banned_reason) : null,
+    memberSince: String(data.created_at || new Date().toISOString()),
+    connect5Stats: normalizeGameStats(
+      (data.connect5_stats as Partial<GameStats>) ?? DEFAULT_STATS
+    ),
+    twentyOneStats: normalizeGameStats(
+      (data.twenty_one_stats as Partial<GameStats>) ?? DEFAULT_STATS
+    ),
+    recentPicks: Array.isArray(data.recent_picks)
+      ? (data.recent_picks as RecentResonancePick[])
+      : [],
+    createdBoardIds: Array.isArray(data.created_board_ids)
+      ? data.created_board_ids.map(String)
+      : [],
+    boardsCreatedCount: Array.isArray(data.created_board_ids)
+      ? data.created_board_ids.length
+      : 0,
+    authMode: "supabase",
+    lastSyncedAt: String(data.updated_at || new Date().toISOString()),
+  };
 }
 
 async function upsertSupabaseUserProfileRow(
@@ -798,16 +883,13 @@ async function upsertSupabaseUserProfileRow(
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  const row = {
-    id: profile.id,
-    email: normalizeEmail(profile.email),
+  // Only user-editable columns are ever sent. role / is_banned / banned_* / email / id
+  // are protected server-side (column grants + trigger) and managed exclusively by the
+  // signup trigger and the Game Master RPCs.
+  const safeColumns = {
     display_name: profile.displayName,
     handle: profile.handle,
     avatar_color: profile.avatarColor,
-    role: profile.role,
-    is_banned: profile.isBanned,
-    banned_at: profile.bannedAt ?? null,
-    banned_reason: profile.bannedReason ?? null,
     connect5_stats: profile.connect5Stats,
     twenty_one_stats: profile.twentyOneStats,
     recent_picks: profile.recentPicks,
@@ -816,14 +898,21 @@ async function upsertSupabaseUserProfileRow(
   };
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("user_profiles")
-      .upsert(row, { onConflict: "id" });
-    if (error) {
-      await supabase
-        .from("user_profiles")
-        .upsert(row, { onConflict: "email" });
-    }
+      .update(safeColumns)
+      .eq("id", profile.id)
+      .select("id");
+    if (error) return;
+    if (Array.isArray(data) && data.length > 0) return;
+
+    // No row yet (signup trigger lag / legacy account): create a minimal own row.
+    // The server forces role='user' and is_banned=false for self-created rows.
+    await supabase.from("user_profiles").insert({
+      id: profile.id,
+      email: normalizeEmail(profile.email),
+      ...safeColumns,
+    });
   } catch {
     // Local profile already saved
   }
@@ -977,30 +1066,25 @@ export async function updateUserRole(
     };
   }
 
-  const active = getActiveUserProfile();
-  if (active && normalizeEmail(active.email) === normalizedTarget) {
-    const updated = normalizeUserProfile({
-      ...active,
-      role: newRole,
-      lastSyncedAt: new Date().toISOString(),
-    });
-    saveActiveUserProfile(updated);
-  }
-
+  // Database FIRST: only mirror the change locally once the server confirmed that
+  // exactly the intended row was modified (RLS / RPC guards may refuse or match 0 rows).
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { error } = await supabase
-          .from("user_profiles")
-          .update({
-            role: newRole,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("email", normalizedTarget);
+        const { data, error } = await supabase.rpc("admin_set_user_role", {
+          target_email: normalizedTarget,
+          new_role: newRole,
+        });
 
         if (error) {
           return { ok: false, error: error.message };
+        }
+        if (typeof data !== "number" || !Number.isFinite(data) || data < 1) {
+          return {
+            ok: false,
+            error: "No matching user profile was updated.",
+          };
         }
       } catch (err: unknown) {
         return {
@@ -1012,6 +1096,16 @@ export async function updateUserRole(
         };
       }
     }
+  }
+
+  const active = getActiveUserProfile();
+  if (active && normalizeEmail(active.email) === normalizedTarget) {
+    const updated = normalizeUserProfile({
+      ...active,
+      role: newRole,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    saveActiveUserProfile(updated);
   }
 
   return { ok: true };
@@ -1044,34 +1138,24 @@ export async function setUserBannedStatus(
     ? reason?.trim() || "Account suspended by Game Master."
     : null;
 
-  const active = getActiveUserProfile();
-  if (active && normalizeEmail(active.email) === normalizedTarget) {
-    const updated = normalizeUserProfile({
-      ...active,
-      isBanned,
-      bannedAt,
-      bannedReason,
-      lastSyncedAt: new Date().toISOString(),
-    });
-    saveActiveUserProfile(updated);
-  }
-
   if (isSupabaseConfigured) {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { error } = await supabase
-          .from("user_profiles")
-          .update({
-            is_banned: isBanned,
-            banned_at: bannedAt,
-            banned_reason: bannedReason,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("email", normalizedTarget);
+        const { data, error } = await supabase.rpc("admin_set_user_banned", {
+          target_email: normalizedTarget,
+          banned: isBanned,
+          reason: bannedReason,
+        });
 
         if (error) {
           return { ok: false, error: error.message };
+        }
+        if (typeof data !== "number" || !Number.isFinite(data) || data < 1) {
+          return {
+            ok: false,
+            error: "No matching user profile was updated.",
+          };
         }
       } catch (err: unknown) {
         return {
@@ -1083,6 +1167,18 @@ export async function setUserBannedStatus(
         };
       }
     }
+  }
+
+  const active = getActiveUserProfile();
+  if (active && normalizeEmail(active.email) === normalizedTarget) {
+    const updated = normalizeUserProfile({
+      ...active,
+      isBanned,
+      bannedAt,
+      bannedReason,
+      lastSyncedAt: new Date().toISOString(),
+    });
+    saveActiveUserProfile(updated);
   }
 
   return { ok: true };
@@ -1203,19 +1299,18 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
   }
 
   try {
-    const { data, error } = await supabase.auth.getSession();
-    const session = data?.session;
-    const sessionUser = session?.user;
+    const verified = await getServerVerifiedSession(supabase);
+    const sessionUser = verified?.user;
+    const session = verified?.session;
 
     if (
-      error ||
+      !verified ||
       !sessionUser ||
       !sessionUser.email ||
       !session?.access_token
     ) {
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      clearServerVerifiedState();
+      purgeSupabaseAuthTokenStorage();
       purgeActiveUserStorageSilently();
       return null;
     }
@@ -1224,6 +1319,8 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
     activeVerifiedJwtEmail = email;
     activeVerifiedJwtToken = session.access_token;
 
+    // Throws on a lookup error => handled by the catch below, which FAILS CLOSED
+    // (no verified profile) instead of treating the account as "not banned".
     const remoteRow = await fetchSupabaseUserProfileRow(sessionUser.id, email);
 
     if (remoteRow?.isBanned) {
@@ -1232,9 +1329,8 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
       } catch {
         // Ignore signOut network errors
       }
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      clearServerVerifiedState();
+      purgeSupabaseAuthTokenStorage();
       purgeActiveUserStorageSilently();
       return null;
     }
@@ -1285,13 +1381,11 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
-    lastVerifiedSessionProfile = synced;
+    markServerVerified(synced);
     saveActiveUserProfile(synced);
     return synced;
   } catch {
-    activeVerifiedJwtEmail = null;
-    activeVerifiedJwtToken = null;
-    lastVerifiedSessionProfile = null;
+    clearServerVerifiedState();
     purgeActiveUserStorageSilently();
     return null;
   }
@@ -1310,9 +1404,8 @@ export async function signUpWithEmail(
     };
   }
 
-  const password =
-    typeof input?.password === "string" ? input.password.trim() : "";
-  if (!password || password.length < 6) {
+  const password = typeof input?.password === "string" ? input.password : "";
+  if (!password.trim() || password.length < 6) {
     return {
       ok: false,
       profile: null,
@@ -1452,16 +1545,24 @@ export async function signUpWithEmail(
     activeVerifiedJwtEmail = verifiedEmail;
     activeVerifiedJwtToken = data.session.access_token;
 
-    const remoteRow = await fetchSupabaseUserProfileRow(
-      data.user.id,
-      verifiedEmail
-    );
+    let remoteRow: Partial<UserProfile> | null;
+    try {
+      remoteRow = await fetchSupabaseUserProfileRow(
+        data.user.id,
+        verifiedEmail
+      );
+    } catch {
+      return await failClosedAfterProfileLookupError(supabase);
+    }
 
     if (remoteRow?.isBanned) {
-      await supabase.auth.signOut();
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore signOut network errors
+      }
+      clearServerVerifiedState();
+      purgeSupabaseAuthTokenStorage();
       purgeActiveUserStorageSilently();
       return {
         ok: false,
@@ -1489,7 +1590,7 @@ export async function signUpWithEmail(
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
-    lastVerifiedSessionProfile = synced;
+    markServerVerified(synced);
     saveActiveUserProfile(synced);
     return {
       ok: true,
@@ -1519,9 +1620,8 @@ export async function signInWithEmail(
     };
   }
 
-  const password =
-    typeof input?.password === "string" ? input.password.trim() : "";
-  if (!password) {
+  const password = typeof input?.password === "string" ? input.password : "";
+  if (!password.trim()) {
     return {
       ok: false,
       profile: null,
@@ -1593,16 +1693,24 @@ export async function signInWithEmail(
     activeVerifiedJwtEmail = verifiedEmail;
     activeVerifiedJwtToken = data.session.access_token;
 
-    const remoteRow = await fetchSupabaseUserProfileRow(
-      data.user.id,
-      verifiedEmail
-    );
+    let remoteRow: Partial<UserProfile> | null;
+    try {
+      remoteRow = await fetchSupabaseUserProfileRow(
+        data.user.id,
+        verifiedEmail
+      );
+    } catch {
+      return await failClosedAfterProfileLookupError(supabase);
+    }
 
     if (remoteRow?.isBanned) {
-      await supabase.auth.signOut();
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore signOut network errors
+      }
+      clearServerVerifiedState();
+      purgeSupabaseAuthTokenStorage();
       saveActiveUserProfile(null);
       return {
         ok: false,
@@ -1646,7 +1754,7 @@ export async function signInWithEmail(
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
-    lastVerifiedSessionProfile = synced;
+    markServerVerified(synced);
     saveActiveUserProfile(synced);
 
     return {
@@ -1804,9 +1912,8 @@ export async function signOutUser(): Promise<void> {
       }
     }
   }
-  activeVerifiedJwtEmail = null;
-  activeVerifiedJwtToken = null;
-  lastVerifiedSessionProfile = null;
+  clearServerVerifiedState();
+  purgeSupabaseAuthTokenStorage();
   saveActiveUserProfile(null);
 }
 
@@ -1865,6 +1972,14 @@ export async function updateUserProfile(
     lastSyncedAt: new Date().toISOString(),
   };
 
+  const synced = await syncProfileAndMergeGuestStats(updatedBase);
+  if (
+    activeVerifiedJwtEmail &&
+    normalizeEmail(synced.email) === activeVerifiedJwtEmail
+  ) {
+    markServerVerified(synced);
+  }
+
   if (isSupabaseConfigured && activeVerifiedJwtEmail) {
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -1882,13 +1997,6 @@ export async function updateUserProfile(
     }
   }
 
-  const synced = await syncProfileAndMergeGuestStats(updatedBase);
-  if (
-    activeVerifiedJwtEmail &&
-    normalizeEmail(synced.email) === activeVerifiedJwtEmail
-  ) {
-    lastVerifiedSessionProfile = synced;
-  }
   return {
     ok: true,
     profile: synced,
@@ -1907,9 +2015,7 @@ export function subscribeToAuthChanges(
 
   const notifyFromVerifiedSession = async () => {
     if (!isSupabaseConfigured) {
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      clearServerVerifiedState();
       purgeActiveUserStorageSilently();
       listener(null);
       return;
@@ -1917,69 +2023,65 @@ export function subscribeToAuthChanges(
 
     const supabase = getSupabaseClient();
     if (!supabase) {
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      clearServerVerifiedState();
       purgeActiveUserStorageSilently();
       listener(null);
       return;
     }
+
+    // While a sign-in / restore / profile sync is running, its owner emits the final
+    // event once the verified profile is ready; do not start a competing verification.
+    if (isSyncInProgress) return;
 
     try {
       const { data, error } = await supabase.auth.getSession();
       const session = data?.session;
       const sessionUser = session?.user;
 
-      if (
-        error ||
-        !sessionUser ||
-        !sessionUser.email ||
-        !session?.access_token
-      ) {
-        activeVerifiedJwtEmail = null;
-        activeVerifiedJwtToken = null;
-        lastVerifiedSessionProfile = null;
+      if (error || !session?.access_token) {
+        clearServerVerifiedState();
         purgeActiveUserStorageSilently();
         listener(null);
         return;
       }
 
-      const sessionEmail = normalizeEmail(sessionUser.email);
-      activeVerifiedJwtEmail = sessionEmail;
-      activeVerifiedJwtToken = session.access_token;
+      const sessionEmail =
+        sessionUser?.email ? normalizeEmail(sessionUser.email) : null;
 
+      // Fast path ONLY when this exact user + token was verified server-side
+      // (auth.getUser + profile/ban lookup) within the last VERIFICATION_TTL_MS.
+      // Anything else (first load, other tab, swapped token, missing sessionUser.email,
+      // stale cache) goes through restoreUserSession() -> getUser() verification.
+      const cached = lastVerifiedSessionProfile;
+      const cachedIsFresh =
+        sessionEmail !== null &&
+        cached !== null &&
+        normalizeEmail(cached.email) === sessionEmail &&
+        activeVerifiedJwtToken === session.access_token &&
+        Date.now() - lastServerVerifiedAt < VERIFICATION_TTL_MS;
       const local = getActiveUserProfile();
-      if (local && normalizeEmail(local.email) === sessionEmail) {
-        const verifiedRole: UserRole = isInitialGameMaster(sessionEmail)
-          ? "game_master"
-          : lastVerifiedSessionProfile &&
-            normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
-          ? lastVerifiedSessionProfile.role
-          : "user";
-        const verifiedBanned =
-          lastVerifiedSessionProfile &&
-          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
-            ? lastVerifiedSessionProfile.isBanned
-            : false;
-        const verifiedBannedAt =
-          lastVerifiedSessionProfile &&
-          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
-            ? lastVerifiedSessionProfile.bannedAt
-            : null;
-        const verifiedBannedReason =
-          lastVerifiedSessionProfile &&
-          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
-            ? lastVerifiedSessionProfile.bannedReason
-            : null;
-
+      if (
+        cachedIsFresh &&
+        sessionEmail &&
+        cached &&
+        local &&
+        normalizeEmail(local.email) === sessionEmail
+      ) {
+        if (cached.isBanned) {
+          await signOutUser();
+          listener(null);
+          return;
+        }
+        activeVerifiedJwtEmail = sessionEmail;
+        activeVerifiedJwtToken = session.access_token;
         const safeProfile = normalizeUserProfile({
           ...local,
-          id: sessionUser.id,
+          id: sessionUser?.id || cached.id,
           email: sessionEmail,
-          role: verifiedRole,
-          isBanned: verifiedBanned,
-          bannedAt: verifiedBannedAt,
-          bannedReason: verifiedBannedReason,
+          role: cached.role,
+          isBanned: cached.isBanned,
+          bannedAt: cached.bannedAt,
+          bannedReason: cached.bannedReason,
           authMode: "supabase",
         });
         listener(safeProfile);
@@ -1989,9 +2091,7 @@ export function subscribeToAuthChanges(
       const restored = await restoreUserSession();
       listener(restored);
     } catch {
-      activeVerifiedJwtEmail = null;
-      activeVerifiedJwtToken = null;
-      lastVerifiedSessionProfile = null;
+      clearServerVerifiedState();
       purgeActiveUserStorageSilently();
       listener(null);
     }
@@ -2021,9 +2121,8 @@ export function subscribeToAuthChanges(
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange((event) => {
         if (event === "SIGNED_OUT") {
-          activeVerifiedJwtEmail = null;
-          activeVerifiedJwtToken = null;
-          lastVerifiedSessionProfile = null;
+          clearServerVerifiedState();
+          purgeSupabaseAuthTokenStorage();
           purgeActiveUserStorageSilently();
           listener(null);
         } else if (

@@ -104,16 +104,21 @@ const {
   saveActiveUserProfile,
   scrubLegacyPlaintextPasswords,
   sendMagicLink,
+  setUserBannedStatus,
   signInWithEmail,
   signOutUser,
   signUpWithEmail,
   subscribeToAuthChanges,
+  updateUserRole,
+  verifyGameMasterSession,
 } = await import("@/lib/user-auth");
 const {
   check17SyllablesPuzzleModeration,
   checkAdmin17SyllablesModeration,
 } = await import("@/lib/moderation");
-const { AuthProvider } = await import("@/components/account/auth-provider");
+const { AuthProvider, AuthContext } = await import(
+  "@/components/account/auth-provider"
+);
 const { SeventeenSyllablesGame } = await import(
   "@/components/games/seventeen-syllables"
 );
@@ -155,6 +160,7 @@ const supabase = rawSupabase;
 
 const origAuth = {
   getSession: supabase.auth.getSession.bind(supabase.auth),
+  getUser: supabase.auth.getUser.bind(supabase.auth),
   signInWithPassword: supabase.auth.signInWithPassword.bind(supabase.auth),
   signUp: supabase.auth.signUp.bind(supabase.auth),
   signInWithOtp: supabase.auth.signInWithOtp.bind(supabase.auth),
@@ -175,6 +181,15 @@ function resetMocksAndStorage() {
     data: { session: null },
     error: null,
   });
+  // Server-verified user lookup: the mock "server" confirms exactly the user carried
+  // by whatever the (possibly test-overridden) getSession() currently returns.
+  (supabase.auth as unknown as Record<string, unknown>).getUser = async () => {
+    const { data } = await supabase.auth.getSession();
+    const user = data?.session?.user ?? null;
+    return user
+      ? { data: { user }, error: null }
+      : { data: { user: null }, error: { message: "Auth session missing" } };
+  };
   (supabase.auth as unknown as Record<string, unknown>).signOut = async () => ({
     error: null,
   });
@@ -692,6 +707,63 @@ await runCase(
   }
 );
 
+await runCase(
+  "Migration 20261111000002 + schema.sql: corrected profile guard (no current_user / legacy GUC), column-level grants, GM RPCs",
+  () => {
+    const fixSql = fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        "supabase/migrations/20261111000002_profile_trigger_hardening.sql"
+      ),
+      "utf8"
+    );
+    const schemaSql = fs.readFileSync(
+      path.resolve(process.cwd(), "supabase/schema.sql"),
+      "utf8"
+    );
+    for (const [label, sql] of [
+      ["20261111000002 migration", fixSql],
+      ["supabase/schema.sql", schemaSql],
+    ] as const) {
+      const fn = sql.slice(
+        sql.indexOf("create or replace function public.enforce_user_profile_security()"),
+        sql.indexOf("drop trigger if exists trg_enforce_user_profile_security")
+      );
+      assert.ok(fn.length > 200, `${label} must define the guard function`);
+      assert.doesNotMatch(
+        fn.replace(/--.*$/gm, ""),
+        /current_user/i,
+        `${label}: guard must not branch on current_user (always the owner inside SECURITY DEFINER)`
+      );
+      assert.match(
+        fn,
+        /current_setting\('request\.jwt\.claims', true\)/,
+        `${label}: guard must read the JSON request.jwt.claims GUC`
+      );
+      assert.match(fn, /session_user/i, `${label}: guard must classify API vs internal sessions via session_user`);
+      assert.match(
+        sql,
+        /revoke insert, update on table public\.user_profiles from authenticated;/i,
+        `${label} must revoke table-wide write grants on user_profiles from authenticated`
+      );
+      assert.match(
+        sql,
+        /grant update \(\s*display_name, handle, avatar_color,[^)]*\) on table public\.user_profiles to authenticated;/i,
+        `${label} must grant UPDATE only on safe user_profiles columns`
+      );
+      const updateGrant = sql.match(/grant update \(([^)]*)\) on table public\.user_profiles/i)?.[1] ?? "";
+      for (const protectedCol of ["role", "is_banned", "banned_at", "banned_reason", "email", "id", "created_at"]) {
+        assert.ok(
+          !new RegExp(`(^|[\\s,])${protectedCol}(\\s*,|\\s*$)`).test(updateGrant),
+          `${label}: protected column '${protectedCol}' must not be UPDATE-grantable`
+        );
+      }
+      assert.match(sql, /create or replace function public\.admin_set_user_role/i);
+      assert.match(sql, /create or replace function public\.admin_set_user_banned/i);
+    }
+  }
+);
+
 if (
   process.argv.includes("--live-rls") ||
   process.env.VERIFY_LIVE_RLS === "1"
@@ -754,6 +826,27 @@ if (
       assert.ok(
         tbPost.status === 401 || tbPost.status === 403,
         `Expected 401/403 on anon twenty_one_boards POST, got ${tbPost.status}`
+      );
+
+      // 3b. Anon RPC admin_set_user_role -> 401/403 (42501). A 404 / PGRST202 here means
+      // migration 20261111000002 has NOT been applied to the live database yet.
+      const rpcRole = await fetch(`${url}/rest/v1/rpc/admin_set_user_role`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ target_email: "nobody@example.com", new_role: "admin" }),
+      });
+      assert.ok(
+        rpcRole.status === 401 || rpcRole.status === 403,
+        `Expected 401/403 on anon admin_set_user_role RPC (migration 20261111000002 applied?), got ${rpcRole.status}`
+      );
+      const rpcBan = await fetch(`${url}/rest/v1/rpc/admin_set_user_banned`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ target_email: "nobody@example.com", banned: true }),
+      });
+      assert.ok(
+        rpcBan.status === 401 || rpcBan.status === 403,
+        `Expected 401/403 on anon admin_set_user_banned RPC, got ${rpcBan.status}`
       );
 
       // 4. Anon GET daily_puzzles -> 200 OK
@@ -838,6 +931,7 @@ await runCase(
         )
       );
 
+    // (1) During SSR the provider is still "loading": only the spinner may show.
     const html17 = renderToStaticMarkup(
       wrapWithRouterAndAuth(
         React.createElement(SeventeenSyllablesGame),
@@ -845,15 +939,9 @@ await runCase(
       )
     );
     assert.ok(
-      html17.includes("Verifying account session") ||
-        html17.includes("Sign In to Create Custom Haikus"),
-      "Unauthenticated 17 Syllables ?mode=create must render auth gate, not haiku form"
-    );
-    assert.ok(
       !html17.includes("OLD GOLD AUTUMN LEAVES"),
       "Unauthenticated 17 Syllables ?mode=create must NOT expose haiku line inputs"
     );
-
     const html21 = renderToStaticMarkup(
       wrapWithRouterAndAuth(
         React.createElement(TwentyOneThingsGame),
@@ -861,14 +949,129 @@ await runCase(
       )
     );
     assert.ok(
-      html21.includes("Verifying account session") ||
-        html21.includes("Sign In to Build Custom Boards"),
-      "Unauthenticated 21 Things ?mode=create must render auth gate, not 21-tile creator"
-    );
-    assert.ok(
       !html21.includes("Stream of Consciousness Transcript"),
       "Unauthenticated 21 Things ?mode=create must NOT expose creator transcript textarea"
     );
+
+    // (2) RESOLVED (isLoading=false) auth states, so the spinner can never satisfy the
+    // assertion: removing the `!isAuthenticated` gates must make these fail.
+    const noop = async () => ({ ok: false, profile: null }) as never;
+    const baseCtx = {
+      profile: null,
+      isAuthenticated: false,
+      isGameMaster: false,
+      isAdmin: false,
+      canAccessStudio: false,
+      isLoading: false,
+      isModalOpen: false,
+      modalInitialTab: "signin" as const,
+      isRecoveryOpen: false,
+      openAccountModal: () => {},
+      closeAccountModal: () => {},
+      openSetNewPasswordModal: () => {},
+      closeSetNewPasswordModal: () => {},
+      signIn: noop,
+      signUp: noop,
+      sendMagicLinkEmail: async () => ({ ok: false, profile: null, message: "" }),
+      signOut: async () => {},
+      updateProfile: noop,
+      refreshProfile: async () => null,
+    };
+    const renderResolved = (
+      ctx: Record<string, unknown>,
+      child: React.ReactNode,
+      pathname: string
+    ) =>
+      renderToStaticMarkup(
+        React.createElement(
+          appRouterCtx.AppRouterContext.Provider,
+          { value: mockRouter as never },
+          React.createElement(
+            hooksCtx.PathnameContext.Provider,
+            { value: pathname },
+            React.createElement(
+              hooksCtx.SearchParamsContext.Provider,
+              { value: searchParams },
+              React.createElement(
+                AuthContext.Provider,
+                { value: { ...baseCtx, ...ctx } as never },
+                child
+              )
+            )
+          )
+        )
+      );
+
+    const player = normalizeUserProfile({
+      id: "33333333-3333-4333-8333-333333333333",
+      email: "player@example.com",
+      authMode: "supabase",
+    });
+    const bannedPlayer = normalizeUserProfile({
+      id: "44444444-4444-4444-8444-444444444444",
+      email: "banned@example.com",
+      isBanned: true,
+      authMode: "supabase",
+    });
+
+    const games = [
+      {
+        name: "17 Syllables",
+        el: () => React.createElement(SeventeenSyllablesGame),
+        path: "/games/17-syllables",
+        gate: "Sign In to Create Custom Haikus",
+        creatorMarker: "OLD GOLD AUTUMN LEAVES",
+      },
+      {
+        name: "21 Things",
+        el: () => React.createElement(TwentyOneThingsGame),
+        path: "/games/21-things",
+        gate: "Sign In to Build Custom Boards",
+        creatorMarker: "Stream of Consciousness Transcript",
+      },
+    ];
+
+    for (const game of games) {
+      const anon = renderResolved({}, game.el(), game.path);
+      assert.ok(
+        anon.includes(game.gate),
+        `${game.name}: resolved-unauthenticated ?mode=create must show the sign-in gate`
+      );
+      assert.ok(
+        !anon.includes("Verifying account session"),
+        `${game.name}: gate assertion must not be satisfied by the loading spinner`
+      );
+      assert.ok(
+        !anon.includes(game.creatorMarker),
+        `${game.name}: resolved-unauthenticated render must NOT expose the creator UI`
+      );
+
+      const banned = renderResolved(
+        { profile: bannedPlayer, isAuthenticated: false },
+        game.el(),
+        game.path
+      );
+      assert.ok(
+        banned.includes("Account Suspended"),
+        `${game.name}: banned account must see the suspension notice`
+      );
+      assert.ok(
+        !banned.includes(game.creatorMarker),
+        `${game.name}: banned account must NOT see the creator UI`
+      );
+
+      // Control: a signed-in, non-banned user DOES reach the creator UI (proves the
+      // markers above are real and the gate is what hides them).
+      const authed = renderResolved(
+        { profile: player, isAuthenticated: true },
+        game.el(),
+        game.path
+      );
+      assert.ok(
+        !authed.includes(game.gate),
+        `${game.name}: authenticated user must not see the sign-in gate`
+      );
+    }
   }
 );
 
@@ -896,6 +1099,272 @@ await runCase(
       adminSrc.includes("check17SyllablesPuzzleModeration"),
       "src/app/admin/page.tsx must enforce check17SyllablesPuzzleModeration in handleSave17Syllables"
     );
+  }
+);
+
+// ============================================================================
+// SUITE 7: Iteration-2 hardening (server-verified sessions, fail-closed bans,
+//          storage role distrust, RPC-based role/ban changes, safe-column sync)
+// ============================================================================
+console.log("\nSuite 7 (M1 iteration 2): Verified-session & fail-closed hardening");
+
+const LUCAS_ID = "11111111-1111-4111-8111-111111111111";
+const lucasSession = {
+  access_token: "jwt-lucas",
+  user: { id: LUCAS_ID, email: "lucas@soltheory.com" },
+};
+
+function mockFrom(handlers: {
+  maybeSingle?: () => Promise<{ data: unknown; error: unknown }>;
+  onUpdate?: (payload: Record<string, unknown>) => void;
+  onInsert?: (payload: Record<string, unknown>) => void;
+}) {
+  (supabase as unknown as Record<string, unknown>).from = () => {
+    const chain: Record<string, unknown> = {};
+    chain.select = () => chain;
+    chain.eq = () => chain;
+    chain.order = () => chain;
+    chain.limit = async () => ({ data: [], error: null });
+    chain.maybeSingle =
+      handlers.maybeSingle ?? (async () => ({ data: null, error: null }));
+    chain.insert = async (payload: Record<string, unknown>) => {
+      handlers.onInsert?.(payload);
+      return { data: null, error: null };
+    };
+    chain.update = (payload: Record<string, unknown>) => {
+      handlers.onUpdate?.(payload);
+      const upd: Record<string, unknown> = {};
+      upd.eq = () => upd;
+      upd.select = async () => ({ data: [{ id: LUCAS_ID }], error: null });
+      return upd;
+    };
+    return chain;
+  };
+}
+
+await runCase(
+  "verifyGameMasterSession trusts only the server-verified user (getUser), never an unverified local session",
+  async () => {
+    resetMocksAndStorage();
+    (supabase.auth as unknown as Record<string, unknown>).getSession = async () => ({
+      data: { session: lucasSession },
+      error: null,
+    });
+    // Server REJECTS the token (forged / revoked): must not elevate.
+    (supabase.auth as unknown as Record<string, unknown>).getUser = async () => ({
+      data: { user: null },
+      error: { message: "invalid JWT" },
+    });
+    assert.equal(await verifyGameMasterSession(), false);
+    assert.equal(getVerifiedJwtEmail(), null);
+
+    // Server returns a DIFFERENT user than the local session claims: must not elevate.
+    (supabase.auth as unknown as Record<string, unknown>).getUser = async () => ({
+      data: { user: { id: "99999999-9999-4999-8999-999999999999", email: "evil@example.com" } },
+      error: null,
+    });
+    assert.equal(await verifyGameMasterSession(), false);
+
+    // Server confirms the same user: root GM verified.
+    (supabase.auth as unknown as Record<string, unknown>).getUser = async () => ({
+      data: { user: lucasSession.user },
+      error: null,
+    });
+    assert.equal(await verifyGameMasterSession(), true);
+    assert.equal(getVerifiedJwtEmail(), "lucas@soltheory.com");
+    await signOutUser();
+  }
+);
+
+await runCase(
+  "restoreUserSession fails CLOSED when the profile/ban lookup errors (no verified profile, storage purged)",
+  async () => {
+    resetMocksAndStorage();
+    (supabase.auth as unknown as Record<string, unknown>).getSession = async () => ({
+      data: { session: lucasSession },
+      error: null,
+    });
+    mockFrom({
+      maybeSingle: async () => ({ data: null, error: { message: "network down" } }),
+    });
+    mockLocalStorage.setItem(
+      ACTIVE_USER_KEY,
+      JSON.stringify({ id: LUCAS_ID, email: "lucas@soltheory.com", authMode: "supabase" })
+    );
+    const restored = await restoreUserSession();
+    assert.equal(restored, null, "lookup error must not yield a (possibly banned) profile");
+    assert.equal(mockLocalStorage.getItem(ACTIVE_USER_KEY), null);
+    assert.equal(isGameMaster(getActiveUserProfile()), false);
+  }
+);
+
+await runCase(
+  "restoreUserSession signs out and returns null for a banned profile",
+  async () => {
+    resetMocksAndStorage();
+    let signedOut = false;
+    (supabase.auth as unknown as Record<string, unknown>).signOut = async () => {
+      signedOut = true;
+      return { error: null };
+    };
+    (supabase.auth as unknown as Record<string, unknown>).getSession = async () => ({
+      data: { session: { access_token: "jwt-b", user: { id: "55555555-5555-4555-8555-555555555555", email: "banned@example.com" } } },
+      error: null,
+    });
+    mockFrom({
+      maybeSingle: async () => ({
+        data: {
+          id: "55555555-5555-4555-8555-555555555555",
+          email: "banned@example.com",
+          role: "user",
+          is_banned: true,
+          banned_reason: "spam",
+        },
+        error: null,
+      }),
+    });
+    assert.equal(await restoreUserSession(), null);
+    assert.equal(signedOut, true);
+  }
+);
+
+await runCase(
+  "role stored in browser storage is never trusted (forged 'admin' reads back as 'user')",
+  () => {
+    resetMocksAndStorage();
+    mockLocalStorage.setItem(
+      ACTIVE_USER_KEY,
+      JSON.stringify({ id: "x", email: "someone@example.com", role: "admin", authMode: "supabase" })
+    );
+    assert.equal(getActiveUserProfile()?.role, "user");
+    mockLocalStorage.setItem(
+      ACTIVE_USER_KEY,
+      JSON.stringify({ id: "x", email: "someone@example.com", role: "game_master", authMode: "supabase" })
+    );
+    assert.equal(getActiveUserProfile()?.role, "user");
+  }
+);
+
+await runCase(
+  "profile sync writes ONLY safe columns; updateUserRole/setUserBannedStatus go through RPCs and report 0-row/error results",
+  async () => {
+    resetMocksAndStorage();
+    const updates: Array<Record<string, unknown>> = [];
+    mockFrom({ onUpdate: (p) => updates.push(p), onInsert: (p) => updates.push(p) });
+    (supabase.auth as unknown as Record<string, unknown>).getSession = async () => ({
+      data: { session: lucasSession },
+      error: null,
+    });
+    (supabase.auth as unknown as Record<string, unknown>).signInWithPassword = async () => ({
+      data: {
+        user: { id: LUCAS_ID, email: "lucas@soltheory.com", created_at: "2026-10-01T00:00:00.000Z", user_metadata: {} },
+        session: lucasSession,
+      },
+      error: null,
+    });
+    const res = await signInWithEmail({ email: "lucas@soltheory.com", password: "VerifiedPassword123!" });
+    assert.equal(res.ok, true);
+    assert.ok(updates.length > 0, "profile sync must have written to user_profiles");
+    const forbidden = ["role", "is_banned", "banned_at", "banned_reason", "email", "id"];
+    for (const payload of updates) {
+      for (const key of forbidden) {
+        if (payload.id !== undefined && key === "id") continue; // INSERT fallback may carry own id/email
+        if (payload.email !== undefined && key === "email") continue;
+        assert.ok(!(key in payload), `sync payload must not contain protected column '${key}'`);
+      }
+    }
+    const actor = res.profile!;
+
+    const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+    let rpcResult: { data: unknown; error: unknown } = { data: 1, error: null };
+    (supabase as unknown as Record<string, unknown>).rpc = async (
+      fn: string,
+      args: Record<string, unknown>
+    ) => {
+      rpcCalls.push({ fn, args });
+      return rpcResult;
+    };
+
+    const ok = await updateUserRole(actor, "Player@Example.com", "admin");
+    assert.equal(ok.ok, true);
+    assert.deepEqual(rpcCalls[0], {
+      fn: "admin_set_user_role",
+      args: { target_email: "player@example.com", new_role: "admin" },
+    });
+
+    rpcResult = { data: 0, error: null };
+    const none = await updateUserRole(actor, "ghost@example.com", "admin");
+    assert.equal(none.ok, false, "0 affected rows must not be reported as success");
+
+    rpcResult = { data: [{ id: "unexpected" }], error: null };
+    const nonNumeric = await updateUserRole(actor, "ghost@example.com", "admin");
+    assert.equal(nonNumeric.ok, false, "non-numeric RPC payload must not be reported as success");
+
+    rpcResult = { data: null, error: { message: "Unauthorized" } };
+    const denied = await updateUserRole(actor, "player@example.com", "admin");
+    assert.equal(denied.ok, false);
+
+    rpcResult = { data: 1, error: null };
+    const banned = await setUserBannedStatus(actor, "player@example.com", true, "spam");
+    assert.equal(banned.ok, true);
+    assert.equal(rpcCalls[rpcCalls.length - 1].fn, "admin_set_user_banned");
+    assert.equal(rpcCalls[rpcCalls.length - 1].args.banned, true);
+
+    rpcResult = { data: 0, error: null };
+    const bannedNone = await setUserBannedStatus(actor, "ghost@example.com", true, "spam");
+    assert.equal(bannedNone.ok, false);
+
+    // Client-side refusals never even reach the server.
+    const before = rpcCalls.length;
+    assert.equal((await updateUserRole(actor, "player@example.com", "game_master")).ok, false);
+    assert.equal((await setUserBannedStatus(actor, "lucas@soltheory.com", true)).ok, false);
+    assert.equal(rpcCalls.length, before);
+    await signOutUser();
+  }
+);
+
+await runCase(
+  "signUpWithEmail and signInWithEmail preserve valid leading/trailing spaces verbatim while rejecting whitespace-only passwords",
+  async () => {
+    resetMocksAndStorage();
+    let capturedSignUpPw: string | null = null;
+    let capturedSignInPw: string | null = null;
+    (supabase.auth as unknown as Record<string, unknown>).signUp = async (args: {
+      password: string;
+    }) => {
+      capturedSignUpPw = args.password;
+      return {
+        data: { user: { id: "u-space", email: "space@example.com", identities: [{}] }, session: null },
+        error: null,
+      };
+    };
+    (supabase.auth as unknown as Record<string, unknown>).signInWithPassword = async (args: {
+      password: string;
+    }) => {
+      capturedSignInPw = args.password;
+      return {
+        data: { user: null, session: null },
+        error: { message: "Invalid login credentials", status: 400 },
+      };
+    };
+
+    // Whitespace-only >=6 chars must be rejected without network calls.
+    const wsUp = await signUpWithEmail({ email: "space@example.com", password: "       " });
+    assert.equal(wsUp.ok, false);
+    assert.equal(capturedSignUpPw, null);
+
+    const wsIn = await signInWithEmail({ email: "space@example.com", password: "       " });
+    assert.equal(wsIn.ok, false);
+    assert.equal(capturedSignInPw, null);
+
+    // Valid password with intentional leading/trailing spaces must NOT be .trim()-mutated.
+    const padded = "  my secret phrase  ";
+    const okUp = await signUpWithEmail({ email: "space@example.com", password: padded });
+    assert.equal(okUp.ok, true);
+    assert.equal(capturedSignUpPw, padded);
+
+    await signInWithEmail({ email: "space@example.com", password: padded });
+    assert.equal(capturedSignInPw, padded);
   }
 );
 

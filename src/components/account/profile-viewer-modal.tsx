@@ -227,8 +227,7 @@ export function GuestAuthPanel({
       return;
     }
 
-    const cleanPassword = password.trim();
-    if (!cleanPassword) {
+    if (!password || !password.trim()) {
       setErrorMessage("Please enter your password.");
       return;
     }
@@ -240,7 +239,7 @@ export function GuestAuthPanel({
 
       const res = await signIn({
         email: cleanEmail,
-        password: cleanPassword,
+        password,
       });
 
       if (!res.ok || !res.profile) {
@@ -279,8 +278,7 @@ export function GuestAuthPanel({
       return;
     }
 
-    const cleanPassword = password.trim();
-    if (cleanPassword.length < 6) {
+    if (!password || !password.trim() || password.length < 6) {
       setErrorMessage("Password must be at least 6 characters.");
       return;
     }
@@ -300,7 +298,7 @@ export function GuestAuthPanel({
     try {
       const res = await signUp({
         email: cleanEmail,
-        password: cleanPassword,
+        password,
         displayName: displayName.trim() || undefined,
         avatarColor,
       });
@@ -951,13 +949,12 @@ export function SetNewPasswordModal({
     e.preventDefault();
     setErrorMessage(null);
 
-    const cleanPassword = newPassword.trim();
-    if (cleanPassword.length < 6) {
+    if (!newPassword || !newPassword.trim() || newPassword.length < 6) {
       setErrorMessage("Password must be at least 6 characters.");
       return;
     }
 
-    if (cleanPassword !== confirmPassword.trim()) {
+    if (newPassword !== confirmPassword) {
       setErrorMessage("Passwords do not match. Please re-enter.");
       return;
     }
@@ -971,7 +968,7 @@ export function SetNewPasswordModal({
       }
 
       const { error } = await supabase.auth.updateUser({
-        password: cleanPassword,
+        password: newPassword,
       });
 
       if (error) {

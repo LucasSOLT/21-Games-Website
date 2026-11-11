@@ -6,7 +6,7 @@ import {
   PLAYABLE_GAMES,
   isPlayableGameSlug,
   getGameBySlug,
-  GameConfig,
+  type GameConfig,
 } from "../src/lib/games-config";
 import fs from "fs";
 import path from "path";
@@ -265,23 +265,22 @@ for (let i = 0; i < expectedOrder.length; i++) {
 
 // 2.3 PLAYABLE_GAMES invariants
 assert(
-  PLAYABLE_GAMES.length === 2,
+  PLAYABLE_GAMES.length === 3,
   "Playable Invariants",
-  "PLAYABLE_GAMES has exactly 2 games",
-  `Expected 2, got ${PLAYABLE_GAMES.length}`
+  "PLAYABLE_GAMES has exactly 3 games (17 Syllables went live after M1-B1)",
+  `Expected 3, got ${PLAYABLE_GAMES.length}`
 );
 
 const playableSlugs = PLAYABLE_GAMES.map((g) => g.slug).sort();
 assert(
-  JSON.stringify(playableSlugs) === JSON.stringify(["21-things", "connect-5"]),
+  JSON.stringify(playableSlugs) === JSON.stringify(["17-syllables", "21-things", "connect-5"]),
   "Playable Invariants",
-  "PLAYABLE_GAMES contains only '21-things' and 'connect-5'",
+  "PLAYABLE_GAMES contains only '17-syllables', '21-things' and 'connect-5'",
   `Got: ${JSON.stringify(playableSlugs)}`
 );
 
-// 2.4 Verify all other 7 games are NOT playable
+// 2.4 Verify all other 6 games are NOT playable
 const nonPlayableSlugs = [
-  "17-syllables",
   "9-rhymes",
   "eightfold-echo",
   "6-pics",
@@ -305,6 +304,11 @@ assert(
   isPlayableGameSlug("21-things") === true,
   "Slug Predicate",
   "isPlayableGameSlug('21-things') === true"
+);
+assert(
+  isPlayableGameSlug("17-syllables") === true,
+  "Slug Predicate",
+  "isPlayableGameSlug('17-syllables') === true"
 );
 assert(
   isPlayableGameSlug("connect-5") === true,
@@ -385,7 +389,7 @@ function scanDirectory(dir: string, fileList: string[] = []): string[] {
   return fileList;
 }
 
-const srcDir = path.resolve(__dirname, "../src");
+const srcDir = path.resolve(import.meta.dirname, "../src");
 const allSrcFiles = scanDirectory(srcDir);
 
 const danglingRefHits: { file: string; line: number; content: string }[] = [];
@@ -401,7 +405,7 @@ for (const filePath of allSrcFiles) {
         continue;
       }
       danglingRefHits.push({
-        file: path.relative(path.resolve(__dirname, ".."), filePath),
+        file: path.relative(path.resolve(import.meta.dirname, ".."), filePath),
         line: i + 1,
         content: line.trim(),
       });

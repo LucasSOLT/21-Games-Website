@@ -61,7 +61,7 @@ export interface AuthContextValue {
   closeSetNewPasswordModal: () => void;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -91,6 +91,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((restored) => {
         if (!isMounted) return;
         setProfile(restored);
+        if (restored && !restored.isBanned) {
+          setIsModalOpen(false);
+        }
       })
       .finally(() => {
         if (isMounted) {

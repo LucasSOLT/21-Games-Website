@@ -1,7 +1,13 @@
 import fs from "node:fs";
+import { register } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isMainThread } from "node:worker_threads";
 import ts from "typescript";
+
+if (isMainThread) {
+  register(import.meta.url);
+}
 
 export async function resolve(specifier, context, nextResolve) {
   let basePath = null;
