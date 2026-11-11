@@ -88,6 +88,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
+  check17SyllablesPuzzleModeration,
   checkConnect5PuzzleModeration,
   check21ThingsBoardModeration,
 } from "@/lib/moderation";
@@ -483,8 +484,16 @@ export default function AdminPage() {
       },
       onConfirm: async () => {
         setIsPublishing(true);
+        const authCtx = {
+          userEmail: profile?.email ?? null,
+          userRole: profile?.role ?? null,
+        };
         try {
-          const res = await saveAdminConnect5Override(targetDate, puzzleObj);
+          const res = await saveAdminConnect5Override(
+            targetDate,
+            puzzleObj,
+            authCtx
+          );
 
           if (res.remotePersisted) {
             setPendingPublish(null);
@@ -501,7 +510,11 @@ export default function AdminPage() {
             const doRetry = async () => {
               setIsRetryingSync(true);
               try {
-                const retryRes = await saveAdminConnect5Override(targetDate, puzzleObj);
+                const retryRes = await saveAdminConnect5Override(
+                  targetDate,
+                  puzzleObj,
+                  authCtx
+                );
                 if (retryRes.remotePersisted) {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
@@ -648,8 +661,16 @@ export default function AdminPage() {
       },
       onConfirm: async () => {
         setIsPublishing(true);
+        const authCtx = {
+          userEmail: profile?.email ?? null,
+          userRole: profile?.role ?? null,
+        };
         try {
-          const res = await saveAdmin21ThingsOverride(targetDate, boardObj);
+          const res = await saveAdmin21ThingsOverride(
+            targetDate,
+            boardObj,
+            authCtx
+          );
 
           if (res.remotePersisted) {
             setPendingPublish(null);
@@ -666,7 +687,11 @@ export default function AdminPage() {
             const doRetry = async () => {
               setIsRetryingSync(true);
               try {
-                const retryRes = await saveAdmin21ThingsOverride(targetDate, boardObj);
+                const retryRes = await saveAdmin21ThingsOverride(
+                  targetDate,
+                  boardObj,
+                  authCtx
+                );
                 if (retryRes.remotePersisted) {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
@@ -759,6 +784,24 @@ export default function AdminPage() {
       chunks,
     };
 
+    const modCheck = check17SyllablesPuzzleModeration(
+      {
+        theme: puzzleObj.theme,
+        author: puzzleObj.author,
+        lines: puzzleObj.lines,
+      },
+      { mode: "public" }
+    );
+
+    if (!modCheck.allowed) {
+      toast({
+        title: "Content Moderation Error",
+        description: modCheck.reason,
+        variant: "destructive",
+      });
+      return;
+    }
+
     const dateStatus: "Today" | "Future" | "Past" = editPerm.isToday
       ? "Today"
       : editPerm.isFuture
@@ -786,8 +829,16 @@ export default function AdminPage() {
       },
       onConfirm: async () => {
         setIsPublishing(true);
+        const authCtx = {
+          userEmail: profile?.email ?? null,
+          userRole: profile?.role ?? null,
+        };
         try {
-          const res = await saveAdmin17SyllablesOverride(targetDate, puzzleObj);
+          const res = await saveAdmin17SyllablesOverride(
+            targetDate,
+            puzzleObj,
+            authCtx
+          );
 
           if (res.remotePersisted) {
             setPendingPublish(null);
@@ -804,7 +855,11 @@ export default function AdminPage() {
             const doRetry = async () => {
               setIsRetryingSync(true);
               try {
-                const retryRes = await saveAdmin17SyllablesOverride(targetDate, puzzleObj);
+                const retryRes = await saveAdmin17SyllablesOverride(
+                  targetDate,
+                  puzzleObj,
+                  authCtx
+                );
                 if (retryRes.remotePersisted) {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
@@ -2001,28 +2056,16 @@ export default function AdminPage() {
                                       )}
 
                                       {u.role === "admin" && (
-                                        <>
-                                          <Button
-                                            size="xs"
-                                            variant="outline"
-                                            disabled={isBusy}
-                                            onClick={() => void handleUpdateRole(u, "user")}
-                                            className="border border-black font-bold text-[11px]"
-                                            title="Demote Editor to standard Player"
-                                          >
-                                            Demote to User
-                                          </Button>
-                                          <Button
-                                            size="xs"
-                                            variant="outline"
-                                            disabled={isBusy || u.isBanned}
-                                            onClick={() => void handleUpdateRole(u, "game_master")}
-                                            className="border border-black font-bold text-[11px] hover:bg-black hover:text-white"
-                                            title="Promote Admin to Game Master"
-                                          >
-                                            Make GM
-                                          </Button>
-                                        </>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          disabled={isBusy}
+                                          onClick={() => void handleUpdateRole(u, "user")}
+                                          className="border border-black font-bold text-[11px]"
+                                          title="Demote Editor to standard Player"
+                                        >
+                                          Demote to User
+                                        </Button>
                                       )}
 
                                       {u.role === "game_master" && !isRootGM && (

@@ -25,15 +25,7 @@ import {
 import { checkContentModeration } from "@/lib/moderation";
 
 export const ACTIVE_USER_KEY = "solgames_v1_active_user";
-
-// Startup scrubber to purge legacy plaintext password database
-if (typeof window !== "undefined") {
-  try {
-    window.localStorage.removeItem("solgames_v1_accounts_db");
-  } catch {
-    // Ignore storage errors
-  }
-}
+export const ACCOUNTS_DB_KEY = "solgames_v1_accounts_db";
 
 export type UserRole = "game_master" | "admin" | "user";
 
@@ -104,6 +96,9 @@ export interface UserProfile {
   lastSyncedAt: string;
 }
 
+export interface StoredLocalAccount {
+  profile: UserProfile;
+}
 
 export interface SignUpInput {
   email: string;
@@ -124,12 +119,22 @@ export interface UpdateProfileInput {
   avatarColor?: AvatarColor;
 }
 
-export interface AuthResult {
+export interface AuthActionResult {
   ok: boolean;
   profile: UserProfile | null;
   error?: string;
   message?: string;
   magicLinkSent?: boolean;
+  confirmationRequired?: boolean;
+}
+
+export type AuthResult = AuthActionResult;
+
+const EMAIL_VALIDATION_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmailFormat(email?: string | null): boolean {
+  if (!email || typeof email !== "string") return false;
+  return EMAIL_VALIDATION_REGEX.test(email.trim().toLowerCase());
 }
 
 export function isValidAvatarColor(value: unknown): value is AvatarColor {
@@ -140,7 +145,7 @@ export function isValidAvatarColor(value: unknown): value is AvatarColor {
 }
 
 export function normalizeEmail(email?: string | null): string {
-  if (!email || typeof email !== "string") return "";
+  if (!email) return "";
   return email.trim().toLowerCase();
 }
 
@@ -159,6 +164,7 @@ export function isValidUserRole(value: unknown): value is UserRole {
 
 let activeVerifiedJwtEmail: string | null = null;
 let activeVerifiedJwtToken: string | null = null;
+let lastVerifiedSessionProfile: UserProfile | null = null;
 
 export function getVerifiedJwtEmail(): string | null {
   return activeVerifiedJwtEmail;
@@ -169,7 +175,8 @@ export function getVerifiedJwtToken(): string | null {
 }
 
 export function setVerifiedJwtEmailForTesting(email: string | null): void {
-  activeVerifiedJwtEmail = email ? normalizeEmail(email) : null;
+  activeVerifiedJwtEmail =
+    email && typeof email === "string" ? normalizeEmail(email) : null;
 }
 
 export async function verifyGameMasterSession(): Promise<boolean> {
@@ -279,6 +286,7 @@ export function checkDateEditPermission(
 }
 
 export function deriveDisplayNameFromEmail(email: string): string {
+  if (!email || typeof email !== "string") return "SOL Player";
   const localPart = normalizeEmail(email).split("@")[0] || "Player";
   const cleaned = localPart
     .replace(/[._-]+/g, " ")
@@ -295,7 +303,7 @@ export function normalizeHandle(raw?: string, fallbackEmail?: string): string {
   const baseSource =
     raw && raw.trim().length > 0
       ? raw.trim()
-      : fallbackEmail
+      : fallbackEmail && typeof fallbackEmail === "string"
       ? normalizeEmail(fallbackEmail).split("@")[0]
       : "solplayer";
   const slug = baseSource
@@ -307,7 +315,8 @@ export function normalizeHandle(raw?: string, fallbackEmail?: string): string {
 }
 
 export function getInitials(displayName: string, email?: string): string {
-  const source = (displayName || "").trim() || deriveDisplayNameFromEmail(email || "");
+  const source =
+    (displayName || "").trim() || deriveDisplayNameFromEmail(email || "");
   const parts = source.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
@@ -327,6 +336,23 @@ export function formatMemberSince(isoOrLabel: string): string {
   }).format(parsed);
 }
 
+function getSafeLocalStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getSafeSessionStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function resolveBoardMetadata(boardId: string): {
   boardTitle: string;
@@ -412,7 +438,8 @@ function mergeRecentPicks(
 export function normalizeUserProfile(
   raw: Partial<UserProfile> & { email: string; id?: string }
 ): UserProfile {
-  const email = normalizeEmail(raw.email);
+  const email =
+    typeof raw.email === "string" ? normalizeEmail(raw.email) : "";
   const displayName =
     raw.displayName && raw.displayName.trim().length > 0
       ? raw.displayName.trim()
@@ -435,9 +462,7 @@ export function normalizeUserProfile(
     ? (rawRecord.role as UserRole)
     : "user";
 
-  const isBanned = isDefaultGM
-    ? false
-    : Boolean(raw.isBanned ?? rawRecord.is_banned ?? false);
+  const isBanned = Boolean(raw.isBanned ?? rawRecord.is_banned ?? false);
 
   const bannedAt = isBanned
     ? String(raw.bannedAt || rawRecord.banned_at || new Date().toISOString())
@@ -475,17 +500,163 @@ export function normalizeUserProfile(
   };
 }
 
+function scrubStorageJsonObject(storage: Storage | null, key: string): void {
+  if (!storage) return;
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+
+    if (key === ACTIVE_USER_KEY) {
+      if ("password" in (parsed as Record<string, unknown>)) {
+        delete (parsed as Record<string, unknown>).password;
+        storage.setItem(key, JSON.stringify(parsed));
+      }
+      return;
+    }
+
+    if (key === ACCOUNTS_DB_KEY && !Array.isArray(parsed)) {
+      const dbObj = parsed as Record<string, Record<string, unknown>>;
+      let mutated = false;
+      const cleaned: Record<string, StoredLocalAccount> = {};
+      for (const [, entry] of Object.entries(dbObj)) {
+        if (!entry || typeof entry !== "object") {
+          mutated = true;
+          continue;
+        }
+        if ("password" in entry) {
+          mutated = true;
+        }
+        const prof = entry.profile as
+          | (Partial<UserProfile> & { email?: string })
+          | undefined;
+        if (prof && typeof prof.email === "string" && prof.email.trim()) {
+          if ("password" in (prof as Record<string, unknown>)) {
+            mutated = true;
+          }
+          const normalized = normalizeUserProfile(
+            prof as Partial<UserProfile> & { email: string }
+          );
+          cleaned[normalized.email] = { profile: normalized };
+        } else {
+          mutated = true;
+        }
+      }
+      if (mutated) {
+        storage.setItem(ACCOUNTS_DB_KEY, JSON.stringify(cleaned));
+      }
+    }
+  } catch {
+    try {
+      if (key === ACCOUNTS_DB_KEY) {
+        storage.removeItem(ACCOUNTS_DB_KEY);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+}
+
+/**
+ * Purges any legacy plaintext `password` fields from `solgames_v1_accounts_db`
+ * and `solgames_v1_active_user` across localStorage and sessionStorage.
+ */
+export function scrubLegacyPlaintextPasswords(): void {
+  if (typeof window === "undefined") return;
+  const local = getSafeLocalStorage();
+  const session = getSafeSessionStorage();
+  scrubStorageJsonObject(local, ACCOUNTS_DB_KEY);
+  scrubStorageJsonObject(session, ACCOUNTS_DB_KEY);
+  scrubStorageJsonObject(local, ACTIVE_USER_KEY);
+  scrubStorageJsonObject(session, ACTIVE_USER_KEY);
+}
+
+// Startup scrubber to purge legacy plaintext password fields immediately
+if (typeof window !== "undefined") {
+  scrubLegacyPlaintextPasswords();
+}
+
+function readLocalAccountsDb(): Record<string, StoredLocalAccount> {
+  const local = getSafeLocalStorage();
+  if (!local) return {};
+  scrubStorageJsonObject(local, ACCOUNTS_DB_KEY);
+  try {
+    const raw = local.getItem(ACCOUNTS_DB_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, StoredLocalAccount> = {};
+    for (const [, entry] of Object.entries(
+      parsed as Record<string, Record<string, unknown>>
+    )) {
+      const prof = entry?.profile as
+        | (Partial<UserProfile> & { email?: string })
+        | undefined;
+      if (prof && typeof prof.email === "string" && prof.email.trim()) {
+        const normalized = normalizeUserProfile(
+          prof as Partial<UserProfile> & { email: string }
+        );
+        result[normalized.email] = { profile: normalized };
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalAccountsDb(db: Record<string, StoredLocalAccount>): void {
+  const local = getSafeLocalStorage();
+  if (!local) return;
+  try {
+    const sanitized: Record<string, StoredLocalAccount> = {};
+    for (const [, entry] of Object.entries(db)) {
+      if (entry?.profile?.email) {
+        const normalized = normalizeUserProfile(entry.profile);
+        sanitized[normalized.email] = { profile: normalized };
+      }
+    }
+    local.setItem(ACCOUNTS_DB_KEY, JSON.stringify(sanitized));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function purgeActiveUserStorageSilently(): void {
+  const local = getSafeLocalStorage();
+  const session = getSafeSessionStorage();
+  try {
+    local?.removeItem(ACTIVE_USER_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+  try {
+    session?.removeItem(ACTIVE_USER_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function getActiveUserProfile(): UserProfile | null {
   if (typeof window === "undefined") return null;
+  const session = getSafeSessionStorage();
+  const local = getSafeLocalStorage();
   try {
-    let raw = window.sessionStorage.getItem(ACTIVE_USER_KEY);
-    if (!raw) {
-      raw = window.localStorage.getItem(ACTIVE_USER_KEY);
+    let raw = session ? session.getItem(ACTIVE_USER_KEY) : null;
+    if (!raw && local) {
+      raw = local.getItem(ACTIVE_USER_KEY);
     }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.email) return null;
-    return normalizeUserProfile(parsed as Partial<UserProfile> & { email: string });
+    if (!parsed || typeof parsed.email !== "string" || !parsed.email.trim()) {
+      return null;
+    }
+    return normalizeUserProfile(
+      parsed as Partial<UserProfile> & { email: string }
+    );
   } catch {
     return null;
   }
@@ -505,14 +676,14 @@ function emitAuthChanged(profile: UserProfile | null): void {
 export function saveActiveUserProfile(profile: UserProfile | null): void {
   if (typeof window === "undefined") return;
 
+  scrubLegacyPlaintextPasswords();
+
   if (!profile) {
+    activeVerifiedJwtEmail = null;
+    activeVerifiedJwtToken = null;
+    lastVerifiedSessionProfile = null;
     clearAuthStorage();
-    try {
-      window.localStorage.removeItem(ACTIVE_USER_KEY);
-      window.sessionStorage.removeItem(ACTIVE_USER_KEY);
-    } catch {
-      // Ignore storage errors
-    }
+    purgeActiveUserStorageSilently();
     emitAuthChanged(null);
     return;
   }
@@ -520,15 +691,21 @@ export function saveActiveUserProfile(profile: UserProfile | null): void {
   const normalized = normalizeUserProfile(profile);
   const remember = getRememberLogin();
   const raw = JSON.stringify(normalized);
+  const local = getSafeLocalStorage();
+  const session = getSafeSessionStorage();
 
   try {
-    if (remember) {
-      window.localStorage.setItem(ACTIVE_USER_KEY, raw);
-      window.sessionStorage.removeItem(ACTIVE_USER_KEY);
+    if (remember || !session) {
+      local?.setItem(ACTIVE_USER_KEY, raw);
+      session?.removeItem(ACTIVE_USER_KEY);
     } else {
-      window.sessionStorage.setItem(ACTIVE_USER_KEY, raw);
-      window.localStorage.removeItem(ACTIVE_USER_KEY);
+      session.setItem(ACTIVE_USER_KEY, raw);
+      local?.removeItem(ACTIVE_USER_KEY);
     }
+
+    const db = readLocalAccountsDb();
+    db[normalized.email] = { profile: normalized };
+    writeLocalAccountsDb(db);
   } catch {
     // Ignore storage quota errors
   }
@@ -548,18 +725,7 @@ async function fetchSupabaseUserProfileRow(
     const normalizedEmail = normalizeEmail(email);
     let data: Record<string, unknown> | null = null;
 
-    if (normalizedEmail) {
-      const byEmail = await supabase
-        .from("user_profiles")
-        .select("*")
-        .eq("email", normalizedEmail)
-        .maybeSingle();
-      if (!byEmail.error && byEmail.data) {
-        data = byEmail.data as Record<string, unknown>;
-      }
-    }
-
-    if (!data && userId) {
+    if (userId) {
       const byId = await supabase
         .from("user_profiles")
         .select("*")
@@ -567,6 +733,17 @@ async function fetchSupabaseUserProfileRow(
         .maybeSingle();
       if (!byId.error && byId.data) {
         data = byId.data as Record<string, unknown>;
+      }
+    }
+
+    if (!data && normalizedEmail) {
+      const byEmail = await supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+      if (!byEmail.error && byEmail.data) {
+        data = byEmail.data as Record<string, unknown>;
       }
     }
 
@@ -623,7 +800,7 @@ async function upsertSupabaseUserProfileRow(
 
   const row = {
     id: profile.id,
-    email: profile.email,
+    email: normalizeEmail(profile.email),
     display_name: profile.displayName,
     handle: profile.handle,
     avatar_color: profile.avatarColor,
@@ -641,9 +818,11 @@ async function upsertSupabaseUserProfileRow(
   try {
     const { error } = await supabase
       .from("user_profiles")
-      .upsert(row, { onConflict: "email" });
+      .upsert(row, { onConflict: "id" });
     if (error) {
-      await supabase.from("user_profiles").upsert(row, { onConflict: "id" });
+      await supabase
+        .from("user_profiles")
+        .upsert(row, { onConflict: "email" });
     }
   } catch {
     // Local profile already saved
@@ -697,10 +876,14 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
                 avatarColor: isValidAvatarColor(row.avatar_color)
                   ? row.avatar_color
                   : "#F9D423",
-                role: (row.role as UserRole) || (isInitialGameMaster(email) ? "game_master" : "user"),
+                role:
+                  (row.role as UserRole) ||
+                  (isInitialGameMaster(email) ? "game_master" : "user"),
                 isBanned: Boolean(row.is_banned ?? false),
                 bannedAt: row.banned_at ? String(row.banned_at) : null,
-                bannedReason: row.banned_reason ? String(row.banned_reason) : null,
+                bannedReason: row.banned_reason
+                  ? String(row.banned_reason)
+                  : null,
                 memberSince: String(row.created_at || new Date().toISOString()),
                 connect5Stats: normalizeGameStats(
                   (row.connect5_stats as Partial<GameStats>) ?? DEFAULT_STATS
@@ -718,7 +901,9 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
                   ? row.created_board_ids.length
                   : 0,
                 authMode: "supabase",
-                lastSyncedAt: String(row.updated_at || new Date().toISOString()),
+                lastSyncedAt: String(
+                  row.updated_at || new Date().toISOString()
+                ),
               })
             );
           }
@@ -729,9 +914,13 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
     }
   }
 
-  // 3. Merge active user
+  // 3. Merge active user only if session-verified
   const active = getActiveUserProfile();
-  if (active?.email) {
+  if (
+    active?.email &&
+    activeVerifiedJwtEmail &&
+    normalizeEmail(active.email) === activeVerifiedJwtEmail
+  ) {
     const email = normalizeEmail(active.email);
     if (!profileMap.has(email)) {
       profileMap.set(email, active);
@@ -746,7 +935,9 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
     };
     const diff = (rolePriority[b.role] || 0) - (rolePriority[a.role] || 0);
     if (diff !== 0) return diff;
-    return new Date(b.memberSince).getTime() - new Date(a.memberSince).getTime();
+    return (
+      new Date(b.memberSince).getTime() - new Date(a.memberSince).getTime()
+    );
   });
 }
 
@@ -774,7 +965,8 @@ export async function updateUserRole(
   if (newRole === "game_master" && !isInitialGameMaster(normalizedTarget)) {
     return {
       ok: false,
-      error: "Only authorized root Game Masters can hold the Game Master role.",
+      error:
+        "Only authorized root Game Masters can hold the Game Master role.",
     };
   }
 
@@ -813,7 +1005,10 @@ export async function updateUserRole(
       } catch (err: unknown) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : "Failed to update role in Supabase.",
+          error:
+            err instanceof Error
+              ? err.message
+              : "Failed to update role in Supabase.",
         };
       }
     }
@@ -846,7 +1041,7 @@ export async function setUserBannedStatus(
 
   const bannedAt = isBanned ? new Date().toISOString() : null;
   const bannedReason = isBanned
-    ? (reason?.trim() || "Account suspended by Game Master.")
+    ? reason?.trim() || "Account suspended by Game Master."
     : null;
 
   const active = getActiveUserProfile();
@@ -881,7 +1076,10 @@ export async function setUserBannedStatus(
       } catch (err: unknown) {
         return {
           ok: false,
-          error: err instanceof Error ? err.message : "Failed to update ban status in Supabase.",
+          error:
+            err instanceof Error
+              ? err.message
+              : "Failed to update ban status in Supabase.",
         };
       }
     }
@@ -905,6 +1103,13 @@ export function ensureProfileSyncListenerRegistered(): void {
     }
     const active = getActiveUserProfile();
     if (!active) return;
+    if (
+      isSupabaseConfigured &&
+      (!activeVerifiedJwtEmail ||
+        normalizeEmail(active.email) !== activeVerifiedJwtEmail)
+    ) {
+      return;
+    }
     await syncProfileAndMergeGuestStats(active);
   });
 }
@@ -978,11 +1183,13 @@ export async function syncProfileAndMergeGuestStats(
 
 export async function restoreUserSession(): Promise<UserProfile | null> {
   ensureProfileSyncListenerRegistered();
+  scrubLegacyPlaintextPasswords();
 
   if (!isSupabaseConfigured) {
     activeVerifiedJwtEmail = null;
     activeVerifiedJwtToken = null;
-    saveActiveUserProfile(null);
+    lastVerifiedSessionProfile = null;
+    purgeActiveUserStorageSilently();
     return null;
   }
 
@@ -990,7 +1197,8 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
   if (!supabase) {
     activeVerifiedJwtEmail = null;
     activeVerifiedJwtToken = null;
-    saveActiveUserProfile(null);
+    lastVerifiedSessionProfile = null;
+    purgeActiveUserStorageSilently();
     return null;
   }
 
@@ -999,10 +1207,16 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
     const session = data?.session;
     const sessionUser = session?.user;
 
-    if (error || !sessionUser || !sessionUser.email || !session?.access_token) {
+    if (
+      error ||
+      !sessionUser ||
+      !sessionUser.email ||
+      !session?.access_token
+    ) {
       activeVerifiedJwtEmail = null;
       activeVerifiedJwtToken = null;
-      saveActiveUserProfile(null);
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
       return null;
     }
 
@@ -1010,67 +1224,85 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
     activeVerifiedJwtEmail = email;
     activeVerifiedJwtToken = session.access_token;
 
-    const remoteRow = await fetchSupabaseUserProfileRow(
-      sessionUser.id,
-      email
-    );
+    const remoteRow = await fetchSupabaseUserProfileRow(sessionUser.id, email);
 
     if (remoteRow?.isBanned) {
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore signOut network errors
+      }
       activeVerifiedJwtEmail = null;
       activeVerifiedJwtToken = null;
-      saveActiveUserProfile(null);
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
       return null;
     }
 
     const meta = sessionUser.user_metadata ?? {};
     const localActive = getActiveUserProfile();
+    const sameUserLocal =
+      localActive && normalizeEmail(localActive.email) === email
+        ? localActive
+        : null;
 
     const baseProfile = normalizeUserProfile({
       id: sessionUser.id,
       email,
       displayName:
         remoteRow?.displayName ||
-        (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
-        localActive?.displayName ||
+        (typeof meta.display_name === "string"
+          ? meta.display_name
+          : undefined) ||
+        sameUserLocal?.displayName ||
         deriveDisplayNameFromEmail(email),
       handle:
         remoteRow?.handle ||
         (typeof meta.handle === "string" ? meta.handle : undefined) ||
-        localActive?.handle ||
+        sameUserLocal?.handle ||
         normalizeHandle(undefined, email),
       avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
         ? remoteRow.avatarColor
         : isValidAvatarColor(meta.avatar_color)
         ? meta.avatar_color
-        : localActive?.avatarColor ?? "#F9D423",
+        : sameUserLocal?.avatarColor ?? "#F9D423",
+      role: remoteRow?.role,
+      isBanned: remoteRow?.isBanned ?? false,
+      bannedAt: remoteRow?.bannedAt ?? null,
+      bannedReason: remoteRow?.bannedReason ?? null,
       memberSince:
         remoteRow?.memberSince ||
         sessionUser.created_at ||
-        localActive?.memberSince ||
+        sameUserLocal?.memberSince ||
         new Date().toISOString(),
-      connect5Stats: remoteRow?.connect5Stats ?? localActive?.connect5Stats,
-      twentyOneStats: remoteRow?.twentyOneStats ?? localActive?.twentyOneStats,
+      connect5Stats: remoteRow?.connect5Stats ?? sameUserLocal?.connect5Stats,
+      twentyOneStats:
+        remoteRow?.twentyOneStats ?? sameUserLocal?.twentyOneStats,
       createdBoardIds:
-        remoteRow?.createdBoardIds ?? localActive?.createdBoardIds ?? [],
-      recentPicks: remoteRow?.recentPicks ?? localActive?.recentPicks ?? [],
+        remoteRow?.createdBoardIds ?? sameUserLocal?.createdBoardIds ?? [],
+      recentPicks: remoteRow?.recentPicks ?? sameUserLocal?.recentPicks ?? [],
       authMode: "supabase",
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    lastVerifiedSessionProfile = synced;
     saveActiveUserProfile(synced);
     return synced;
   } catch {
     activeVerifiedJwtEmail = null;
     activeVerifiedJwtToken = null;
-    saveActiveUserProfile(null);
+    lastVerifiedSessionProfile = null;
+    purgeActiveUserStorageSilently();
     return null;
   }
 }
 
-export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
-  const email = normalizeEmail(input.email || "");
-  if (!email || !email.includes("@") || !email.includes(".")) {
+export async function signUpWithEmail(
+  input: SignUpInput
+): Promise<AuthResult> {
+  const email =
+    typeof input?.email === "string" ? normalizeEmail(input.email) : "";
+  if (!isValidEmailFormat(email)) {
     return {
       ok: false,
       profile: null,
@@ -1078,14 +1310,17 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     };
   }
 
-  const password = input.password?.trim() || "";
-  if (!password || password.length < 8) {
+  const password =
+    typeof input?.password === "string" ? input.password.trim() : "";
+  if (!password || password.length < 6) {
     return {
       ok: false,
       profile: null,
-      error: "Password must be at least 8 characters.",
+      error: "Password must be at least 6 characters.",
     };
   }
+
+  scrubLegacyPlaintextPasswords();
 
   if (input.displayName && input.displayName.trim().length > 0) {
     const mod = checkContentModeration(input.displayName, {
@@ -1120,7 +1355,8 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     return {
       ok: false,
       profile: null,
-      error: "Authentication service is temporarily unavailable.",
+      error:
+        "Authentication service is unavailable. Please try again shortly.",
     };
   }
 
@@ -1134,10 +1370,16 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
   }
 
   try {
+    const redirectTo =
+      typeof window !== "undefined" && window.location?.origin
+        ? `${window.location.origin}${assetPath("/account")}`
+        : undefined;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo: redirectTo,
         data: {
           display_name: displayName,
           handle,
@@ -1147,7 +1389,7 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     });
 
     if (error) {
-      const msg = error.message.toLowerCase();
+      const msg = (error.message || "").toLowerCase();
       if (
         msg.includes("already registered") ||
         msg.includes("already exists") ||
@@ -1158,7 +1400,8 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
         return {
           ok: false,
           profile: null,
-          error: "An account with this email already exists. Please log in or use Forgot Password.",
+          error:
+            "An account with this email already exists. Please log in or use Forgot Password.",
         };
       }
       return {
@@ -1176,27 +1419,67 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
       };
     }
 
-    if (data.user && !data.session) {
+    // Detect Supabase GoTrue obfuscated duplicate user (empty identities array)
+    const userWithIdentities = data.user as unknown as {
+      identities?: unknown[];
+    };
+    if (
+      Array.isArray(userWithIdentities.identities) &&
+      userWithIdentities.identities.length === 0
+    ) {
       return {
-        ok: true,
+        ok: false,
         profile: null,
-        message: "Account created! Check your inbox for a confirmation link to activate your account.",
+        error:
+          "An account with this email already exists. Please log in or use Forgot Password.",
       };
     }
 
-    activeVerifiedJwtEmail = normalizeEmail(data.user.email || email);
-    activeVerifiedJwtToken = data.session?.access_token || null;
+    // Email confirmation required (no verified JWT session issued yet)
+    if (!data.session || !data.session.access_token) {
+      return {
+        ok: true,
+        profile: null,
+        confirmationRequired: true,
+        message:
+          "Account created! Check your inbox for a confirmation link to activate your account.",
+      };
+    }
+
+    const verifiedEmail = normalizeEmail(
+      data.session.user?.email || data.user.email || email
+    );
+    activeVerifiedJwtEmail = verifiedEmail;
+    activeVerifiedJwtToken = data.session.access_token;
 
     const remoteRow = await fetchSupabaseUserProfileRow(
       data.user.id,
-      email
+      verifiedEmail
     );
+
+    if (remoteRow?.isBanned) {
+      await supabase.auth.signOut();
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
+      return {
+        ok: false,
+        profile: null,
+        error: `Account suspended: ${remoteRow.bannedReason || "Access revoked."}`,
+      };
+    }
+
     const baseProfile = normalizeUserProfile({
       id: data.user.id,
-      email,
+      email: verifiedEmail,
       displayName: remoteRow?.displayName || displayName,
       handle: remoteRow?.handle || handle,
       avatarColor: remoteRow?.avatarColor || avatarColor,
+      role: remoteRow?.role,
+      isBanned: remoteRow?.isBanned ?? false,
+      bannedAt: remoteRow?.bannedAt ?? null,
+      bannedReason: remoteRow?.bannedReason ?? null,
       memberSince: data.user.created_at || new Date().toISOString(),
       connect5Stats: remoteRow?.connect5Stats,
       twentyOneStats: remoteRow?.twentyOneStats,
@@ -1206,6 +1489,7 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    lastVerifiedSessionProfile = synced;
     saveActiveUserProfile(synced);
     return {
       ok: true,
@@ -1222,9 +1506,12 @@ export async function signUpWithEmail(input: SignUpInput): Promise<AuthResult> {
   }
 }
 
-export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
-  const email = normalizeEmail(input.email || "");
-  if (!email || !email.includes("@") || !email.includes(".")) {
+export async function signInWithEmail(
+  input: SignInInput
+): Promise<AuthResult> {
+  const email =
+    typeof input?.email === "string" ? normalizeEmail(input.email) : "";
+  if (!isValidEmailFormat(email)) {
     return {
       ok: false,
       profile: null,
@@ -1232,20 +1519,24 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
     };
   }
 
-  const password = input.password?.trim() || "";
+  const password =
+    typeof input?.password === "string" ? input.password.trim() : "";
   if (!password) {
     return {
       ok: false,
       profile: null,
-      error: "Please enter your password.",
+      error: "Please enter your password to sign in.",
     };
   }
+
+  scrubLegacyPlaintextPasswords();
 
   if (!isSupabaseConfigured) {
     return {
       ok: false,
       profile: null,
-      error: "Authentication service is temporarily unavailable.",
+      error:
+        "Authentication service is unavailable. Please try again shortly.",
     };
   }
 
@@ -1264,53 +1555,54 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
       password,
     });
 
-    if (error) {
-      const msg = error.message.toLowerCase();
-      if (
-        msg.includes("invalid login credentials") ||
-        msg.includes("invalid_credentials") ||
-        error.status === 400
-      ) {
-        return {
-          ok: false,
-          profile: null,
-          error: "Invalid email or password. Please try again or create an account.",
-        };
-      }
+    if (error || !data?.user || !data?.session?.access_token) {
+      const msg = (error?.message || "").toLowerCase();
       if (msg.includes("email not confirmed")) {
         return {
           ok: false,
           profile: null,
-          error: "Please verify your email address before signing in.",
+          confirmationRequired: true,
+          error:
+            "Please verify your email address via the confirmation link in your inbox before signing in.",
+        };
+      }
+      if (
+        msg.includes("invalid login credentials") ||
+        msg.includes("invalid_credentials") ||
+        error?.status === 400
+      ) {
+        return {
+          ok: false,
+          profile: null,
+          error:
+            "Invalid email or password. Please try again or create an account.",
         };
       }
       return {
         ok: false,
         profile: null,
-        error: error.message || "Unable to sign in. Please check your credentials.",
+        error:
+          error?.message ||
+          "Invalid email or password. Please check your credentials.",
       };
     }
 
-    if (!data?.user) {
-      return {
-        ok: false,
-        profile: null,
-        error: "Sign in failed. No user returned.",
-      };
-    }
-
-    activeVerifiedJwtEmail = normalizeEmail(data.user.email || email);
-    activeVerifiedJwtToken = data.session?.access_token || null;
+    const verifiedEmail = normalizeEmail(
+      data.session.user?.email || data.user.email || email
+    );
+    activeVerifiedJwtEmail = verifiedEmail;
+    activeVerifiedJwtToken = data.session.access_token;
 
     const remoteRow = await fetchSupabaseUserProfileRow(
       data.user.id,
-      email
+      verifiedEmail
     );
 
     if (remoteRow?.isBanned) {
       await supabase.auth.signOut();
       activeVerifiedJwtEmail = null;
       activeVerifiedJwtToken = null;
+      lastVerifiedSessionProfile = null;
       saveActiveUserProfile(null);
       return {
         ok: false,
@@ -1322,20 +1614,26 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
     const meta = data.user.user_metadata ?? {};
     const baseProfile = normalizeUserProfile({
       id: data.user.id,
-      email,
+      email: verifiedEmail,
       displayName:
         remoteRow?.displayName ||
-        (typeof meta.display_name === "string" ? meta.display_name : undefined) ||
-        deriveDisplayNameFromEmail(email),
+        (typeof meta.display_name === "string"
+          ? meta.display_name
+          : undefined) ||
+        deriveDisplayNameFromEmail(verifiedEmail),
       handle:
         remoteRow?.handle ||
         (typeof meta.handle === "string" ? meta.handle : undefined) ||
-        normalizeHandle(undefined, email),
+        normalizeHandle(undefined, verifiedEmail),
       avatarColor: isValidAvatarColor(remoteRow?.avatarColor)
         ? remoteRow.avatarColor
         : isValidAvatarColor(meta.avatar_color)
         ? meta.avatar_color
         : "#F9D423",
+      role: remoteRow?.role,
+      isBanned: remoteRow?.isBanned ?? false,
+      bannedAt: remoteRow?.bannedAt ?? null,
+      bannedReason: remoteRow?.bannedReason ?? null,
       memberSince:
         remoteRow?.memberSince ||
         data.user.created_at ||
@@ -1348,6 +1646,7 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
     });
 
     const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    lastVerifiedSessionProfile = synced;
     saveActiveUserProfile(synced);
 
     return {
@@ -1365,8 +1664,9 @@ export async function signInWithEmail(input: SignInInput): Promise<AuthResult> {
 }
 
 export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
-  const email = normalizeEmail(emailInput || "");
-  if (!email || !email.includes("@") || !email.includes(".")) {
+  const email =
+    typeof emailInput === "string" ? normalizeEmail(emailInput) : "";
+  if (!isValidEmailFormat(email)) {
     return {
       ok: false,
       profile: null,
@@ -1374,11 +1674,14 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
     };
   }
 
+  scrubLegacyPlaintextPasswords();
+
   if (!isSupabaseConfigured) {
     return {
       ok: false,
       profile: null,
-      error: "Authentication service is temporarily unavailable.",
+      error:
+        "Authentication service is unavailable. Please sign in once connectivity is restored.",
     };
   }
 
@@ -1393,8 +1696,8 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
 
   try {
     const redirectTo =
-      typeof window !== "undefined"
-        ? `${window.location.origin}${assetPath("/")}`
+      typeof window !== "undefined" && window.location?.origin
+        ? `${window.location.origin}${assetPath("/account")}`
         : undefined;
 
     const { error } = await supabase.auth.signInWithOtp({
@@ -1412,11 +1715,13 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
       };
     }
 
+    // Never activate a local session before the OTP link in the user's email is verified
     return {
       ok: true,
       profile: null,
       magicLinkSent: true,
-      message: "Check your inbox for your sign-in link.",
+      message:
+        "Check your inbox for your sign-in link. Click the link in that email to finish signing in.",
     };
   } catch (err: unknown) {
     return {
@@ -1430,8 +1735,9 @@ export async function sendMagicLink(emailInput: string): Promise<AuthResult> {
 export async function requestPasswordReset(
   emailInput: string
 ): Promise<{ ok: boolean; message?: string; error?: string }> {
-  const email = normalizeEmail(emailInput || "");
-  if (!email || !email.includes("@") || !email.includes(".")) {
+  const email =
+    typeof emailInput === "string" ? normalizeEmail(emailInput) : "";
+  if (!isValidEmailFormat(email)) {
     return {
       ok: false,
       error: "Please enter a valid email address.",
@@ -1498,6 +1804,9 @@ export async function signOutUser(): Promise<void> {
       }
     }
   }
+  activeVerifiedJwtEmail = null;
+  activeVerifiedJwtToken = null;
+  lastVerifiedSessionProfile = null;
   saveActiveUserProfile(null);
 }
 
@@ -1513,7 +1822,10 @@ export async function updateUserProfile(
     };
   }
 
-  if (updates.displayName !== undefined && updates.displayName.trim().length > 0) {
+  if (
+    updates.displayName !== undefined &&
+    updates.displayName.trim().length > 0
+  ) {
     const mod = checkContentModeration(updates.displayName, {
       mode: "public",
       field: "Display Name",
@@ -1553,7 +1865,7 @@ export async function updateUserProfile(
     lastSyncedAt: new Date().toISOString(),
   };
 
-  if (isSupabaseConfigured) {
+  if (isSupabaseConfigured && activeVerifiedJwtEmail) {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -1565,12 +1877,18 @@ export async function updateUserProfile(
           },
         });
       } catch {
-        // Ignore auth metadata error if session is local fallback
+        // Ignore auth metadata error if offline
       }
     }
   }
 
   const synced = await syncProfileAndMergeGuestStats(updatedBase);
+  if (
+    activeVerifiedJwtEmail &&
+    normalizeEmail(synced.email) === activeVerifiedJwtEmail
+  ) {
+    lastVerifiedSessionProfile = synced;
+  }
   return {
     ok: true,
     profile: synced,
@@ -1587,8 +1905,100 @@ export function subscribeToAuthChanges(
     return () => {};
   }
 
+  const notifyFromVerifiedSession = async () => {
+    if (!isSupabaseConfigured) {
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
+      listener(null);
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
+      listener(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      const session = data?.session;
+      const sessionUser = session?.user;
+
+      if (
+        error ||
+        !sessionUser ||
+        !sessionUser.email ||
+        !session?.access_token
+      ) {
+        activeVerifiedJwtEmail = null;
+        activeVerifiedJwtToken = null;
+        lastVerifiedSessionProfile = null;
+        purgeActiveUserStorageSilently();
+        listener(null);
+        return;
+      }
+
+      const sessionEmail = normalizeEmail(sessionUser.email);
+      activeVerifiedJwtEmail = sessionEmail;
+      activeVerifiedJwtToken = session.access_token;
+
+      const local = getActiveUserProfile();
+      if (local && normalizeEmail(local.email) === sessionEmail) {
+        const verifiedRole: UserRole = isInitialGameMaster(sessionEmail)
+          ? "game_master"
+          : lastVerifiedSessionProfile &&
+            normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
+          ? lastVerifiedSessionProfile.role
+          : "user";
+        const verifiedBanned =
+          lastVerifiedSessionProfile &&
+          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
+            ? lastVerifiedSessionProfile.isBanned
+            : false;
+        const verifiedBannedAt =
+          lastVerifiedSessionProfile &&
+          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
+            ? lastVerifiedSessionProfile.bannedAt
+            : null;
+        const verifiedBannedReason =
+          lastVerifiedSessionProfile &&
+          normalizeEmail(lastVerifiedSessionProfile.email) === sessionEmail
+            ? lastVerifiedSessionProfile.bannedReason
+            : null;
+
+        const safeProfile = normalizeUserProfile({
+          ...local,
+          id: sessionUser.id,
+          email: sessionEmail,
+          role: verifiedRole,
+          isBanned: verifiedBanned,
+          bannedAt: verifiedBannedAt,
+          bannedReason: verifiedBannedReason,
+          authMode: "supabase",
+        });
+        listener(safeProfile);
+        return;
+      }
+
+      const restored = await restoreUserSession();
+      listener(restored);
+    } catch {
+      activeVerifiedJwtEmail = null;
+      activeVerifiedJwtToken = null;
+      lastVerifiedSessionProfile = null;
+      purgeActiveUserStorageSilently();
+      listener(null);
+    }
+  };
+
   const handleAuthEvent = () => {
-    listener(getActiveUserProfile());
+    void notifyFromVerifiedSession();
   };
 
   const handleStorageEvent = (event: StorageEvent) => {
@@ -1597,7 +2007,7 @@ export function subscribeToAuthChanges(
       event.key === ACTIVE_USER_KEY ||
       event.key.startsWith("solgames_v1_stats_")
     ) {
-      listener(getActiveUserProfile());
+      void notifyFromVerifiedSession();
     }
   };
 
@@ -1611,8 +2021,16 @@ export function subscribeToAuthChanges(
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange((event) => {
         if (event === "SIGNED_OUT") {
-          listener(getActiveUserProfile());
-        } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+          activeVerifiedJwtEmail = null;
+          activeVerifiedJwtToken = null;
+          lastVerifiedSessionProfile = null;
+          purgeActiveUserStorageSilently();
+          listener(null);
+        } else if (
+          event === "SIGNED_IN" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED"
+        ) {
           void restoreUserSession().then((profile) => {
             listener(profile);
           });
@@ -1642,4 +2060,3 @@ export const signInWithMagicLink = sendMagicLink;
 export const signOut = signOutUser;
 export const resetPassword = requestPasswordReset;
 export const updateProfile = updateUserProfile;
-

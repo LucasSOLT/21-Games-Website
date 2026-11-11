@@ -142,3 +142,20 @@ export function checkDateEditPermission(
 - `src/components/games/connect-five.tsx`: Connect 5 gameplay, board re-sync
 - `src/components/account/profile-viewer-modal.tsx`: Profile modal & moderation checks
 - `supabase/schema.sql`: Postgres schema, table migrations, and RLS policies
+
+---
+
+## Step 2.5 — P0 Auth & Postgres RLS Security Lockdown
+
+- **Verified Supabase Session Enforcement (`AUTH-1`, `AUTH-2`, `AUTH-3`, `AUTH-4`)**:
+  - `signInWithEmail` and `signUpWithEmail` in `src/lib/user-auth.ts` strictly require non-empty passwords (`>= 6` characters on sign-up) verified against Supabase GoTrue (`signInWithPassword` / `signUp`) with zero local-account fallback or deterministic password synthesis.
+  - `sendMagicLink` sends the GoTrue OTP email and returns `profile: null, magicLinkSent: true` without activating any local profile prior to URL verification.
+  - `restoreUserSession` and `subscribeToAuthChanges` verify `supabase.auth.getSession()` on every bootstrap, storage event, and custom event, immediately purging forged `solgames_v1_active_user` entries when no verified Supabase JWT exists.
+  - `scrubLegacyPlaintextPasswords` strips any legacy plaintext `password` fields from `solgames_v1_accounts_db` and `solgames_v1_active_user`.
+- **Least-Privilege Postgres Grants & Row Level Security (`RLS-5`)**:
+  - `supabase/migrations/20261111000001_auth_security_lockdown.sql` and `supabase/schema.sql` revoke anonymous write grants on `daily_puzzles` and `twenty_one_boards`, revoke all anonymous grants on `user_profiles` (preventing email enumeration), enforce `public.is_root_game_master()` (`lucas@soltheory.com` and `steve@soltheory.com` only) and `public.is_active_admin()` (`puzzle_date > current_date`), and guard `user_profiles` via `BEFORE INSERT OR UPDATE` trigger `public.enforce_user_profile_security()`.
+- **Custom Game Creation Auth Gates & Studio Moderation (`GATE-6`, `RBAC-7`)**:
+  - Both `17 Syllables` (`src/components/games/seventeen-syllables.tsx`) and `21 Things` (`src/components/games/twenty-one-things.tsx`) strictly require `isAuthenticated && !profile.isBanned` across all UI entry points (`?mode=create`, splash screen, header button, victory modal, and publish handlers).
+  - `src/app/admin/page.tsx` enforces public-mode content moderation (`check17SyllablesPuzzleModeration`) on 17 Syllables studio saves and removes the dead `"Make GM"` action in User Management.
+- **Verification Harness**: `scripts/test-step2-5-auth-lockdown.ts` and `scripts/verify-live-supabase-realtime.ts`.
+

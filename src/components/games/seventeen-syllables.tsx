@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   buildStructuredHaikuLines,
@@ -31,10 +31,11 @@ import {
   shareTextResult,
   decodeShareable17Haiku,
 } from "@/lib/custom-game-share";
-import { checkContentModeration } from "@/lib/moderation";
+import { check17SyllablesPuzzleModeration } from "@/lib/moderation";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { GameShell, formatTimerSeconds } from "@/components/game-shell";
 import { useAuth } from "@/components/account/auth-provider";
+import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -46,6 +47,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Sparkles,
+  Loader2,
   Lock,
   Share2,
   Trophy,
@@ -225,7 +227,13 @@ function resolvePuzzle(
 export function SeventeenSyllablesGame() {
   const searchParams = useSearchParams();
   const customParam = searchParams.get("b");
-  const { profile } = useAuth();
+  const modeParam = searchParams.get("mode");
+  const {
+    profile,
+    isAuthenticated,
+    isLoading: authLoading,
+    openAccountModal,
+  } = useAuth();
 
   const todayKey = useMemo(() => getLocalDateKey(), []);
 
@@ -237,6 +245,10 @@ export function SeventeenSyllablesGame() {
   const [puzzle, setPuzzle] = useState<SeventeenSyllablesPuzzle>(
     resolvedInitial.puzzle
   );
+  const puzzleRef = useRef<SeventeenSyllablesPuzzle>(puzzle);
+  useEffect(() => {
+    puzzleRef.current = puzzle;
+  }, [puzzle]);
   const isCustomMode = resolvedInitial.isCustomMode;
 
   const currentContentHash = useMemo(
@@ -282,27 +294,83 @@ export function SeventeenSyllablesGame() {
   const [isGameWon, setIsGameWon] = useState(initialData.isGameWon);
   const [victoryModalOpen, setVictoryModalOpen] = useState(false);
 
-  // Creator modal
+  // Creator modal (gated strictly behind verified authentication)
   const [creatorModalOpen, setCreatorModalOpen] = useState(false);
+  const [pendingCreatorAfterAuth, setPendingCreatorAfterAuth] = useState(false);
+  const [dismissedUrlCreateMode, setDismissedUrlCreateMode] = useState(false);
   const [creatorTheme, setCreatorTheme] = useState("");
   const [creatorName, setCreatorName] = useState(profile?.displayName || "");
+  const [syncedProfileName, setSyncedProfileName] = useState<string>(
+    profile?.displayName ?? ""
+  );
+  if ((profile?.displayName ?? "") !== syncedProfileName) {
+    const prevName = syncedProfileName;
+    const nextName = profile?.displayName ?? "";
+    setSyncedProfileName(nextName);
+    if (nextName && (creatorName === "" || creatorName === prevName)) {
+      setCreatorName(nextName);
+    }
+  }
   const [creatorLine1, setCreatorLine1] = useState("");
   const [creatorLine2, setCreatorLine2] = useState("");
   const [creatorLine3, setCreatorLine3] = useState("");
   const [creatorErrors, setCreatorErrors] = useState<string[]>([]);
   const [createdShareLink, setCreatedShareLink] = useState<string | null>(null);
 
+  const isCreatorDialogOpen =
+    isAuthenticated &&
+    !profile?.isBanned &&
+    (creatorModalOpen ||
+      pendingCreatorAfterAuth ||
+      (modeParam === "create" && !dismissedUrlCreateMode));
+
+  const handleCreatorDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      setCreatorModalOpen(false);
+      setPendingCreatorAfterAuth(false);
+      setDismissedUrlCreateMode(true);
+    } else {
+      setCreatorModalOpen(true);
+    }
+  }, []);
+
+  const requestOpenCreatorModal = useCallback(() => {
+    if (profile?.isBanned) {
+      toast({
+        title: "Account Suspended",
+        description:
+          "Your account has been suspended from creating custom haikus.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!isAuthenticated || !profile) {
+      setPendingCreatorAfterAuth(true);
+      toast({
+        title: "Sign In Required",
+        description:
+          "Please sign in or create a free account to compose and share custom 17 Syllables haikus.",
+      });
+      openAccountModal("signin");
+      return;
+    }
+    setCreatorErrors([]);
+    setCreatorModalOpen(true);
+  }, [isAuthenticated, openAccountModal, profile]);
+
   // Real-Time Propagation: update board when puzzle is modified by Game Master
   const applyRemotePuzzleIfChanged = useCallback(
     (remotePuzzle: SeventeenSyllablesPuzzle) => {
       if (isCustomMode) return;
+      const activePuzzle = puzzleRef.current;
       const remoteHash = computePuzzleContentHash(remotePuzzle);
-      const currentHash = computePuzzleContentHash(puzzle);
+      const currentHash = computePuzzleContentHash(activePuzzle);
       const linesChanged =
-        remotePuzzle.lines.join("|") !== puzzle.lines.join("|");
-      const themeChanged = remotePuzzle.theme !== puzzle.theme;
+        remotePuzzle.lines.join("|") !== activePuzzle.lines.join("|");
+      const themeChanged = remotePuzzle.theme !== activePuzzle.theme;
 
       if (remoteHash !== currentHash || linesChanged || themeChanged) {
+        puzzleRef.current = remotePuzzle;
         clear17SyllablesProgress(todayKey);
         const nextStructured = buildStructuredHaikuLines(remotePuzzle.lines);
         const base = createInitialGameState(
@@ -338,7 +406,7 @@ export function SeventeenSyllablesGame() {
         });
       }
     },
-    [isCustomMode, puzzle, todayKey]
+    [isCustomMode, todayKey]
   );
 
   // Fetch remote Supabase daily_puzzles override on mount and listen to live updates
@@ -658,9 +726,30 @@ export function SeventeenSyllablesGame() {
     checkFullBoard(nextSlots);
   }, [tileHintsUsed, slots, trayChunks, checkFullBoard]);
 
-  // Custom Haiku Creation
+  // Custom Haiku Creation (strictly requires verified non-banned auth session)
   const handlePublishCustomHaiku = useCallback(() => {
     setCreatorErrors([]);
+
+    if (!isAuthenticated || !profile) {
+      toast({
+        title: "Sign In Required",
+        description:
+          "You must be signed in to publish a custom 17 Syllables haiku.",
+        variant: "destructive",
+      });
+      openAccountModal("signin");
+      return;
+    }
+
+    if (profile.isBanned) {
+      toast({
+        title: "Account Suspended",
+        description:
+          "Your account has been suspended from publishing custom haikus.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const val = validateHaikuStructure([creatorLine1, creatorLine2, creatorLine3]);
     if (!val.isValid) {
@@ -668,14 +757,28 @@ export function SeventeenSyllablesGame() {
       return;
     }
 
-    // Content moderation check (Tier 1 slur ban, Tier 2 allows casual swearing in private)
-    const mod1 = checkContentModeration(creatorLine1, { mode: "private" });
-    const mod2 = checkContentModeration(creatorLine2, { mode: "private" });
-    const mod3 = checkContentModeration(creatorLine3, { mode: "private" });
+    const effectiveTheme = (creatorTheme || "My Custom Haiku").trim();
+    const effectiveCreatorName = (
+      creatorName ||
+      profile.displayName ||
+      "Friend"
+    ).trim();
 
-    if (!mod1.allowed || !mod2.allowed || !mod3.allowed) {
+    // Content moderation check across theme, creator name, and all 3 haiku lines (private mode)
+    const mod = check17SyllablesPuzzleModeration(
+      {
+        theme: effectiveTheme,
+        author: effectiveCreatorName,
+        lines: [creatorLine1, creatorLine2, creatorLine3],
+      },
+      { mode: "private" }
+    );
+
+    if (!mod.allowed) {
       setCreatorErrors([
-        mod1.flaggedReason || mod2.flaggedReason || mod3.flaggedReason || "Content violates moderation policy.",
+        mod.reason ||
+          mod.flaggedReason ||
+          "Content violates moderation policy.",
       ]);
       return;
     }
@@ -683,8 +786,8 @@ export function SeventeenSyllablesGame() {
     const shortId = generateShortGameId("17s");
     const customPayload = {
       id: shortId,
-      theme: (creatorTheme || "My Custom Haiku").trim(),
-      creatorName: (creatorName || "Friend").trim(),
+      theme: effectiveTheme,
+      creatorName: effectiveCreatorName,
       lines: [
         creatorLine1.trim().toUpperCase(),
         creatorLine2.trim().toUpperCase(),
@@ -708,7 +811,16 @@ export function SeventeenSyllablesGame() {
       creatorName: customPayload.creatorName,
       gameName: "17 Syllables",
     });
-  }, [creatorLine1, creatorLine2, creatorLine3, creatorTheme, creatorName]);
+  }, [
+    creatorLine1,
+    creatorLine2,
+    creatorLine3,
+    creatorTheme,
+    creatorName,
+    isAuthenticated,
+    openAccountModal,
+    profile,
+  ]);
 
   // Share game result snippet
   const handleShareResults = useCallback(() => {
@@ -742,6 +854,221 @@ export function SeventeenSyllablesGame() {
     });
   }, [currentStars, elapsedSeconds, puzzle.puzzleNumber, wordHintsUsed, tileHintsUsed]);
 
+  const creatorDialogElement = isAuthenticated && !profile?.isBanned ? (
+    <Dialog
+      open={isCreatorDialogOpen}
+      onOpenChange={handleCreatorDialogOpenChange}
+    >
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-emerald-600" />
+            <span>Create Your Own 17 Syllables Haiku</span>
+          </DialogTitle>
+          <DialogDescription>
+            Compose a 5 – 7 – 5 haiku to slice into tiles and challenge your friends.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">
+              Haiku Theme / Title
+            </label>
+            <input
+              type="text"
+              value={creatorTheme}
+              onChange={(e) => setCreatorTheme(e.target.value)}
+              placeholder="e.g. Autumn Whisper"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">
+              Creator Name
+            </label>
+            <input
+              type="text"
+              value={creatorName}
+              onChange={(e) => setCreatorName(e.target.value)}
+              placeholder="Your Name or @handle"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
+            />
+          </div>
+
+          {/* Line 1 */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-bold text-neutral-700">Line 1 (5 syllables)</label>
+              <span
+                className={cn(
+                  "text-xs font-mono font-bold",
+                  countLineSyllables(creatorLine1) === 5 ? "text-emerald-600" : "text-neutral-500"
+                )}
+              >
+                {countLineSyllables(creatorLine1)} / 5 {countLineSyllables(creatorLine1) === 5 && "✓"}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={creatorLine1}
+              onChange={(e) => setCreatorLine1(e.target.value)}
+              placeholder="OLD GOLD AUTUMN LEAVES"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+            />
+          </div>
+
+          {/* Line 2 */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-bold text-neutral-700">Line 2 (7 syllables)</label>
+              <span
+                className={cn(
+                  "text-xs font-mono font-bold",
+                  countLineSyllables(creatorLine2) === 7 ? "text-emerald-600" : "text-neutral-500"
+                )}
+              >
+                {countLineSyllables(creatorLine2)} / 7 {countLineSyllables(creatorLine2) === 7 && "✓"}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={creatorLine2}
+              onChange={(e) => setCreatorLine2(e.target.value)}
+              placeholder="DRIFTING DOWN TO FROZEN SOIL"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+            />
+          </div>
+
+          {/* Line 3 */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-bold text-neutral-700">Line 3 (5 syllables)</label>
+              <span
+                className={cn(
+                  "text-xs font-mono font-bold",
+                  countLineSyllables(creatorLine3) === 5 ? "text-emerald-600" : "text-neutral-500"
+                )}
+              >
+                {countLineSyllables(creatorLine3)} / 5 {countLineSyllables(creatorLine3) === 5 && "✓"}
+              </span>
+            </div>
+            <input
+              type="text"
+              value={creatorLine3}
+              onChange={(e) => setCreatorLine3(e.target.value)}
+              placeholder="WINTER REACHES IN"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+            />
+          </div>
+
+          {creatorErrors.length > 0 && (
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 space-y-1">
+              {creatorErrors.map((err, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{err}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {createdShareLink && (
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs space-y-2">
+              <p className="font-bold text-emerald-800 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Haiku Ready to Share!</span>
+              </p>
+              <input
+                type="text"
+                readOnly
+                value={createdShareLink}
+                className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded font-mono text-[11px]"
+              />
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <button
+            type="button"
+            onClick={() => handleCreatorDialogOpenChange(false)}
+            className="px-4 py-2 text-xs font-bold text-neutral-600 hover:text-black"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handlePublishCustomHaiku}
+            className="px-5 py-2.5 bg-black text-white rounded-full font-bold text-xs hover:bg-neutral-800 cursor-pointer shadow-xs"
+          >
+            Generate &amp; Share Link
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  ) : null;
+
+  // Gate direct ?mode=create navigation for unauthenticated guests or suspended accounts
+  if (modeParam === "create" && !dismissedUrlCreateMode && !isAuthenticated) {
+    return (
+      <GameShell
+        gameSlug="17-syllables"
+        gameTitle="17 Syllables"
+        puzzleNumber={puzzle.puzzleNumber}
+        dateKey={puzzle.dateKey}
+        author={puzzle.author}
+        subtitle="Haiku Fragment Reconstruction"
+      >
+        {authLoading ? (
+          <div className="rounded-2xl border-2 border-black bg-white p-8 text-center space-y-3 max-w-lg mx-auto shadow-[0_4px_0_#111111] my-8">
+            <Loader2 className="h-7 w-7 animate-spin mx-auto text-black" />
+            <p className="text-sm font-bold text-gray-700">
+              Verifying account session...
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-2xl border-2 border-black bg-white p-6 sm:p-8 text-center space-y-4 max-w-lg mx-auto shadow-[0_4px_0_#111111] my-8">
+            <div className="h-14 w-14 rounded-full bg-emerald-50 border-2 border-black flex items-center justify-center mx-auto text-black">
+              <Lock className="h-7 w-7" />
+            </div>
+            <h2 className="font-headline font-black text-2xl text-black">
+              {profile?.isBanned
+                ? "Account Suspended"
+                : "Sign In to Create Custom Haikus"}
+            </h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              {profile?.isBanned
+                ? "Your account has been suspended from creating and sharing custom 17 Syllables haikus."
+                : "Composing and sharing custom 17 Syllables haiku puzzles requires an account. Sign in or register for free to craft 5–7–5 puzzles for your friends."}
+            </p>
+            <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+              {!profile?.isBanned && (
+                <Button
+                  onClick={() => {
+                    setPendingCreatorAfterAuth(true);
+                    openAccountModal("signin");
+                  }}
+                  className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
+                >
+                  Sign In or Register
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => setDismissedUrlCreateMode(true)}
+                className="border-2 border-black font-bold"
+              >
+                Play Today&apos;s Haiku
+              </Button>
+            </div>
+          </div>
+        )}
+      </GameShell>
+    );
+  }
+
   // If splash screen not yet dismissed
   if (!splashDismissed) {
     const isCompleted = !isCustomMode && isDateCompleted("17-syllables", puzzle.dateKey);
@@ -773,162 +1100,10 @@ export function SeventeenSyllablesGame() {
             setSplashDismissed(true);
             setIsTimerRunning(true);
           }}
-          onCreate={() => {
-            setCreatorModalOpen(true);
-          }}
+          onCreate={requestOpenCreatorModal}
         />
 
-        {/* Custom Creator Dialog */}
-        <Dialog open={creatorModalOpen} onOpenChange={setCreatorModalOpen}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-emerald-600" />
-                <span>Create Your Own 17 Syllables Haiku</span>
-              </DialogTitle>
-              <DialogDescription>
-                Compose a 5 – 7 – 5 haiku to slice into tiles and challenge your friends.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 py-2">
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  Haiku Theme / Title
-                </label>
-                <input
-                  type="text"
-                  value={creatorTheme}
-                  onChange={(e) => setCreatorTheme(e.target.value)}
-                  placeholder="e.g. Autumn Whisper"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  Creator Name
-                </label>
-                <input
-                  type="text"
-                  value={creatorName}
-                  onChange={(e) => setCreatorName(e.target.value)}
-                  placeholder="Your Name or @handle"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
-                />
-              </div>
-
-              {/* Line 1 */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-bold text-neutral-700">Line 1 (5 syllables)</label>
-                  <span
-                    className={cn(
-                      "text-xs font-mono font-bold",
-                      countLineSyllables(creatorLine1) === 5 ? "text-emerald-600" : "text-neutral-500"
-                    )}
-                  >
-                    {countLineSyllables(creatorLine1)} / 5 {countLineSyllables(creatorLine1) === 5 && "✓"}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={creatorLine1}
-                  onChange={(e) => setCreatorLine1(e.target.value)}
-                  placeholder="OLD GOLD AUTUMN LEAVES"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
-                />
-              </div>
-
-              {/* Line 2 */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-bold text-neutral-700">Line 2 (7 syllables)</label>
-                  <span
-                    className={cn(
-                      "text-xs font-mono font-bold",
-                      countLineSyllables(creatorLine2) === 7 ? "text-emerald-600" : "text-neutral-500"
-                    )}
-                  >
-                    {countLineSyllables(creatorLine2)} / 7 {countLineSyllables(creatorLine2) === 7 && "✓"}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={creatorLine2}
-                  onChange={(e) => setCreatorLine2(e.target.value)}
-                  placeholder="DRIFTING DOWN TO FROZEN SOIL"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
-                />
-              </div>
-
-              {/* Line 3 */}
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-bold text-neutral-700">Line 3 (5 syllables)</label>
-                  <span
-                    className={cn(
-                      "text-xs font-mono font-bold",
-                      countLineSyllables(creatorLine3) === 5 ? "text-emerald-600" : "text-neutral-500"
-                    )}
-                  >
-                    {countLineSyllables(creatorLine3)} / 5 {countLineSyllables(creatorLine3) === 5 && "✓"}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  value={creatorLine3}
-                  onChange={(e) => setCreatorLine3(e.target.value)}
-                  placeholder="WINTER REACHES IN"
-                  className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
-                />
-              </div>
-
-              {creatorErrors.length > 0 && (
-                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 space-y-1">
-                  {creatorErrors.map((err, i) => (
-                    <div key={i} className="flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>{err}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {createdShareLink && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs space-y-2">
-                  <p className="font-bold text-emerald-800 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Haiku Ready to Share!</span>
-                  </p>
-                  <input
-                    type="text"
-                    readOnly
-                    value={createdShareLink}
-                    className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded font-mono text-[11px]"
-                  />
-                </div>
-              )}
-            </div>
-
-            <DialogFooter>
-              <button
-                type="button"
-                onClick={() => setCreatorModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-neutral-600 hover:text-black"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handlePublishCustomHaiku}
-                className="px-5 py-2.5 bg-black text-white rounded-full font-bold text-xs hover:bg-neutral-800 cursor-pointer shadow-xs"
-              >
-                Generate &amp; Share Link
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {creatorDialogElement}
       </GameShell>
     );
   }
@@ -943,7 +1118,16 @@ export function SeventeenSyllablesGame() {
       author={puzzle.author}
       subtitle={puzzle.theme}
       headerRightSlot={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            onClick={requestOpenCreatorModal}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white hover:bg-neutral-50 border-2 border-black text-[11px] sm:text-xs font-bold cursor-pointer transition-colors"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Create Haiku</span>
+            <span className="sm:hidden">Create</span>
+          </button>
           {/* Stars rating badge */}
           <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 border border-neutral-300 text-xs font-bold">
             <Star className="w-3.5 h-3.5 fill-[#F9D423] text-black" />
@@ -1284,7 +1468,7 @@ export function SeventeenSyllablesGame() {
               type="button"
               onClick={() => {
                 setVictoryModalOpen(false);
-                setCreatorModalOpen(true);
+                requestOpenCreatorModal();
               }}
               className="w-full py-2.5 px-4 bg-white text-black hover:bg-neutral-50 rounded-full font-bold text-xs border-2 border-neutral-300 hover:border-black flex items-center justify-center gap-2 cursor-pointer"
             >
@@ -1294,6 +1478,8 @@ export function SeventeenSyllablesGame() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {creatorDialogElement}
     </GameShell>
   );
 }

@@ -671,3 +671,36 @@ export function checkAdmin21BoardModeration(board: {
 }): ModerationResult {
   return check21ThingsBoardModeration(board, { mode: "public" });
 }
+
+/**
+ * Validates a 17 Syllables haiku puzzle (theme, author, and 3 haiku lines).
+ */
+export function check17SyllablesPuzzleModeration(
+  puzzle: {
+    theme: string;
+    author: string;
+    lines: [string, string, string] | string[];
+  },
+  context: { mode: ModerationMode } = { mode: "public" }
+): ModerationResult {
+  const fields: Array<{ text: string; field: string }> = [
+    { text: puzzle.theme, field: "Haiku Theme" },
+    { text: puzzle.author, field: "Author" },
+  ];
+  puzzle.lines.forEach((line, idx) => {
+    fields.push({ text: line, field: `Haiku Line ${idx + 1}` });
+  });
+  return checkMultipleFields(fields, context);
+}
+
+/**
+ * Validates 17 Syllables haiku creation in admin studio (public mode).
+ */
+export function checkAdmin17SyllablesModeration(puzzle: {
+  theme: string;
+  author: string;
+  lines: [string, string, string] | string[];
+}): ModerationResult {
+  return check17SyllablesPuzzleModeration(puzzle, { mode: "public" });
+}
+

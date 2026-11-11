@@ -332,6 +332,26 @@ export interface DiagnosticContext {
 // 4. Raw Error Extraction Helper
 // ============================================================================
 
+function safeReadProp(obj: Record<string, unknown>, key: string): unknown {
+  try {
+    return obj[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function safeFallbackString(val: unknown): string {
+  try {
+    return String(val);
+  } catch {
+    try {
+      return Object.prototype.toString.call(val);
+    } catch {
+      return "[Unserializable Error Object]";
+    }
+  }
+}
+
 export function extractRawErrorDetails(error: unknown): DiagnosticReportRawError {
   if (!error) {
     return {
@@ -349,37 +369,49 @@ export function extractRawErrorDetails(error: unknown): DiagnosticReportRawError
 
   if (typeof error === "object") {
     const err = error as Record<string, unknown>;
-    const name = typeof err.name === "string" ? err.name : undefined;
+    const rawName = safeReadProp(err, "name");
+    const rawMsg = safeReadProp(err, "message");
+    const rawErrDesc = safeReadProp(err, "error_description");
+    const rawCode = safeReadProp(err, "code");
+    const rawStatus = safeReadProp(err, "status");
+    const rawStatusCode = safeReadProp(err, "statusCode");
+    const rawDetails = safeReadProp(err, "details");
+    const rawDetail = safeReadProp(err, "detail");
+    const rawHint = safeReadProp(err, "hint");
+    const rawStack = safeReadProp(err, "stack");
+
+    const name = typeof rawName === "string" ? rawName : undefined;
     const message =
-      typeof err.message === "string"
-        ? err.message
-        : typeof err.error_description === "string"
-        ? err.error_description
+      typeof rawMsg === "string"
+        ? rawMsg
+        : typeof rawErrDesc === "string"
+        ? rawErrDesc
         : undefined;
     const code =
-      typeof err.code === "string" || typeof err.code === "number"
-        ? err.code
+      typeof rawCode === "string" || typeof rawCode === "number"
+        ? rawCode
         : undefined;
     const status =
-      typeof err.status === "number"
-        ? err.status
-        : typeof err.statusCode === "number"
-        ? err.statusCode
+      typeof rawStatus === "number"
+        ? rawStatus
+        : typeof rawStatusCode === "number"
+        ? rawStatusCode
         : undefined;
     const details =
-      typeof err.details === "string"
-        ? err.details
-        : typeof err.detail === "string"
-        ? err.detail
+      typeof rawDetails === "string"
+        ? rawDetails
+        : typeof rawDetail === "string"
+        ? rawDetail
         : undefined;
-    const hint = typeof err.hint === "string" ? err.hint : undefined;
-    const stack = typeof err.stack === "string" ? err.stack : undefined;
+    const hint = typeof rawHint === "string" ? rawHint : undefined;
+    const stack = typeof rawStack === "string" ? rawStack : undefined;
 
     let rawString = "";
     try {
-      rawString = JSON.stringify(error, Object.getOwnPropertyNames(error), 2);
+      const propNames = Object.getOwnPropertyNames(error);
+      rawString = JSON.stringify(error, propNames, 2);
     } catch {
-      rawString = String(error);
+      rawString = safeFallbackString(error);
     }
 
     return {
@@ -394,9 +426,10 @@ export function extractRawErrorDetails(error: unknown): DiagnosticReportRawError
     };
   }
 
+  const primitiveStr = safeFallbackString(error);
   return {
-    message: String(error),
-    rawString: String(error),
+    message: primitiveStr,
+    rawString: primitiveStr,
   };
 }
 
@@ -462,7 +495,8 @@ export function classifyDiagnosticError(
   } else if (
     context?.action === "save" &&
     context.userEmail &&
-    !isInitialGameMaster(context.userEmail)
+    !isInitialGameMaster(context.userEmail) &&
+    context.userRole !== "admin"
   ) {
     resolvedCode = DIAGNOSTIC_ERROR_CODES.ERR_AUTH_NOT_GAME_MASTER;
   }

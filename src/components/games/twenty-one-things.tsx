@@ -234,6 +234,11 @@ function TwentyOneThingsBoardView({
   const { profile, isAuthenticated, isLoading: authLoading, openAccountModal } = useAuth();
 
   const [mode, setMode] = useState<"play" | "create">(initialMode);
+  const [pendingCreateAfterAuth, setPendingCreateAfterAuth] = useState(false);
+  const effectiveMode: "play" | "create" =
+    mode === "create" || (pendingCreateAfterAuth && isAuthenticated)
+      ? "create"
+      : "play";
 
   const initialCustomBoard = resolveInitial21Board(
     activeDateKey,
@@ -300,6 +305,8 @@ function TwentyOneThingsBoardView({
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const isMountedRef = useRef<boolean>(true);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -339,7 +346,9 @@ function TwentyOneThingsBoardView({
 
   // Cleanup active microphone or speech recognition sessions on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
@@ -353,6 +362,10 @@ function TwentyOneThingsBoardView({
         } catch {
           // Ignore stop error on unmount
         }
+      }
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
       }
       if (recognitionRef.current) {
         try {
@@ -618,6 +631,27 @@ function TwentyOneThingsBoardView({
   };
 
   const handleResetFunnel = (targetBoardId = board?.id ?? "") => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // Ignore stop error
+      }
+    }
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
+    }
+    setIsRecordingAudio(false);
+    setRecordingSeconds(0);
+
     if (targetBoardId) {
       clear21ThingsProgress(targetBoardId);
     }
@@ -636,6 +670,11 @@ function TwentyOneThingsBoardView({
     if (typeof window === "undefined") return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      recordingStreamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       audioChunksRef.current = [];
 
@@ -644,15 +683,19 @@ function TwentyOneThingsBoardView({
       };
 
       recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingStreamRef.current === stream) {
+          recordingStreamRef.current = null;
+        }
+        if (!isMountedRef.current) return;
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         const reader = new FileReader();
         reader.onloadend = () => {
-          if (typeof reader.result === "string") {
+          if (isMountedRef.current && typeof reader.result === "string") {
             setVoiceNoteDataUrl(reader.result);
           }
         };
         reader.readAsDataURL(blob);
-        stream.getTracks().forEach((t) => t.stop());
       };
 
       mediaRecorderRef.current = recorder;
@@ -674,8 +717,16 @@ function TwentyOneThingsBoardView({
 
   const stopAudioRecording = () => {
     if (mediaRecorderRef.current && isRecordingAudio) {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // Ignore stop error
+      }
       setIsRecordingAudio(false);
+    }
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
     }
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
@@ -897,7 +948,7 @@ function TwentyOneThingsBoardView({
   };
 
   const handlePublishCustomBoard = async () => {
-    if (!isAuthenticated && !profile) {
+    if (!isAuthenticated || !profile) {
       toast({
         title: "Sign In Required",
         description: "You must be signed in to publish your custom 21 Things board.",
@@ -907,7 +958,7 @@ function TwentyOneThingsBoardView({
       return;
     }
 
-    if (profile?.isBanned) {
+    if (profile.isBanned) {
       toast({
         title: "Account Suspended",
         description: "Your account has been suspended from publishing custom boards.",
@@ -968,6 +1019,7 @@ function TwentyOneThingsBoardView({
     const fullUrl = buildBoardShareUrl(customBoard);
     setShareUrl(fullUrl);
     setBoard(customBoard);
+    setPendingCreateAfterAuth(false);
     setMode("play");
     handleResetFunnel(customBoard.id);
 
@@ -1072,11 +1124,21 @@ function TwentyOneThingsBoardView({
       author={board.creatorName}
       headerRightSlot={
         <Button
-          variant={mode === "create" ? "default" : "outline"}
+          variant={effectiveMode === "create" ? "default" : "outline"}
           size="sm"
           onClick={() => {
-            if (mode === "play") {
-              if (!isAuthenticated && !profile) {
+            if (effectiveMode === "play") {
+              if (profile?.isBanned) {
+                toast({
+                  title: "Account Suspended",
+                  description:
+                    "Your account has been suspended from building custom 21 Things boards.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              if (!isAuthenticated) {
+                setPendingCreateAfterAuth(true);
                 toast({
                   title: "Sign In Required",
                   description:
@@ -1090,38 +1152,58 @@ function TwentyOneThingsBoardView({
               }
               setMode("create");
             } else {
+              setPendingCreateAfterAuth(false);
               setMode("play");
             }
           }}
           className="font-bold border-2 border-black text-[10px] min-[375px]:text-[11px] sm:text-xs h-7 sm:h-9 px-2 min-[375px]:px-2.5 sm:px-3"
         >
           <Mic className="h-3 w-3 min-[375px]:h-3.5 min-[375px]:w-3.5 mr-0.5 min-[375px]:mr-1" />
-          {mode === "play" ? "Create Your Own" : "Back to Board"}
+          {effectiveMode === "play" ? "Create Your Own" : "Back to Board"}
         </Button>
       }
     >
-      {mode === "create" ? (
-        !authLoading && !isAuthenticated && !profile ? (
+      {effectiveMode === "create" ? (
+        authLoading ? (
+          <div className="rounded-2xl border-2 border-black bg-white p-8 text-center space-y-3 max-w-lg mx-auto shadow-[0_4px_0_#111111] my-8">
+            <Loader2 className="h-7 w-7 animate-spin mx-auto text-black" />
+            <p className="text-sm font-bold text-gray-700">
+              Verifying account session...
+            </p>
+          </div>
+        ) : !isAuthenticated || profile?.isBanned ? (
           <div className="rounded-2xl border-2 border-black bg-white p-6 sm:p-8 text-center space-y-4 max-w-lg mx-auto shadow-[0_4px_0_#111111] my-8">
             <div className="h-14 w-14 rounded-full bg-purple-50 border-2 border-black flex items-center justify-center mx-auto text-black">
               <Lock className="h-7 w-7" />
             </div>
             <h2 className="font-headline font-black text-2xl text-black">
-              Sign In to Build Custom Boards
+              {profile?.isBanned
+                ? "Account Suspended"
+                : "Sign In to Build Custom Boards"}
             </h2>
             <p className="text-sm text-gray-600 leading-relaxed">
-              Creating and publishing custom 21 Things boards requires an account. Sign in or register for free to craft personal gratitude or favorite-things boards and share them with friends.
+              {profile?.isBanned
+                ? "Your account has been suspended from creating and publishing custom 21 Things boards."
+                : "Creating and publishing custom 21 Things boards requires an account. Sign in or register for free to craft personal gratitude or favorite-things boards and share them with friends."}
             </p>
             <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-              <Button
-                onClick={() => openAccountModal("signin")}
-                className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
-              >
-                Sign In or Register
-              </Button>
+              {!profile?.isBanned && (
+                <Button
+                  onClick={() => {
+                    setPendingCreateAfterAuth(true);
+                    openAccountModal("signin");
+                  }}
+                  className="bg-black text-white hover:bg-gray-800 font-bold border-2 border-black"
+                >
+                  Sign In or Register
+                </Button>
+              )}
               <Button
                 variant="outline"
-                onClick={() => setMode("play")}
+                onClick={() => {
+                  setPendingCreateAfterAuth(false);
+                  setMode("play");
+                }}
                 className="border-2 border-black font-bold"
               >
                 Back to Today&apos;s Board
@@ -1815,7 +1897,17 @@ function TwentyOneThingsBoardView({
                 <Button
                   variant="outline"
                   onClick={() => {
-                    if (!isAuthenticated && !profile) {
+                    if (profile?.isBanned) {
+                      toast({
+                        title: "Account Suspended",
+                        description:
+                          "Your account has been suspended from building custom 21 Things boards.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    if (!isAuthenticated) {
+                      setPendingCreateAfterAuth(true);
                       toast({
                         title: "Sign In Required",
                         description:

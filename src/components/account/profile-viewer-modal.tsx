@@ -38,6 +38,7 @@ import {
   AVATAR_COLOR_OPTIONS,
   formatMemberSince,
   getInitials,
+  requestPasswordReset,
   type AvatarColor,
   type RecentResonancePick,
   type UserProfile,
@@ -243,7 +244,17 @@ export function GuestAuthPanel({
       });
 
       if (!res.ok || !res.profile) {
-        setSignInInvalidMode(true);
+        if (
+          res.confirmationRequired ||
+          (res.error && res.error.toLowerCase().includes("suspended"))
+        ) {
+          setErrorMessage(
+            res.error ||
+              "Please verify your email address via the confirmation link in your inbox before signing in."
+          );
+        } else {
+          setSignInInvalidMode(true);
+        }
         return;
       }
 
@@ -269,8 +280,8 @@ export function GuestAuthPanel({
     }
 
     const cleanPassword = password.trim();
-    if (cleanPassword.length < 8) {
-      setErrorMessage("Password must be at least 8 characters.");
+    if (cleanPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters.");
       return;
     }
 
@@ -294,7 +305,7 @@ export function GuestAuthPanel({
         avatarColor,
       });
 
-      if (!res.ok || !res.profile) {
+      if (!res.ok) {
         const err = (res.error || "").toLowerCase();
         if (
           err.includes("already registered") ||
@@ -308,6 +319,19 @@ export function GuestAuthPanel({
             res.error || "Unable to create account. Please try again."
           );
         }
+        return;
+      }
+
+      if (res.confirmationRequired || !res.profile) {
+        setPassword("");
+        const confirmMsg =
+          res.message ||
+          "Account created! Check your inbox for a confirmation link to activate your account.";
+        setStatusMessage(confirmMsg);
+        toast({
+          title: "Confirm Your Email Address",
+          description: confirmMsg,
+        });
         return;
       }
 
@@ -363,29 +387,15 @@ export function GuestAuthPanel({
 
     setIsSubmitting(true);
     try {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        setErrorMessage("Authentication service unavailable.");
-        return;
-      }
-
-      const origin =
-        typeof window !== "undefined" && window.location?.origin
-          ? window.location.origin
-          : "https://21games.ai";
-      const redirectTo = `${origin}/account?recovery=true`;
-
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo,
-      });
-
-      if (error) {
-        setErrorMessage(error.message || "Unable to send reset instructions.");
+      const res = await requestPasswordReset(cleanEmail);
+      if (!res.ok) {
+        setErrorMessage(res.error || "Unable to send reset instructions.");
         return;
       }
 
       setStatusMessage(
-        "If an account exists for this email, password reset instructions have been sent. Please check your inbox."
+        res.message ||
+          "If an account exists for this email, password reset instructions have been sent. Please check your inbox."
       );
       toast({
         title: "Password Reset Sent",
@@ -716,16 +726,16 @@ export function GuestAuthPanel({
                 htmlFor={`${formId}-signup-password`}
                 className="block text-xs font-black uppercase tracking-wider text-gray-700"
               >
-                Password (min 8 characters)
+                Password (min 6 characters)
               </label>
               {password.length > 0 && (
                 <span
                   className={cn(
                     "text-[11px] font-black",
-                    password.length >= 8 ? "text-emerald-600" : "text-amber-600"
+                    password.length >= 6 ? "text-emerald-600" : "text-amber-600"
                   )}
                 >
-                  {password.length >= 8 ? "✓ 8+ chars" : `${password.length}/8 chars`}
+                  {password.length >= 6 ? "✓ 6+ chars" : `${password.length}/6 chars`}
                 </span>
               )}
             </div>
@@ -735,7 +745,8 @@ export function GuestAuthPanel({
                 type={showSignUpPassword ? "text" : "password"}
                 autoComplete="new-password"
                 required
-                placeholder="Create a password (min 8 characters)"
+                minLength={6}
+                placeholder="Create a password (min 6 characters)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="h-11 border-2 border-black bg-white pr-10 text-base sm:text-sm font-medium"
@@ -941,8 +952,8 @@ export function SetNewPasswordModal({
     setErrorMessage(null);
 
     const cleanPassword = newPassword.trim();
-    if (cleanPassword.length < 8) {
-      setErrorMessage("Password must be at least 8 characters.");
+    if (cleanPassword.length < 6) {
+      setErrorMessage("Password must be at least 6 characters.");
       return;
     }
 
@@ -1003,7 +1014,7 @@ export function SetNewPasswordModal({
             Set New Password
           </DialogTitle>
           <DialogDescription className="text-xs sm:text-sm text-gray-600">
-            Enter a new secure password (minimum 8 characters) for your SOL Theory account.
+            Enter a new secure password (minimum 6 characters) for your SOL Theory account.
           </DialogDescription>
         </DialogHeader>
 
@@ -1023,20 +1034,20 @@ export function SetNewPasswordModal({
                 htmlFor={`${formId}-new-password`}
                 className="block text-xs font-black uppercase tracking-wider text-gray-700"
               >
-                New Password (min 8 chars)
+                New Password (min 6 chars)
               </label>
               {newPassword.length > 0 && (
                 <span
                   className={cn(
                     "text-[11px] font-black",
-                    newPassword.length >= 8
+                    newPassword.length >= 6
                       ? "text-emerald-600"
                       : "text-amber-600"
                   )}
                 >
-                  {newPassword.length >= 8
-                    ? "✓ 8+ chars"
-                    : `${newPassword.length}/8 chars`}
+                  {newPassword.length >= 6
+                    ? "✓ 6+ chars"
+                    : `${newPassword.length}/6 chars`}
                 </span>
               )}
             </div>

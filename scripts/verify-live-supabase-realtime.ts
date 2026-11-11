@@ -123,18 +123,40 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  // Also verify DB persistence & clean up any test row
-  console.log("\n[4/4] Verifying database row cleanup...");
-  try {
-    await clientA
-      .from("daily_puzzles")
-      .delete()
-      .eq("game_slug", TEST_GAME_SLUG)
-      .eq("puzzle_date", TEST_DATE_KEY);
-    console.log(`   Cleaned up test row (${TEST_GAME_SLUG}:${TEST_DATE_KEY})`);
-  } catch (err) {
-    console.warn("   Database cleanup warning:", err);
-  }
+  // [4/4] Verify live RLS lockdown: anon SELECT allowed, anon INSERT/UPSERT blocked (42501)
+  console.log("\n[4/4] Verifying live Postgres RLS lockdown on daily_puzzles...");
+  const selectProbe = await clientA
+    .from("daily_puzzles")
+    .select("game_slug, puzzle_date")
+    .limit(1);
+  const anonSelectAllowed = !selectProbe.error;
+  console.log(
+    `   Anon SELECT on daily_puzzles: ${anonSelectAllowed ? "ALLOWED (expected)" : `FAILED (${selectProbe.error?.message})`}`
+  );
+
+  const insertProbe = await clientA.from("daily_puzzles").insert({
+    game_slug: TEST_GAME_SLUG,
+    puzzle_date: TEST_DATE_KEY,
+    puzzle_number: 9999,
+    title: "Unauthorized Anon Probe",
+    payload: testPayload.payload,
+  });
+  const anonWriteBlocked =
+    Boolean(insertProbe.error) &&
+    (insertProbe.error?.code === "42501" ||
+      (insertProbe.error?.message || "")
+        .toLowerCase()
+        .includes("permission denied") ||
+      (insertProbe.error?.message || "")
+        .toLowerCase()
+        .includes("row-level security"));
+  console.log(
+    `   Anon INSERT on daily_puzzles: ${
+      anonWriteBlocked
+        ? `BLOCKED as required (${insertProbe.error?.code}: ${insertProbe.error?.message})`
+        : "UNEXPECTEDLY ALLOWED"
+    }`
+  );
 
   // Cleanup channels
   try {
@@ -145,20 +167,24 @@ async function main() {
   }
 
   console.log("\n=================================================================");
-  console.log("FINAL REALTIME VERIFICATION RESULT:");
+  console.log("FINAL REALTIME & RLS VERIFICATION RESULT:");
   console.log(`  Client B Received Broadcast: ${clientBReceivedBroadcast}`);
   if (receivedPayload) {
     console.log("  Received Payload Match:", (receivedPayload as { gameSlug?: string }).gameSlug === TEST_GAME_SLUG);
   }
-  console.log(`  REALTIME DELIVERED: ${clientBReceivedBroadcast}`);
+  console.log(`  Anon SELECT Allowed:         ${anonSelectAllowed}`);
+  console.log(`  Anon Write Blocked (42501):  ${anonWriteBlocked}`);
+  console.log(`  REALTIME DELIVERED:          ${clientBReceivedBroadcast}`);
   console.log("=================================================================");
 
-  if (!clientBReceivedBroadcast) {
-    console.error("FAILED: Realtime broadcast was not received by Client B within 10 seconds.");
+  if (!clientBReceivedBroadcast || !anonSelectAllowed || !anonWriteBlocked) {
+    console.error(
+      "FAILED: Realtime broadcast or RLS lockdown verification check failed."
+    );
     process.exit(1);
   }
 
-  console.log("SUCCESS: Realtime WebSocket event successfully delivered across independent clients!");
+  console.log("SUCCESS: Realtime WebSocket event delivered and RLS write lockdown verified!");
   process.exit(0);
 }
 

@@ -48,7 +48,7 @@ assert(ALL_GAMES.length === 9, `ALL_GAMES has exact length 9 (actual: ${ALL_GAME
 
 const expectedCountdown = [
   { rank: 21, slug: "21-things", name: "21 Things", color: "customPurple2", logo: "things", isPlayable: true },
-  { rank: 17, slug: "17-syllables", name: "17 Syllables", color: "green", logo: "syllables", isPlayable: false },
+  { rank: 17, slug: "17-syllables", name: "17 Syllables", color: "green", logo: "syllables", isPlayable: true },
   { rank: 9, slug: "9-rhymes", name: "9 Rhymes", color: "customYellow2", logo: "rhymes", isPlayable: false },
   { rank: 8, slug: "eightfold-echo", name: "Eightfold Echo", color: "customPurple2", logo: "echo", isPlayable: false },
   { rank: 6, slug: "6-pics", name: "6 Pics", color: "customF4D621", logo: "6-pics", isPlayable: false },
@@ -112,20 +112,26 @@ expectedCountdown.forEach((exp, idx) => {
 console.log("\nSuite 2: Playable Games & Helper Functions");
 
 assert(
-  PLAYABLE_GAMES.length === 2,
-  `PLAYABLE_GAMES has exact length 2 (actual: ${PLAYABLE_GAMES.length})`
+  PLAYABLE_GAMES.length === 3,
+  `PLAYABLE_GAMES has exact length 3 (actual: ${PLAYABLE_GAMES.length})`
 );
 
 const playableSlugs = PLAYABLE_GAMES.map((g) => g.slug);
 assert(
-  playableSlugs.includes("21-things") && playableSlugs.includes("connect-5"),
-  `PLAYABLE_GAMES includes exactly '21-things' and 'connect-5'`,
+  playableSlugs.includes("21-things") &&
+    playableSlugs.includes("17-syllables") &&
+    playableSlugs.includes("connect-5"),
+  `PLAYABLE_GAMES includes exactly '21-things', '17-syllables', and 'connect-5'`,
   playableSlugs
 );
 
 assert(
   isPlayableGameSlug("21-things") === true,
   "isPlayableGameSlug('21-things') returns true"
+);
+assert(
+  isPlayableGameSlug("17-syllables") === true,
+  "isPlayableGameSlug('17-syllables') returns true"
 );
 assert(
   isPlayableGameSlug("connect-5") === true,

@@ -834,15 +834,18 @@ export async function saveUserCreated21Board(
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from("twenty_one_boards").upsert({
-          id: board.id,
-          title: board.title,
-          creator_name: board.creatorName,
-          creator_bio: board.creatorBio,
-          items: board.items,
-          raw_transcript: rawTranscript ?? null,
-          is_daily: false,
-        });
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.access_token) {
+          await supabase.from("twenty_one_boards").insert({
+            id: board.id,
+            title: board.title,
+            creator_name: board.creatorName,
+            creator_bio: board.creatorBio,
+            items: board.items,
+            raw_transcript: rawTranscript ?? null,
+            is_daily: false,
+          });
+        }
       } catch {
         // Local copy already saved
       }
@@ -1289,10 +1292,33 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
   }
 }
 
+export interface AdminSaveAuthContext {
+  userEmail?: string | null;
+  userRole?: string | null;
+}
+
+function resolveDefaultAdminAuthContext(
+  authContext?: AdminSaveAuthContext
+): AdminSaveAuthContext {
+  if (authContext !== undefined) {
+    return authContext;
+  }
+  const active = safeReadJson<{ email?: string; role?: string } | null>(
+    `${STORAGE_PREFIX}_active_user`,
+    null
+  );
+  return {
+    userEmail: typeof active?.email === "string" ? active.email : null,
+    userRole: typeof active?.role === "string" ? active.role : null,
+  };
+}
+
 export async function saveAdminConnect5Override(
   dateKey: string,
-  puzzle: Connect5Puzzle
+  puzzle: Connect5Puzzle,
+  authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
+  const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
   const current = getAdminConnect5Overrides();
   current[dateKey] = puzzle;
   safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
@@ -1346,6 +1372,8 @@ export async function saveAdminConnect5Override(
             targetDate: dateKey,
             action: "save",
             puzzlePayload: puzzle,
+            userEmail: resolvedAuth.userEmail,
+            userRole: resolvedAuth.userRole,
           });
         } else {
           remotePersisted = true;
@@ -1358,6 +1386,8 @@ export async function saveAdminConnect5Override(
           targetDate: dateKey,
           action: "save",
           puzzlePayload: puzzle,
+          userEmail: resolvedAuth.userEmail,
+          userRole: resolvedAuth.userRole,
         });
       }
     }
@@ -1430,8 +1460,10 @@ export async function fetchRemote21ThingsOverride(
 
 export async function saveAdmin21ThingsOverride(
   dateKey: string,
-  board: TwentyOneThingsBoard
+  board: TwentyOneThingsBoard,
+  authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
+  const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
   const current = getAdmin21ThingsOverrides();
   current[dateKey] = board;
   safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
@@ -1485,6 +1517,8 @@ export async function saveAdmin21ThingsOverride(
             targetDate: dateKey,
             action: "save",
             puzzlePayload: board,
+            userEmail: resolvedAuth.userEmail,
+            userRole: resolvedAuth.userRole,
           });
         } else {
           remotePersisted = true;
@@ -1497,6 +1531,8 @@ export async function saveAdmin21ThingsOverride(
           targetDate: dateKey,
           action: "save",
           puzzlePayload: board,
+          userEmail: resolvedAuth.userEmail,
+          userRole: resolvedAuth.userRole,
         });
       }
     }
@@ -1576,8 +1612,10 @@ export async function fetchRemote17SyllablesOverride(
 
 export async function saveAdmin17SyllablesOverride(
   dateKey: string,
-  puzzle: SeventeenSyllablesPuzzle
+  puzzle: SeventeenSyllablesPuzzle,
+  authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
+  const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
   const current = getAdmin17SyllablesOverrides();
   current[dateKey] = puzzle;
   safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
@@ -1631,6 +1669,8 @@ export async function saveAdmin17SyllablesOverride(
             targetDate: dateKey,
             action: "save",
             puzzlePayload: puzzle,
+            userEmail: resolvedAuth.userEmail,
+            userRole: resolvedAuth.userRole,
           });
         } else {
           remotePersisted = true;
@@ -1643,6 +1683,8 @@ export async function saveAdmin17SyllablesOverride(
           targetDate: dateKey,
           action: "save",
           puzzlePayload: puzzle,
+          userEmail: resolvedAuth.userEmail,
+          userRole: resolvedAuth.userRole,
         });
       }
     }

@@ -175,10 +175,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: string
     ): Promise<AuthResult & { ok: boolean; message: string }> => {
       const result = await sendMagicLink(email);
-      if (result.ok && result.profile) {
-        setProfile(result.profile);
-        setModalInitialTab("profile");
-      }
       const message =
         result.message ||
         result.error ||
@@ -187,6 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : "Could not send magic link.");
       return {
         ...result,
+        profile: null,
         message,
       };
     },
