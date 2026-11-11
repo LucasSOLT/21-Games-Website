@@ -58,6 +58,7 @@
 | M4-B1 | Admin Puzzle Studio Persistence & Permissions | R4 (GM roles with Luke, Admin future-only, confirmation modal, Supabase sync & board re-sync) | M2-B1, M3-B1 | DONE |
 | M17 | 17 Syllables Playable Countdown Game | Pre-game splash screen, 66-day haiku bank, playable drag/tap UI, route, custom share | M1-B1, M2-B1, M3-B1 | DONE |
 | M5-B1 | Full Verification & Live Deployment Sync | R5 (Lint, build, unit test suites, deploy:solworld, git push both repos, halt for permission) | M1-B1, M2-B1, M3-B1, M4-B1, M17 | DONE |
+| M1 (Step 2.5) | P0 Auth & Postgres RLS Security Lockdown | `AUTH-1`..`AUTH-4`, `RLS-5` (`20261111000001`), `GATE-6`, `RBAC-7`, Live Supabase & `21games.ai` verification | M4-B1, M17 | DONE |
 
 ## Interface Contracts
 
