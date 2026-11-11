@@ -7,7 +7,7 @@
  * 3. Anon UPSERT on public.daily_puzzles is rejected with 42501 (RLS violation).
  * 4. Anon UPDATE on public.daily_puzzles is rejected (RLS violation / 0 rows modified).
  * 5. Anon DELETE on public.daily_puzzles is rejected (RLS violation / 0 rows deleted).
- * 6. Public SELECT on public.user_profiles succeeds.
+ * 6. Anon SELECT on public.user_profiles is blocked with 42501 (email enumeration lockdown).
  * 7. Anon INSERT on public.user_profiles is blocked (RLS / FK lockdown).
  * 8. Invalid non-UUID id in public.user_profiles is rejected.
  * 9. Un-normalized email in public.user_profiles is rejected.
@@ -221,7 +221,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------------------
-  // Test 6: Public SELECT on user_profiles must succeed
+  // Test 6: Anon SELECT on user_profiles blocked (email enumeration lockdown)
   // ---------------------------------------------------------------------------
   try {
     const { data, error } = await anonClient
@@ -230,17 +230,31 @@ async function main() {
       .limit(3);
 
     if (error) {
-      recordResult("6. Public SELECT on user_profiles", false, `Failed: ${error.message}`, error.code);
+      const msg = error.message.toLowerCase();
+      const isBlocked =
+        error.code === "42501" ||
+        msg.includes("permission denied") ||
+        msg.includes("row-level security");
+      recordResult(
+        "6. Anon SELECT on user_profiles blocked (email enumeration lockdown)",
+        isBlocked,
+        `Blocked as required: "${error.message}"`,
+        error.code
+      );
     } else {
       recordResult(
-        "6. Public SELECT on user_profiles",
-        true,
-        `Succeeded — public profile read permitted (${data?.length ?? 0} profiles)`,
+        "6. Anon SELECT on user_profiles blocked (email enumeration lockdown)",
+        false,
+        `CRITICAL VULNERABILITY: Anon was allowed to read user_profiles (${data?.length ?? 0} profiles returned)!`,
         null
       );
     }
   } catch (err: unknown) {
-    recordResult("6. Public SELECT on user_profiles", false, `Exception: ${String(err)}`);
+    recordResult(
+      "6. Anon SELECT on user_profiles blocked (email enumeration lockdown)",
+      false,
+      `Exception: ${String(err)}`
+    );
   }
 
   // ---------------------------------------------------------------------------
