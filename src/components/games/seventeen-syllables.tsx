@@ -28,8 +28,10 @@ import {
   generateShortGameId,
   build17SyllablesShareUrl,
   shareCustomGame,
-  shareTextResult,
+  nativeShareResultsOnly,
+  copyResultsOnly,
   decodeShareable17Haiku,
+  type ShareResultsOptions,
 } from "@/lib/custom-game-share";
 import { check17SyllablesPuzzleModeration } from "@/lib/moderation";
 import { GameSplashScreen } from "@/components/game-splash-screen";
@@ -50,6 +52,8 @@ import {
   Loader2,
   Lock,
   Share2,
+  Copy,
+  Check,
   Trophy,
   CheckCircle2,
   PlusCircle,
@@ -293,6 +297,16 @@ export function SeventeenSyllablesGame() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [isGameWon, setIsGameWon] = useState(initialData.isGameWon);
   const [victoryModalOpen, setVictoryModalOpen] = useState(false);
+  const [resultsCopied, setResultsCopied] = useState(false);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   // Creator modal (gated strictly behind verified authentication)
   const [creatorModalOpen, setCreatorModalOpen] = useState(false);
@@ -419,6 +433,11 @@ export function SeventeenSyllablesGame() {
         setIsTimerRunning(false);
         setIsGameWon(false);
         setVictoryModalOpen(false);
+        if (copyFeedbackTimerRef.current) {
+          clearTimeout(copyFeedbackTimerRef.current);
+          copyFeedbackTimerRef.current = null;
+        }
+        setResultsCopied(false);
 
         save17SyllablesProgress({
           dateKey: todayKey,
@@ -851,8 +870,8 @@ export function SeventeenSyllablesGame() {
     profile,
   ]);
 
-  // Share game result snippet
-  const handleShareResults = useCallback(() => {
+  // Build share/copy payload for both daily/archive and custom haiku completions
+  const buildResultsShareOptions = useCallback((): ShareResultsOptions => {
     const starStr =
       currentStars >= 3
         ? "⭐⭐⭐"
@@ -865,10 +884,16 @@ export function SeventeenSyllablesGame() {
     const shareUrl =
       typeof window !== "undefined" && window.location?.href
         ? window.location.href
+        : isCustomMode
+        ? build17SyllablesShareUrl({ id: puzzle.id })
         : "https://21games.ai/games/17-syllables";
 
+    const headerLine = isCustomMode
+      ? `17 Syllables — "${puzzle.theme}"`
+      : `17 Syllables #${puzzle.puzzleNumber || "Daily"}`;
+
     const text = [
-      `17 Syllables #${puzzle.puzzleNumber || "Daily"}`,
+      headerLine,
       `${starStr} (${currentStars.toFixed(1)}/3)`,
       `⏱️ ${formatTimerSeconds(elapsedSeconds)} · ${wordHintsUsed + tileHintsUsed} hints`,
       "🟩🟩🟩",
@@ -876,12 +901,43 @@ export function SeventeenSyllablesGame() {
       "🟩🟩🟩",
     ].join("\n");
 
-    void shareTextResult({
-      title: "17 Syllables Victory",
+    return {
+      title: isCustomMode
+        ? `17 Syllables — ${puzzle.theme}`
+        : "17 Syllables Victory",
       text,
       url: shareUrl,
-    });
-  }, [currentStars, elapsedSeconds, puzzle.puzzleNumber, wordHintsUsed, tileHintsUsed]);
+    };
+  }, [
+    currentStars,
+    elapsedSeconds,
+    isCustomMode,
+    puzzle.id,
+    puzzle.puzzleNumber,
+    puzzle.theme,
+    tileHintsUsed,
+    wordHintsUsed,
+  ]);
+
+  // R3: "Share" action — native share sheet ONLY (never writes to clipboard or triggers "Copied!")
+  const handleNativeShareResults = useCallback(async () => {
+    await nativeShareResultsOnly(buildResultsShareOptions());
+  }, [buildResultsShareOptions]);
+
+  // R3: "Copy results" action — clipboard ONLY (never calls navigator.share)
+  const handleCopyResults = useCallback(async () => {
+    const { copied } = await copyResultsOnly(buildResultsShareOptions());
+    if (copied) {
+      setResultsCopied(true);
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current);
+      }
+      copyFeedbackTimerRef.current = setTimeout(() => {
+        setResultsCopied(false);
+        copyFeedbackTimerRef.current = null;
+      }, 2000);
+    }
+  }, [buildResultsShareOptions]);
 
   const creatorDialogElement = isAuthenticated && !profile?.isBanned ? (
     <Dialog
@@ -1127,7 +1183,11 @@ export function SeventeenSyllablesGame() {
           hasSavedProgress={hasProgress}
           onPlay={() => {
             setSplashDismissed(true);
-            setIsTimerRunning(true);
+            if (isGameWon) {
+              setVictoryModalOpen(true);
+            } else {
+              setIsTimerRunning(true);
+            }
           }}
           onCreate={requestOpenCreatorModal}
         />
@@ -1253,14 +1313,19 @@ export function SeventeenSyllablesGame() {
                           <div
                             key={slotIdx}
                             onClick={() => {
+                              if (isGameWon) return;
                               if (isFilled) {
                                 handleRemoveChunk(slotKey);
                               } else if (selectedTrayChunkId) {
                                 handlePlaceChunk(slotKey);
                               }
                             }}
-                            onDragOver={(e) => e.preventDefault()}
+                            onDragOver={(e) => {
+                              if (isGameWon) return;
+                              e.preventDefault();
+                            }}
                             onDrop={(e) => {
+                              if (isGameWon) return;
                               e.preventDefault();
                               const chunkId = e.dataTransfer.getData("text/plain");
                               handlePlaceChunk(slotKey, chunkId);
@@ -1323,51 +1388,140 @@ export function SeventeenSyllablesGame() {
           ))}
         </div>
 
-        {/* Bottom Tray: Available Chunks */}
-        <div className="bg-neutral-50 border-2 border-black/10 rounded-3xl p-4 sm:p-6 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
-              Poetic Fragments ({trayChunks.length} remaining)
-            </span>
-            <span className="text-[11px] text-neutral-400 font-medium hidden sm:inline">
-              Tap a chunk to select, then tap a matching empty slot on the board
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 min-h-[70px]">
-            {trayChunks.map((chunk) => {
-              const isSelected = selectedTrayChunkId === chunk.id;
-
-              return (
-                <button
-                  key={chunk.id}
-                  type="button"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/plain", chunk.id);
-                  }}
-                  onClick={() => {
-                    setSelectedTrayChunkId(isSelected ? null : chunk.id);
-                  }}
-                  className={cn(
-                    "px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl border-2 font-mono font-bold text-sm sm:text-base uppercase transition-all select-none cursor-pointer",
-                    isSelected
-                      ? "bg-[#F9D423] text-black border-black scale-105 shadow-[0_3px_0_#111111]"
-                      : "bg-white text-black border-black shadow-[0_2px_0_#111111] hover:bg-neutral-100 active:translate-y-0.5 active:shadow-none"
-                  )}
-                >
-                  {chunk.text}
-                </button>
-              );
-            })}
-
-            {trayChunks.length === 0 && !isGameWon && (
-              <div className="w-full text-center py-4 text-xs font-bold text-neutral-400">
-                All fragments placed! Checking haiku...
+        {/* Bottom Section: Inline Completion Card (when won) or Available Chunks Tray */}
+        {isGameWon ? (
+          <div className="bg-emerald-50/70 border-2 border-black rounded-3xl p-4 sm:p-6 shadow-[0_4px_0_#111111] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-100 border-2 border-black text-emerald-800 flex items-center justify-center shrink-0">
+                  <Trophy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-headline font-black text-lg sm:text-xl text-black leading-tight">
+                    Haiku Reconstructed!
+                  </h2>
+                  <p className="text-xs font-medium text-neutral-600">
+                    {isCustomMode
+                      ? `${puzzle.theme} · Custom Haiku by ${puzzle.author}`
+                      : `${puzzle.theme} · 17 Syllables #${puzzle.puzzleNumber || "Daily"}`}
+                  </p>
+                </div>
               </div>
-            )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-xs font-bold text-black">
+                  <Star className="w-3.5 h-3.5 fill-[#F9D423] text-black" />
+                  <span>{currentStars.toFixed(1)}</span>
+                </span>
+                <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-black">
+                  {formatTimerSeconds(elapsedSeconds)}
+                </span>
+                <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-neutral-700">
+                  {wordHintsUsed + tileHintsUsed} hints
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 w-full">
+              <button
+                type="button"
+                onClick={() => void handleNativeShareResults()}
+                className="w-full py-2.5 sm:py-3 px-3 sm:px-4 bg-black text-white hover:bg-neutral-800 active:translate-y-0.5 rounded-full font-bold text-xs sm:text-sm border-2 border-black flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:shadow-none transition-all whitespace-nowrap"
+              >
+                <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span>Share</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleCopyResults()}
+                className={cn(
+                  "w-full py-2.5 sm:py-3 px-3 sm:px-4 rounded-full font-bold text-xs sm:text-sm border-2 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:translate-y-0.5 active:shadow-none transition-all whitespace-nowrap",
+                  resultsCopied
+                    ? "bg-emerald-600 text-white border-black"
+                    : "bg-white text-black border-black hover:bg-emerald-50"
+                )}
+              >
+                {resultsCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                    <span>Copy results</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-emerald-200/80">
+              <button
+                type="button"
+                onClick={() => setVictoryModalOpen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 hover:text-black cursor-pointer"
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>View Victory Card</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={requestOpenCreatorModal}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-700 hover:text-black cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Create Your Own Haiku</span>
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-neutral-50 border-2 border-black/10 rounded-3xl p-4 sm:p-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                Poetic Fragments ({trayChunks.length} remaining)
+              </span>
+              <span className="text-[11px] text-neutral-400 font-medium hidden sm:inline">
+                Tap a chunk to select, then tap a matching empty slot on the board
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 min-h-[70px]">
+              {trayChunks.map((chunk) => {
+                const isSelected = selectedTrayChunkId === chunk.id;
+
+                return (
+                  <button
+                    key={chunk.id}
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", chunk.id);
+                    }}
+                    onClick={() => {
+                      setSelectedTrayChunkId(isSelected ? null : chunk.id);
+                    }}
+                    className={cn(
+                      "px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl border-2 font-mono font-bold text-sm sm:text-base uppercase transition-all select-none cursor-pointer",
+                      isSelected
+                        ? "bg-[#F9D423] text-black border-black scale-105 shadow-[0_3px_0_#111111]"
+                        : "bg-white text-black border-black shadow-[0_2px_0_#111111] hover:bg-neutral-100 active:translate-y-0.5 active:shadow-none"
+                    )}
+                  >
+                    {chunk.text}
+                  </button>
+                );
+              })}
+
+              {trayChunks.length === 0 && !isGameWon && (
+                <div className="w-full text-center py-4 text-xs font-bold text-neutral-400">
+                  All fragments placed! Checking haiku...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Word Hint Confirmation Modal */}
@@ -1437,7 +1591,7 @@ export function SeventeenSyllablesGame() {
       {/* Victory & Share Modal */}
       <Dialog open={victoryModalOpen} onOpenChange={setVictoryModalOpen}>
         <DialogContent className="max-w-md text-center">
-          <DialogHeader>
+          <DialogHeader className="sm:text-center">
             <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2">
               <Trophy className="w-6 h-6" />
             </div>
@@ -1445,7 +1599,9 @@ export function SeventeenSyllablesGame() {
               Haiku Reconstructed!
             </DialogTitle>
             <DialogDescription>
-              {puzzle.theme} · 17 Syllables #{puzzle.puzzleNumber || "Daily"}
+              {isCustomMode
+                ? `${puzzle.theme} · Custom Haiku by ${puzzle.author}`
+                : `${puzzle.theme} · 17 Syllables #${puzzle.puzzleNumber || "Daily"}`}
             </DialogDescription>
           </DialogHeader>
 
@@ -1483,15 +1639,40 @@ export function SeventeenSyllablesGame() {
             </div>
           </div>
 
-          <DialogFooter className="flex-col sm:flex-col gap-2 pt-2">
-            <button
-              type="button"
-              onClick={handleShareResults}
-              className="w-full py-3 px-4 bg-black text-white hover:bg-neutral-800 rounded-full font-bold text-sm border-2 border-black flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>Share Results</span>
-            </button>
+          <DialogFooter className="flex flex-col sm:flex-col sm:space-x-0 gap-2.5 pt-2 w-full">
+            <div className="grid grid-cols-2 gap-2.5 w-full">
+              <button
+                type="button"
+                onClick={() => void handleNativeShareResults()}
+                className="w-full py-2.5 sm:py-3 px-3 sm:px-4 bg-black text-white hover:bg-neutral-800 active:translate-y-0.5 rounded-full font-bold text-xs sm:text-sm border-2 border-black flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:shadow-none transition-all whitespace-nowrap"
+              >
+                <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                <span>Share</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void handleCopyResults()}
+                className={cn(
+                  "w-full py-2.5 sm:py-3 px-3 sm:px-4 rounded-full font-bold text-xs sm:text-sm border-2 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:translate-y-0.5 active:shadow-none transition-all whitespace-nowrap",
+                  resultsCopied
+                    ? "bg-emerald-600 text-white border-black"
+                    : "bg-white text-black border-black hover:bg-emerald-50"
+                )}
+              >
+                {resultsCopied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                    <span>Copy results</span>
+                  </>
+                )}
+              </button>
+            </div>
 
             <button
               type="button"

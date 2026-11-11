@@ -26,6 +26,15 @@ export interface ShareCustomGameResult {
   creatorUsername: string;
 }
 
+export interface ShareResultsOptions {
+  title: string;
+  text: string;
+  url?: string;
+  showToast?: boolean;
+  toastTitle?: string;
+  toastDescription?: string;
+}
+
 /**
  * Generates a clean, compact, URL-safe alphanumeric game ID (< 14 chars).
  * Format: 21t-<8 random alphanumeric chars>
@@ -210,8 +219,6 @@ export function formatCreatorShareBlurb(options: {
  * Resilient clipboard writer supporting modern Async Clipboard API and legacy fallback.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
-  if (typeof window === "undefined") return false;
-
   // 1. Try modern async Clipboard API
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     try {
@@ -223,7 +230,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 
   // 2. Fallback: document.execCommand('copy')
-  if (typeof document !== "undefined") {
+  if (typeof document !== "undefined" && document.body) {
     try {
       const textarea = document.createElement("textarea");
       textarea.value = text;
@@ -375,4 +382,153 @@ export async function shareTextResult(options: {
   }
 
   return { shared, copied };
+}
+
+function formatResultsTextWithUrl(text: string, url?: string): string {
+  const trimmedUrl = url?.trim();
+  if (!trimmedUrl) {
+    return text;
+  }
+  if (text.includes(trimmedUrl)) {
+    return text;
+  }
+  return `${text}\n${trimmedUrl}`;
+}
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof Error && err.name === "AbortError") {
+    return true;
+  }
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "name" in err &&
+    (err as { name?: unknown }).name === "AbortError"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function safeCanShare(data: ShareData): boolean {
+  if (typeof navigator === "undefined" || typeof navigator.canShare !== "function") {
+    return true;
+  }
+  try {
+    return Boolean(navigator.canShare(data));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Opens ONLY the native OS/device share sheet via Web Share API (`navigator.share`).
+ * Strictly decoupled from clipboard operations: NEVER writes to the clipboard in any code path.
+ */
+export async function nativeShareResultsOnly(
+  options: ShareResultsOptions
+): Promise<{ shared: boolean; unsupported: boolean; aborted: boolean }> {
+  const canUseWebShare =
+    typeof navigator !== "undefined" && typeof navigator.share === "function";
+
+  if (!canUseWebShare) {
+    if (options.showToast !== false) {
+      toast({
+        title: options.toastTitle || "Native Share Unavailable",
+        description:
+          options.toastDescription ||
+          'Your browser doesn\'t support native sharing. Click "Copy results" instead.',
+      });
+    }
+    return { shared: false, unsupported: true, aborted: false };
+  }
+
+  const trimmedUrl = options.url?.trim();
+  const primaryShareData: ShareData = trimmedUrl
+    ? { title: options.title, text: options.text, url: trimmedUrl }
+    : { title: options.title, text: options.text };
+
+  let payloadToShare: ShareData | null = null;
+  if (typeof navigator.canShare === "function") {
+    if (safeCanShare(primaryShareData)) {
+      payloadToShare = primaryShareData;
+    } else if (trimmedUrl) {
+      const fullText = formatResultsTextWithUrl(options.text, trimmedUrl);
+      const fallbackShareData: ShareData = {
+        title: options.title,
+        text: fullText,
+      };
+      if (safeCanShare(fallbackShareData)) {
+        payloadToShare = fallbackShareData;
+      }
+    }
+  } else {
+    payloadToShare = primaryShareData;
+  }
+
+  if (!payloadToShare) {
+    if (options.showToast !== false) {
+      toast({
+        title: options.toastTitle || "Native Share Unavailable",
+        description:
+          options.toastDescription ||
+          'Your browser doesn\'t support native sharing. Click "Copy results" instead.',
+      });
+    }
+    return { shared: false, unsupported: true, aborted: false };
+  }
+
+  try {
+    await navigator.share(payloadToShare);
+    if (options.showToast !== false) {
+      toast({
+        title: options.toastTitle || "Shared!",
+        description: options.toastDescription || "Opened native share sheet.",
+      });
+    }
+    return { shared: true, unsupported: false, aborted: false };
+  } catch (err: unknown) {
+    if (isAbortError(err)) {
+      return { shared: false, unsupported: false, aborted: true };
+    }
+
+    if (options.showToast !== false) {
+      toast({
+        title: options.toastTitle || "Native Share Unavailable",
+        description:
+          options.toastDescription ||
+          'Your browser doesn\'t support native sharing. Click "Copy results" instead.',
+      });
+    }
+    return { shared: false, unsupported: true, aborted: false };
+  }
+}
+
+/**
+ * Copies formatted game summary results (+ URL if not already present) ONLY to the clipboard.
+ * Strictly decoupled from Web Share API: NEVER invokes `navigator.share` or `navigator.canShare`.
+ */
+export async function copyResultsOnly(
+  options: ShareResultsOptions
+): Promise<{ copied: boolean }> {
+  const fullText = formatResultsTextWithUrl(options.text, options.url);
+  const copied = await copyToClipboard(fullText);
+
+  if (options.showToast !== false) {
+    if (copied) {
+      toast({
+        title: options.toastTitle || "Results Copied!",
+        description:
+          options.toastDescription ||
+          "Your game summary has been copied to the clipboard.",
+      });
+    } else {
+      toast({
+        title: "Copy Failed",
+        description: "Could not copy results to the clipboard.",
+      });
+    }
+  }
+
+  return { copied };
 }

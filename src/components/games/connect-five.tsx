@@ -3,8 +3,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   Lightbulb,
   Link2,
   RotateCcw,
@@ -14,6 +16,11 @@ import {
 } from "lucide-react";
 import type { Connect5Puzzle } from "@/data/puzzles/connect-5";
 import { getConnect5PuzzleForDate, getLocalDateKey } from "@/lib/daily-engine";
+import {
+  copyResultsOnly,
+  nativeShareResultsOnly,
+  type ShareResultsOptions,
+} from "@/lib/custom-game-share";
 import {
   clearConnect5Progress,
   fetchRemoteConnect5Override,
@@ -33,7 +40,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const KEYBOARD_ROWS = [
@@ -211,8 +217,6 @@ export function ConnectFiveGame() {
 }
 
 function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
-  const { toast } = useToast();
-
   const [initial] = useState<InitialBoardState>(() =>
     loadInitialBoardState(activeDateKey)
   );
@@ -238,9 +242,12 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
     initial.status === "won"
   );
   const [notQuiteBanner, setNotQuiteBanner] = useState<boolean>(false);
+  const [resultsCopied, setResultsCopied] = useState<boolean>(false);
 
+  const isMountedRef = useRef<boolean>(true);
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notQuiteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
@@ -273,6 +280,11 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
         elapsedSecondsRef.current = 0;
         setHintsUsed(0);
         setWinModalOpen(false);
+        if (copyTimeoutRef.current) {
+          clearTimeout(copyTimeoutRef.current);
+          copyTimeoutRef.current = null;
+        }
+        setResultsCopied(false);
         setIsBufferingWin(false);
         isBufferingWinRef.current = false;
         setActiveRow(firstOpen.row);
@@ -346,9 +358,12 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
   // Cleanup timeouts on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (winTimeoutRef.current) clearTimeout(winTimeoutRef.current);
       if (notQuiteTimeoutRef.current) clearTimeout(notQuiteTimeoutRef.current);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
     };
   }, []);
 
@@ -892,6 +907,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       clearTimeout(notQuiteTimeoutRef.current);
       notQuiteTimeoutRef.current = null;
     }
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
     isBufferingWinRef.current = false;
     clearConnect5Progress(activeDateKey);
     const base = createInitialGrid(puzzle);
@@ -904,6 +923,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
     setStatus("playing");
     setIsBufferingWin(false);
     setWinModalOpen(false);
+    setResultsCopied(false);
     setNotQuiteBanner(false);
     const firstOpen = findFirstOpenCell(base.grid, base.locked, base.slashed, 1);
     setActiveRow(firstOpen.row);
@@ -911,30 +931,45 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
     setSpecificCellFocus(true);
   };
 
-  const handleShareResults = async () => {
+  const buildConnect5ShareOptions = (): ShareResultsOptions => {
     const rowEmojis = puzzle.words.map((w) => "🟩".repeat(w.length));
-    const shareText = [
+    const text = [
       `🔗 Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`,
       `⏱️ Time: ${formatTimerSeconds(elapsedSeconds)}${
         hintsUsed > 0 ? ` (${hintsUsed} hint${hintsUsed > 1 ? "s" : ""})` : ""
       }`,
       ...rowEmojis,
-      typeof window !== "undefined"
-        ? window.location.href
-        : "https://21games.ai/games/connect-5",
     ].join("\n");
 
-    try {
-      await navigator.clipboard.writeText(shareText);
-      toast({
-        title: "Results Copied!",
-        description: "Your Connect 5 time and grid are ready to share.",
-      });
-    } catch {
-      toast({
-        title: "Share Summary",
-        description: shareText,
-      });
+    const url =
+      typeof window !== "undefined" && window.location?.href
+        ? window.location.href
+        : "https://21games.ai/games/connect-5";
+
+    return {
+      title: `Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`,
+      text,
+      url,
+    };
+  };
+
+  const handleNativeShareResults = async () => {
+    await nativeShareResultsOnly(buildConnect5ShareOptions());
+  };
+
+  const handleCopyResults = async () => {
+    const { copied } = await copyResultsOnly(buildConnect5ShareOptions());
+    if (copied && isMountedRef.current) {
+      setResultsCopied(true);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setResultsCopied(false);
+        }
+        copyTimeoutRef.current = null;
+      }, 2000);
     }
   };
 
@@ -1183,41 +1218,93 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
           </div>
         )}
 
-        <div className="w-full space-y-1.5 pt-1 select-none">
-          {KEYBOARD_ROWS.map((rowKeys, rIdx) => (
-            <div
-              key={rIdx}
-              className="flex justify-center gap-0.5 min-[375px]:gap-1 sm:gap-1.5"
-            >
-              {rowKeys.map((k) => {
-                const isWide = k === "ENTER" || k === "BACKSPACE";
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => {
-                      if (k === "BACKSPACE") {
-                        handleBackspace();
-                      } else if (k === "ENTER") {
-                        handleNavigationKey("Enter");
-                      } else {
-                        handleLetterInput(k);
-                      }
-                    }}
-                    className={cn(
-                      "h-10 min-[375px]:h-11 sm:h-12 rounded-lg border-2 border-black/15 bg-white font-headline font-bold text-xs sm:text-sm text-black shadow-2xs active:translate-y-0.5 hover:border-black hover:bg-gray-50 transition-all flex items-center justify-center",
-                      isWide
-                        ? "px-2 min-[375px]:px-2.5 sm:px-4 text-[11px] min-[375px]:text-xs shrink-0"
-                        : "flex-1 max-w-8 sm:max-w-10 min-w-0"
-                    )}
-                  >
-                    {k === "BACKSPACE" ? "⌫" : k === "ENTER" ? "NEXT" : k}
-                  </button>
-                );
-              })}
+        {status === "won" ? (
+          <div className="w-full rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-[#2ECC71] shrink-0" />
+                <span className="font-headline font-black text-base sm:text-lg text-black">
+                  Solved in {formatTimerSeconds(elapsedSeconds)}!
+                </span>
+              </div>
+              <p className="text-xs text-gray-600">
+                Connect 5 #{puzzle.puzzleNumber} · &ldquo;{puzzle.title}&rdquo;
+                {hintsUsed > 0
+                  ? ` · ${hintsUsed} hint${hintsUsed > 1 ? "s" : ""} used`
+                  : " · No hints used"}
+              </p>
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                onClick={handleNativeShareResults}
+                className="bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
+              >
+                <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
+                <span>Share</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCopyResults}
+                className={cn(
+                  "border-2 border-black font-headline font-bold text-xs h-10 px-3.5 sm:px-4 transition-colors",
+                  resultsCopied
+                    ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
+                    : "bg-white text-black hover:bg-gray-100"
+                )}
+              >
+                {resultsCopied ? (
+                  <>
+                    <Check className="h-4 w-4 mr-1.5 shrink-0" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-1.5 shrink-0" />
+                    <span>Copy results</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="w-full space-y-1.5 pt-1 select-none">
+            {KEYBOARD_ROWS.map((rowKeys, rIdx) => (
+              <div
+                key={rIdx}
+                className="flex justify-center gap-0.5 min-[375px]:gap-1 sm:gap-1.5"
+              >
+                {rowKeys.map((k) => {
+                  const isWide = k === "ENTER" || k === "BACKSPACE";
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => {
+                        if (k === "BACKSPACE") {
+                          handleBackspace();
+                        } else if (k === "ENTER") {
+                          handleNavigationKey("Enter");
+                        } else {
+                          handleLetterInput(k);
+                        }
+                      }}
+                      className={cn(
+                        "h-10 min-[375px]:h-11 sm:h-12 rounded-lg border-2 border-black/15 bg-white font-headline font-bold text-xs sm:text-sm text-black shadow-2xs active:translate-y-0.5 hover:border-black hover:bg-gray-50 transition-all flex items-center justify-center",
+                        isWide
+                          ? "px-2 min-[375px]:px-2.5 sm:px-4 text-[11px] min-[375px]:text-xs shrink-0"
+                          : "flex-1 max-w-8 sm:max-w-10 min-w-0"
+                      )}
+                    >
+                      {k === "BACKSPACE" ? "⌫" : k === "ENTER" ? "NEXT" : k}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <Dialog open={winModalOpen} onOpenChange={setWinModalOpen}>
@@ -1254,20 +1341,47 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
             ))}
           </div>
 
-          <div className="flex items-center justify-between gap-2 pt-2">
+          <div className="flex flex-col gap-2 pt-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                onClick={handleNativeShareResults}
+                className="w-full bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black h-10 px-4"
+              >
+                <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
+                <span>Share</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCopyResults}
+                className={cn(
+                  "w-full border-2 border-black font-headline font-bold h-10 px-4 transition-colors",
+                  resultsCopied
+                    ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
+                    : "bg-white text-black hover:bg-gray-100"
+                )}
+              >
+                {resultsCopied ? (
+                  <>
+                    <Check className="h-4 w-4 mr-1.5 shrink-0" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 mr-1.5 shrink-0" />
+                    <span>Copy results</span>
+                  </>
+                )}
+              </Button>
+            </div>
             <Button
+              type="button"
               variant="outline"
               onClick={() => setWinModalOpen(false)}
-              className="border-2 border-black font-bold"
+              className="w-full border-2 border-black/25 hover:border-black bg-white text-black font-bold h-9 text-xs"
             >
               View Board
-            </Button>
-            <Button
-              onClick={handleShareResults}
-              className="bg-black text-white hover:bg-gray-800 font-headline font-black px-5"
-            >
-              <Share2 className="h-4 w-4 mr-1.5" />
-              Share Results
             </Button>
           </div>
         </DialogContent>

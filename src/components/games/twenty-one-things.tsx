@@ -27,8 +27,12 @@ import {
 } from "@/lib/daily-engine";
 import {
   buildBoardShareUrl,
+  copyResultsOnly,
+  formatCustomGameBlurb,
   generateShortGameId,
+  nativeShareResultsOnly,
   shareCustomGame,
+  type ShareResultsOptions,
 } from "@/lib/custom-game-share";
 import {
   enforceTileConstraints,
@@ -342,9 +346,13 @@ function TwentyOneThingsBoardView({
   );
   const [autoShortenedCount, setAutoShortenedCount] = useState(0);
   const [shareUrl, setShareUrl] = useState<string>("");
+  const [journeyResultsCopied, setJourneyResultsCopied] = useState(false);
+  const [creatorLinkCopied, setCreatorLinkCopied] = useState(false);
+  const journeyCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const creatorCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
-  // Cleanup active microphone or speech recognition sessions on unmount
+  // Cleanup active microphone, speech recognition, or copy feedback timers on unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -352,6 +360,14 @@ function TwentyOneThingsBoardView({
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
+      }
+      if (journeyCopyTimerRef.current) {
+        clearTimeout(journeyCopyTimerRef.current);
+        journeyCopyTimerRef.current = null;
+      }
+      if (creatorCopyTimerRef.current) {
+        clearTimeout(creatorCopyTimerRef.current);
+        creatorCopyTimerRef.current = null;
       }
       if (
         mediaRecorderRef.current &&
@@ -396,6 +412,11 @@ function TwentyOneThingsBoardView({
 
         setBoard(remoteBoard);
         setCreatorItems(remoteBoard.items.slice(0, 21));
+        if (journeyCopyTimerRef.current) {
+          clearTimeout(journeyCopyTimerRef.current);
+          journeyCopyTimerRef.current = null;
+        }
+        setJourneyResultsCopied(false);
         setPhase("pick6");
         setPick6([]);
         setPick3([]);
@@ -655,6 +676,11 @@ function TwentyOneThingsBoardView({
     if (targetBoardId) {
       clear21ThingsProgress(targetBoardId);
     }
+    if (journeyCopyTimerRef.current) {
+      clearTimeout(journeyCopyTimerRef.current);
+      journeyCopyTimerRef.current = null;
+    }
+    setJourneyResultsCopied(false);
     setPhase("pick6");
     setPick6([]);
     setPick3([]);
@@ -796,8 +822,8 @@ function TwentyOneThingsBoardView({
     });
   };
 
-  const handleShareJourney = async () => {
-    if (pick1 === null || !board) return;
+  const buildJourneyShareOptions = (): ShareResultsOptions | null => {
+    if (pick1 === null || !board) return null;
     const text = [
       `✨ 21 Things (${board.title} by ${board.creatorName})`,
       `21 → 6 → 3 → 1 Funnel:`,
@@ -805,24 +831,46 @@ function TwentyOneThingsBoardView({
       `🟧 Top 3: ${pick3.map((i) => board.items[i]).join(" · ")}`,
       `👑 My #1: "${board.items[pick1]}"`,
       reflectionNote ? `💬 "${reflectionNote}"` : "",
-      typeof window !== "undefined"
-        ? window.location.href
-        : "https://21games.ai/games/21-things",
     ]
       .filter(Boolean)
       .join("\n");
 
-    try {
-      await navigator.clipboard.writeText(text);
-      toast({
-        title: "Copied to Clipboard!",
-        description: "Your 21 → 6 → 3 → 1 summary is ready to paste and share.",
-      });
-    } catch {
-      toast({
-        title: "Share Summary Ready",
-        description: text,
-      });
+    const url =
+      shareUrl ||
+      (typeof window !== "undefined" && window.location?.href
+        ? window.location.href
+        : board.puzzleNumber === 0 && board.id
+        ? buildBoardShareUrl(board)
+        : "https://21games.ai/games/21-things");
+
+    return {
+      title: `21 Things — ${board.title}`,
+      text,
+      url,
+    };
+  };
+
+  const handleNativeShareJourney = async () => {
+    const options = buildJourneyShareOptions();
+    if (!options) return;
+    await nativeShareResultsOnly(options);
+  };
+
+  const handleCopyJourneyResults = async () => {
+    const options = buildJourneyShareOptions();
+    if (!options) return;
+    const { copied } = await copyResultsOnly(options);
+    if (copied && isMountedRef.current) {
+      setJourneyResultsCopied(true);
+      if (journeyCopyTimerRef.current) {
+        clearTimeout(journeyCopyTimerRef.current);
+      }
+      journeyCopyTimerRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setJourneyResultsCopied(false);
+        }
+        journeyCopyTimerRef.current = null;
+      }, 2000);
     }
   };
 
@@ -1465,10 +1513,11 @@ function TwentyOneThingsBoardView({
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Button
+                    type="button"
                     size="xs"
                     variant="outline"
                     onClick={async () => {
-                      await shareCustomGame({
+                      const { blurbText } = formatCustomGameBlurb({
                         title: board.title,
                         creatorHandle:
                           board.creatorHandle ||
@@ -1476,6 +1525,11 @@ function TwentyOneThingsBoardView({
                         creatorName: board.creatorName,
                         shareUrl,
                         gameName: "21 Things",
+                      });
+                      await nativeShareResultsOnly({
+                        title: `${board.title} — 21 Things`,
+                        text: blurbText,
+                        url: shareUrl,
                       });
                     }}
                     className="border border-black font-bold"
@@ -1484,10 +1538,11 @@ function TwentyOneThingsBoardView({
                     Share
                   </Button>
                   <Button
+                    type="button"
                     size="xs"
                     variant="outline"
                     onClick={async () => {
-                      await shareCustomGame({
+                      const { blurbText } = formatCustomGameBlurb({
                         title: board.title,
                         creatorHandle:
                           board.creatorHandle ||
@@ -1495,13 +1550,43 @@ function TwentyOneThingsBoardView({
                         creatorName: board.creatorName,
                         shareUrl,
                         gameName: "21 Things",
+                      });
+                      const { copied } = await copyResultsOnly({
+                        title: `${board.title} — 21 Things`,
+                        text: blurbText,
+                        url: shareUrl,
                         toastTitle: "Friend Link Copied!",
                       });
+                      if (copied && isMountedRef.current) {
+                        setCreatorLinkCopied(true);
+                        if (creatorCopyTimerRef.current) {
+                          clearTimeout(creatorCopyTimerRef.current);
+                        }
+                        creatorCopyTimerRef.current = setTimeout(() => {
+                          if (isMountedRef.current) {
+                            setCreatorLinkCopied(false);
+                          }
+                          creatorCopyTimerRef.current = null;
+                        }, 2000);
+                      }
                     }}
-                    className="border border-black font-bold"
+                    className={cn(
+                      "border border-black font-bold transition-colors",
+                      creatorLinkCopied &&
+                        "bg-[#2ECC71] text-black hover:bg-[#27b863]"
+                    )}
                   >
-                    <Copy className="h-3 w-3 mr-1" />
-                    Copy
+                    {creatorLinkCopied ? (
+                      <>
+                        <Check className="h-3 w-3 mr-1" />
+                        Copied!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3 mr-1" />
+                        Copy link
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
@@ -1869,11 +1954,11 @@ function TwentyOneThingsBoardView({
           )}
 
           {phase === "complete" && pick1 !== null && (
-            <div className="rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="space-y-1">
+            <div className="rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <Crown className="h-5 w-5 text-[#2ECC71]" />
-                  <span className="font-headline font-black text-lg">
+                  <Crown className="h-5 w-5 text-[#2ECC71] shrink-0" />
+                  <span className="font-headline font-black text-base sm:text-lg">
                     Your #1 Resonance: &ldquo;{board.items[pick1]}&rdquo;
                   </span>
                 </div>
@@ -1886,15 +1971,42 @@ function TwentyOneThingsBoardView({
                   {pick6.map((i) => board.items[i]).join(" · ")}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 w-full lg:w-auto">
+                <div className="grid grid-cols-2 sm:flex items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={handleNativeShareJourney}
+                    className="bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
+                  >
+                    <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
+                    <span>Share</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCopyJourneyResults}
+                    className={cn(
+                      "border-2 border-black font-headline font-bold text-xs h-10 px-3.5 sm:px-4 transition-colors",
+                      journeyResultsCopied
+                        ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
+                        : "bg-white text-black hover:bg-gray-100"
+                    )}
+                  >
+                    {journeyResultsCopied ? (
+                      <>
+                        <Check className="h-4 w-4 mr-1.5 shrink-0" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4 mr-1.5 shrink-0" />
+                        <span>Copy results</span>
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <Button
-                  onClick={handleShareJourney}
-                  className="bg-black text-white hover:bg-gray-800 font-bold text-xs h-10 px-4"
-                >
-                  <Share2 className="h-4 w-4 mr-1.5" />
-                  Share My 6 → 3 → 1
-                </Button>
-                <Button
+                  type="button"
                   variant="outline"
                   onClick={() => {
                     if (profile?.isBanned) {
@@ -1921,10 +2033,10 @@ function TwentyOneThingsBoardView({
                     }
                     setMode("create");
                   }}
-                  className="border-2 border-black font-bold text-xs h-10 px-3"
+                  className="border-2 border-black bg-white text-black hover:bg-purple-50 font-bold text-xs h-10 px-3"
                 >
-                  <Mic className="h-3.5 w-3.5 mr-1" />
-                  Create My Own 21
+                  <Mic className="h-3.5 w-3.5 mr-1 shrink-0" />
+                  <span>Create My Own 21</span>
                 </Button>
               </div>
             </div>
