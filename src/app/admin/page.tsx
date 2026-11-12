@@ -70,6 +70,7 @@ import type { GenericPublishRequest } from "@/components/admin/generic-publish";
 import { NineRhymesStudioTab } from "@/components/admin/nine-rhymes-studio-tab";
 import { EightfoldEchoStudioTab } from "@/components/admin/eightfold-echo-studio-tab";
 import { SixPicsStudioTab } from "@/components/admin/six-pics-studio-tab";
+import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
 import {
   classifyDiagnosticError,
   type DiagnosticReport,
@@ -1255,6 +1256,9 @@ export default function AdminPage() {
             <TabsTrigger value="6-pics">
               🖼️ 6 Pics Creator
             </TabsTrigger>
+            <TabsTrigger value="four-score">
+              🧮 Four Score
+            </TabsTrigger>
             <TabsTrigger value="bank">
               📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
             </TabsTrigger>
@@ -1954,6 +1958,15 @@ export default function AdminPage() {
 
           <TabsContent value="6-pics">
             <SixPicsStudioTab
+              targetDate={targetDate}
+              canEdit={editPerm.canEdit}
+              editReason={editPerm.reason}
+              onPublish={requestGenericPublish}
+            />
+          </TabsContent>
+
+          <TabsContent value="four-score">
+            <FourScoreStudioTab
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}

@@ -165,7 +165,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "four-score",
     slug: "four-score",
     showCreate: false,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "Reach 80 math puzzle",
     description:
       "Combine four numbers with basic arithmetic and squares to hit the target score of 80.",

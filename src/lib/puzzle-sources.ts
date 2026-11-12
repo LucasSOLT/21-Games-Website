@@ -43,6 +43,12 @@ import {
   type SixPicsPuzzle,
 } from "@/data/puzzles/6-pics";
 import {
+  FOUR_SCORE_PUZZLES,
+  generateSeededFourScorePuzzle,
+  isFourScorePuzzle,
+  type FourScorePuzzle,
+} from "@/data/puzzles/four-score";
+import {
   getPuzzleNumberForDate,
   getRotationIndexForDate,
 } from "@/lib/date-keys";
@@ -248,6 +254,30 @@ const sixPicsSource: PuzzleSource<SixPicsPuzzle> = {
   }),
 };
 
+const fourScoreSource: PuzzleSource<FourScorePuzzle> = {
+  slug: "four-score",
+  validate: isFourScorePuzzle,
+  fromBank(dateKey) {
+    const base =
+      FOUR_SCORE_PUZZLES[
+        getRotationIndexForDate(dateKey, FOUR_SCORE_PUZZLES.length)
+      ]!;
+    return {
+      ...base,
+      puzzleNumber: getPuzzleNumberForDate(dateKey),
+      customDate: dateKey,
+    };
+  },
+  generateSeeded: (dateKey) =>
+    generateSeededFourScorePuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
+  summarize: (p) => ({
+    title: p.title,
+    author: p.author,
+    editor: p.editor,
+    puzzleNumber: p.puzzleNumber,
+  }),
+};
+
 // ---------------------------------------------------------------------------
 // Registry (new countdown games register below as they ship)
 // ---------------------------------------------------------------------------
@@ -259,6 +289,7 @@ export const PUZZLE_SOURCES: Partial<Record<AllGameSlug, PuzzleSource<never>>> =
   "eightfold-echo": eightfoldEchoSource as unknown as PuzzleSource<never>,
   "6-pics": sixPicsSource as unknown as PuzzleSource<never>,
   "connect-5": connect5Source as unknown as PuzzleSource<never>,
+  "four-score": fourScoreSource as unknown as PuzzleSource<never>,
 };
 
 export function getPuzzleSource<T = unknown>(
