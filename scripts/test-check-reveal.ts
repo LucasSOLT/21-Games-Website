@@ -395,9 +395,9 @@ assert(
   "GameShell supports unifiedHeader prop"
 );
 assert(
-  gameShellSource.includes("!unifiedHeader && (") &&
+  gameShellSource.includes("!unifiedHeader && headerRightSlot && (") &&
     gameShellSource.includes("Tier 2 Mobile Bar"),
-  "GameShell omits redundant Tier 2 mobile bar when unifiedHeader is true"
+  "GameShell omits redundant Tier 2 mobile bar when unifiedHeader is true or no headerRightSlot is used"
 );
 
 assert(

@@ -58,12 +58,13 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "6-pics": {
     summary:
-      "Deduce the secret theme connecting six progressively revealed pictures.",
-    headline: "One Theme, Six Pictures",
+      "Use the overarching theme to name all 6 hidden pictures while removing as few puzzle pieces as possible.",
+    headline: "Name All 6 Hidden Pictures (36 Pts Max)",
     rules: [
-      "Swipe through the pictures; each new one is a stronger clue.",
-      "Guess earlier to score higher: **6/6** down to **0/6**.",
-      "After the game see all six captioned in a 2×3 grid.",
+      "Check the **Overarching Theme** at the top — all 6 pictures belong to it.",
+      "Each picture starts covered by **5 of 6 puzzle pieces** (`1/6` visible, worth **6 pts**).",
+      "Wrong guesses have **no penalty**. Tap **Reveal Piece (-1 pt)** to uncover a random piece, or **Pass (0 pts)** to reveal and move on.",
+      "Score up to **6 pts per picture** (`36` max) and view the full **2×3** gallery at the end.",
     ],
   },
   "connect-5": {

@@ -159,17 +159,28 @@ const s6 = storage.buildUnifiedGameProfileSummary("6-pics", {
   won: 3,
   currentStreak: 3,
   maxStreak: 3,
-  distribution: { score_total_x10: 150, "score_6.0": 2, "score_3.0": 1 },
+  distribution: {
+    score_total_x10: 930,
+    flawless: 1,
+    pic_pts_6: 10,
+    pic_pts_5: 5,
+    pic_pts_3: 2,
+  },
 });
 kit.eq(
   s6.guessDistribution?.length,
   6,
-  "6 Pics builds 6-bar Guess Distribution (Guesses 1..6)"
+  "6 Pics builds 6-bar Piece Efficiency breakdown (1/6..6/6)"
 );
 kit.eq(
   s6.guessDistribution?.[0]?.count,
-  2,
-  "6 Pics maps score_6.0 to Guess 1 count"
+  10,
+  "6 Pics maps pic_pts_6 to 1/6 (6 pts) count"
+);
+kit.assert(
+  s6.metrics.some((m) => m.label === "Avg Score" && m.value === "31.0 / 36") &&
+    s6.metrics.some((m) => m.label === "Flawless 36/36" && m.value === "1"),
+  "6 Pics computes 36-point Avg Score (31.0 / 36) and Flawless 36/36 count"
 );
 
 const sM2Merged = storage.mergeTwoGameStats(

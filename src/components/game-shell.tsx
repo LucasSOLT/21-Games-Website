@@ -22,9 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatLongDate } from "@/lib/daily-engine";
 import { getGameStats } from "@/lib/game-storage";
 import {
-  ALL_GAMES,
   GAME_ACCENT_HEX,
-  getPlayableGameSlugs,
   type PlayableGameSlug,
 } from "@/lib/games-config";
 import { getGameHelp } from "@/lib/game-help";
@@ -49,10 +47,6 @@ interface GameShellProps {
   onHelpOpenChange?: (open: boolean) => void;
   statsOpen?: boolean;
   onStatsOpenChange?: (open: boolean) => void;
-}
-
-function gameNameOf(slug: PlayableGameSlug): string {
-  return ALL_GAMES.find((g) => g.slug === slug)?.name ?? slug;
 }
 
 function renderBold(text: string): React.ReactNode[] {
@@ -116,7 +110,6 @@ export function GameShell({
 
   const { profile, openAccountModal } = useAuth();
 
-  const playableSlugs = getPlayableGameSlugs();
   const stats = getGameStats(gameSlug);
   const winRate =
     stats.played > 0 ? Math.round((stats.won / stats.played) * 100) : 0;
@@ -125,9 +118,9 @@ export function GameShell({
     <div className="min-h-screen bg-[#FCFCFD] text-black flex flex-col">
       {/* Top Game Navigation Bar */}
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1 min-[375px]:gap-1.5 sm:gap-2">
-          {/* Left: Brand Mark + Back Home + Game Switcher */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-3">
+          {/* Left: Brand Mark + Back Home */}
+          <div className="flex items-center gap-1.5 sm:gap-3 sm:flex-1 min-w-0">
             <Link
               href="/"
               className="group flex items-center shrink-0 transition-transform hover:scale-105 active:scale-95"
@@ -150,32 +143,10 @@ export function GameShell({
               <ArrowLeft className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
               <span className="hidden sm:inline">All Games</span>
             </Link>
-
-            <div className="hidden md:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200 max-w-[38vw] lg:max-w-[46vw] overflow-x-auto">
-              {playableSlugs.map((slug) => (
-                <Link
-                  key={slug}
-                  href={`/games/${slug}`}
-                  style={
-                    gameSlug === slug
-                      ? { backgroundColor: GAME_ACCENT_HEX[slug] }
-                      : undefined
-                  }
-                  className={cn(
-                    "rounded-full px-3 py-1 text-xs font-bold transition-all whitespace-nowrap",
-                    gameSlug === slug
-                      ? "text-black border border-black shadow-2xs"
-                      : "text-gray-600 hover:text-black"
-                  )}
-                >
-                  {gameNameOf(slug)}
-                </Link>
-              ))}
-            </div>
           </div>
 
           {/* Center: Title + Puzzle # + Date */}
-          <div className="flex flex-col items-center text-center min-w-0">
+          <div className="flex flex-col items-center text-center min-w-0 shrink-0">
             <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2">
               <h1 className="font-headline font-black text-sm min-[375px]:text-base sm:text-2xl tracking-tight whitespace-nowrap">
                 {gameTitle}
@@ -194,10 +165,10 @@ export function GameShell({
             </p>
           </div>
 
-          {/* Right: Timer / Action Slot + Archive / Stats / Help */}
-          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Right: Action Slot + Archive / Stats / Help / Account */}
+          <div className="flex items-center justify-end gap-1 sm:gap-2 sm:flex-1 min-w-0">
             {headerRightSlot && (
-              <div className={cn("items-center", unifiedHeader ? "flex" : "hidden sm:flex")}>
+              <div className={cn("items-center shrink-0", unifiedHeader ? "flex" : "hidden sm:flex")}>
                 {headerRightSlot}
               </div>
             )}
@@ -240,34 +211,14 @@ export function GameShell({
           </div>
         </div>
 
-        {/* Tier 2 Mobile Bar: 1-Tap Game Switcher + Action Slot (< 640px only, omitted when unifiedHeader is true) */}
-        {!unifiedHeader && (
-          <div className="sm:hidden px-2 min-[375px]:px-3 py-1.5 bg-gray-50/95 border-t border-black/10 flex items-center justify-between gap-1.5 min-[375px]:gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="inline-flex items-center gap-1 overflow-x-auto max-w-[60vw]">
-                {playableSlugs.map((slug) => (
-                  <Link
-                    key={slug}
-                    href={`/games/${slug}`}
-                    className={cn(
-                      "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
-                      gameSlug === slug
-                        ? "bg-black text-white border border-black shadow-2xs"
-                        : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
-                    )}
-                  >
-                    {gameNameOf(slug)}
-                  </Link>
-                ))}
-              </div>
-              <span className="hidden xs:inline text-[11px] text-gray-500 font-medium truncate">
-                By {author}
-              </span>
-            </div>
-
-            {headerRightSlot && (
-              <div className="flex items-center shrink-0">{headerRightSlot}</div>
-            )}
+        {/* Mobile Action Sub-Bar (< 640px only when headerRightSlot is used without unifiedHeader) */}
+        {/* Tier 2 Mobile Bar: shown only when headerRightSlot is provided (game-switcher pills removed) */}
+        {!unifiedHeader && headerRightSlot && (
+          <div className="sm:hidden px-2 min-[375px]:px-3 py-1.5 bg-gray-50/95 border-t border-black/10 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-gray-500 font-medium truncate">
+              By {author}
+            </span>
+            <div className="flex items-center shrink-0">{headerRightSlot}</div>
           </div>
         )}
 

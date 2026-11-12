@@ -259,7 +259,7 @@ const sixPicsSource: PuzzleSource<SixPicsPuzzle> = {
   generateSeeded: (dateKey) =>
     generateSeededSixPicsPuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
   summarize: (p) => ({
-    title: p.title,
+    title: `${p.themeAnswer} — ${p.title}`,
     author: p.author,
     editor: p.editor,
     puzzleNumber: p.puzzleNumber,

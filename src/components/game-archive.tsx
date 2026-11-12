@@ -17,13 +17,12 @@ import { getAdminOverridesForGame, isDateCompleted } from "@/lib/game-storage";
 import {
   ALL_GAMES,
   GAME_ACCENT_HEX,
-  getPlayableGameSlugs,
   type PlayableGameSlug,
 } from "@/lib/games-config";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { AccountNavButton } from "@/components/account/account-nav-button";
-import { cn } from "@/lib/utils";
+import { SolGamesLogo } from "@/components/solgames-logo";
 
 const SSR_ANCHOR_DATE = parseDateKeyToLocalNoon("2026-11-05");
 const subscribeNoop = () => () => {};
@@ -62,7 +61,6 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
   const gameConfig = ALL_GAMES.find((g) => g.slug === gameSlug);
   const gameTitle = gameConfig?.name ?? gameSlug;
   const accentHex = GAME_ACCENT_HEX[gameSlug];
-  const playableSlugs = getPlayableGameSlugs();
 
   const filtered = entries.filter(
     (entry) =>
@@ -75,47 +73,39 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black">
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-3 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1.5 min-[375px]:gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-3 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+            <Link
+              href="/"
+              className="group flex items-center shrink-0 transition-transform hover:scale-105 active:scale-95"
+              title="SOL GaMES - Home"
+              aria-label="SOL GaMES Homepage"
+            >
+              <SolGamesLogo
+                variant="mark"
+                size={30}
+                className="h-7 w-7 sm:h-8 sm:w-8"
+              />
+            </Link>
             <Link
               href={`/games/${gameSlug}`}
-              className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full border-2 border-black px-2 min-[375px]:px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full border-2 border-black px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap"
             >
               <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
               <span className="hidden sm:inline">
                 Back to Today&apos;s {gameTitle}
               </span>
-              <span className="sm:hidden">Today</span>
+              <span className="sm:hidden">Today&apos;s {gameTitle}</span>
             </Link>
             <Link
               href="/"
               className="text-xs font-bold text-gray-500 hover:text-black hidden sm:inline whitespace-nowrap"
             >
-              Home
+              All Games
             </Link>
           </div>
 
-          <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2 shrink-0">
-            {playableSlugs.map((slug) => {
-              const cfg = ALL_GAMES.find((g) => g.slug === slug);
-              const active = slug === gameSlug;
-              return (
-                <Link
-                  key={slug}
-                  href={`/games/${slug}/archive`}
-                  style={active ? { backgroundColor: GAME_ACCENT_HEX[slug] } : undefined}
-                  className={cn(
-                    "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
-                    active
-                      ? "text-black border-black"
-                      : "bg-white text-gray-600 border-gray-200 hover:border-black"
-                  )}
-                >
-                  {cfg?.name ?? slug}
-                  <span className="hidden lg:inline"> Archive</span>
-                </Link>
-              );
-            })}
+          <div className="flex items-center gap-2 shrink-0">
             <AccountNavButton variant="compact" />
           </div>
         </div>

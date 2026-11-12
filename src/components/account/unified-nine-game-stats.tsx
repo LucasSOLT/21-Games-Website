@@ -343,11 +343,11 @@ export function UnifiedNineGameStats({
                 ))}
               </div>
 
-              {/* #6: 6 Pics Guess Distribution (1-6) */}
+              {/* #6: 6 Pics Piece Efficiency Breakdown (1/6 -> 6/6) */}
               {slug === "6-pics" && summary.guessDistribution && (
                 <div className="rounded-xl border border-black/15 bg-gray-50/90 p-3 space-y-1.5">
                   <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-gray-600">
-                    <span>Guess Distribution (1–6)</span>
+                    <span>Piece Efficiency (1/6 → 6/6)</span>
                     <span>Points</span>
                   </div>
                   <div className="space-y-1">
@@ -361,8 +361,8 @@ export function UnifiedNineGameStats({
                           key={row.guessNumber}
                           className="flex items-center gap-2 text-[11px]"
                         >
-                          <span className="w-4 font-mono font-black text-black text-right">
-                            {row.guessNumber}
+                          <span className="w-7 font-mono font-black text-black text-right">
+                            {row.guessNumber}/6
                           </span>
                           <div className="flex-1 h-5 rounded-md bg-white border border-black/15 overflow-hidden flex items-center">
                             <div

@@ -246,7 +246,7 @@ function verifySingleGamePayload(
     case "6-pics": {
       const check = validateSixPicsPuzzle(payload);
       if (!check.valid) errors.push(...check.errors);
-      solverDetail = "6 progressive clues + captions verified";
+      solverDetail = "6 jigsaw-reveal picture names + aliases verified";
       break;
     }
     case "connect-5": {

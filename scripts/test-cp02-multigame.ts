@@ -171,7 +171,11 @@ for (const slug of cfg.ALL_GAME_SLUGS) kit.assert(schema.includes(`'${slug}'`), 
 const archivePage = fs.readFileSync("src/app/games/[slug]/archive/page.tsx", "utf8");
 kit.assert(archivePage.includes("getPlayableGameSlugs()"), "archive generateStaticParams driven by playable slugs");
 const shell = fs.readFileSync("src/components/game-shell.tsx", "utf8");
-kit.assert(shell.includes("getPlayableGameSlugs()") && shell.includes("getGameHelp"), "shell switcher + help driven by config");
+const archiveComp = fs.readFileSync("src/components/game-archive.tsx", "utf8");
+kit.assert(
+  !shell.includes("playableSlugs.map") && !archiveComp.includes("playableSlugs.map") && shell.includes("getGameHelp"),
+  "top game-switcher pill bar removed from game-shell & game-archive; help driven by config"
+);
 const boundary = fs.readFileSync("src/components/game-error-boundary.tsx", "utf8");
 kit.assert(boundary.includes("GAME_PROGRESS_PREFIX") && boundary.includes("AllGameSlug"), "error boundary generic over all games");
 const auth = fs.readFileSync("src/lib/user-auth.ts", "utf8");

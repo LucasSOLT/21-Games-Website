@@ -91,7 +91,7 @@
   - **17 Syllables**: Played, Win %, Current/Max Streak, Average Star Rating (`⭐⭐⭐`).
   - **9 Rhymes**: Played, Current/Max Streak, Average Score (`x / 9`), Flawless `9/9` count.
   - **Eightfold Echo**: Played, Win %, Current/Max Streak, Best Time (`MM:SS`), Zero-Mistake solves.
-  - **6 Pics**: Played, Win %, Current/Max Streak, Average Score (`x / 6`), visual `1–6` Guess Distribution bars.
+  - **6 Pics**: Played, Win %, Current/Max Streak, Average Score (`x / 36`), Flawless `36/36` count, visual `6 pts → 1 pt` Piece-Efficiency Distribution bars.
   - **Connect 5**: Played, Win %, Current/Max Streak, Best Time (`MM:SS`), Average Time.
   - **Four Score**: Played, Win %, Current/Max Streak, Total `80` Equations Solved.
   - **Move Two**: Played, Win %, Current/Max Streak, Best Moves vs. Par, `⭐⭐⭐` Par count.
@@ -182,21 +182,27 @@
 - **Single-Screen Fit (Q25)**:
   - The `3×3` square grid + compact stopwatch/mistakes bar fits 100% on a single viewport without scrolling on both desktop and `320px` mobile.
 
-### Game #6 — `6 Pics` (Progressive 6-Image Theme Deduction) — Q27 to Q33
+### Game #6 — `6 Pics` (6-Piece Jigsaw Image-Naming Game) — Q27 to Q33
 - **Route**: `/games/6-pics` | **Archive**: `/games/6-pics/archive`
-- **Starting State & Progressive Unlocks (Q27 & Q29)**:
-  - **Image #1 is revealed for free** at the start of the game (solving on Image #1 earns a perfect **`6/6`**).
-  - Players have **6 total attempts** corresponding to the 6 pictures.
-  - Submitting a wrong guess **OR** clicking the **"Skip / Reveal Next Pic (`2/6`)"** button automatically unlocks and transitions to the next image (`#2` through `#6`).
-- **Gameplay Single-Image Carousel → Post-Game `2×3` Summary Grid (Q28 & Q32)**:
-  - **During Gameplay**: Renders a clean, focused **single-image carousel/slideshow** with swipe support, left/right arrows, and pagination dots (`1 of 6`, showing unlocked vs. locked `🔒` dots) below the image, plus the theme guess input bar at the top. Images are **label-free** during gameplay.
-  - **Post-Game Ending Screen (Win or Loss)**: Smoothly transitions into a **`2×3` grid (2 columns, 3 rows)** displaying all 6 images at once, with the **Overarching Theme Answer** displayed as a bold editorial header at the **top center** above the grid, and each image's short caption (`1. Ocean`, `2. Volcano`, `3. Island`, `4. Surfing`, `5. Luau`, `6. Hula Dancing`) revealed on its card!
-- **Fuzzy Matching + Free AI Synonym Generator in `/admin` (Q30)**:
-  - Answer matcher normalizes case/whitespace/punctuation, checks the primary answer + accepted synonyms/aliases list, and grants **1-letter typo forgiveness** (`Levenshtein distance ≤ 1` for answers with `≥ 5` characters).
-  - In `/admin` (and Creator Mode), next to the Theme Answer field, provide an **"✨ Auto-Generate Synonyms/Aliases"** button powered by `gemini-2.5-flash` (with OpenRouter toggle + local dictionary fallback) that populates accepted aliases in 1 click.
-- **Scoring (`6/6` to `0/6`) & Resilient Images (Q31 & Q33)**:
-  - Solved with 1 pic = `6/6`, 2 pics = `5/6`, 3 pics = `4/6`, 4 pics = `3/6`, 5 pics = `2/6`, 6 pics = `1/6`, missed after 6 guesses = `0/6`.
-  - Every image renders through `<ImageWithFallback>` supporting external/Supabase URLs AND rich inline SVG illustrated scene cards so no daily puzzle can ever display a broken image.
+- **Clean Top Navigation Rule (All Games & Archives)**:
+  - Individual game headers (`GameShell`) and archive headers (`GameArchiveView`) **never** render a multi-game horizontal pill switcher bar (which crowds centered titles with 9 live games). Players return to the homepage via the `SOL GaMES` mark or `← All Games` button to switch games.
+- **Visible Overarching Theme + 6 Jigsaw-Covered Images (Q27 & Q28)**:
+  - The puzzle's **Overarching Theme** (e.g., `Theme: Hawaii`) is **visible at the top** throughout gameplay to guide the player's guesses.
+  - Players progress sequentially through **6 focused `4:3` images** (`Pic 1 of 6` → `Pic 6 of 6`), trying to **guess the name of EACH image** while revealing as few puzzle pieces as possible.
+  - Each image is covered by **6 interlocking SVG jigsaw puzzle pieces** (`3×2` layout). At the start of each image, **5 pieces cover the artwork** and **1 piece is already open** (`1/6` visible, deterministically chosen over a piece containing visual subject detail).
+- **Guessing, Free Wrong Guesses & `Reveal Piece (-1 pt)` (Q29)**:
+  - Typing a guess up top checks that image's primary name + accepted synonyms/aliases.
+  - **Wrong guesses** shake (`"Not quite!"`) with **zero point penalty** and do **not** auto-remove puzzle pieces.
+  - Clicking **`Reveal Piece (-1 pt)`** removes **1 random covered jigsaw piece** from the board (`5` covering → `4` → `3` → `2` → `1` → `0`).
+  - Clicking **`Pass / Reveal Word (0 pts)`** (confirmation-gated while pieces remain, or 1-tap once all 6 pieces are open) uncovers the full image, reveals the word for `0` points, and lets the player advance.
+  - Whenever an image is solved or passed, all remaining pieces pop off to reveal the full illustration + earned points before advancing to the next image (`Next Picture →` / `Enter`).
+- **Fuzzy Per-Image Matching + Free AI Synonym Generator in `/admin` (Q30)**:
+  - Answer matcher normalizes case/whitespace/punctuation/articles/plurals, checks the image's primary name + accepted per-image synonyms/aliases (including scene-level synonyms), and grants **1-letter typo forgiveness** (`Levenshtein distance ≤ 1` for candidate answers with `≥ 5` characters).
+  - In `/admin` (and Creator Mode), each picture card provides an **"✨ Auto-Aliases"** button powered by `gemini-2.5-flash` (with OpenRouter toggle + local dictionary fallback) that populates accepted per-image synonyms in 1 click.
+- **36-Point Scoring (`0–36`) & Post-Game `2×3` Summary Grid (Q31–Q33)**:
+  - Per image `i ∈ {1..6}` with `r_i ∈ {0..5}` extra pieces removed: `score_i = 6 - r_i` (`6 pts` at `1/6` shown down to `1 pt` at `6/6` shown) if named correctly, or `0 pts` if passed/missed. Total score: `0` to `36` points (`X / 36 pts · Y / 6 named`).
+  - Post-game ending screen transitions into a **`2×3` grid** displaying all 6 uncovered images, their numbered names (`1. Ocean`), per-image score badges (`6/6 pts`, `0/6 pts`), 6-tile emoji receipt (`🟩` `5–6 pts`, `🟨` `3–4 pts`, `🟧` `1–2 pts`, `⬜` `0 pts`), and decoupled **Share** + **Copy results** buttons.
+  - Every image renders through `<ImageWithFallback>` supporting external/Supabase URLs AND rich inline SVG illustrated scene cards so broken images are impossible.
 
 ### Game #5 — `Connect 5` (LIVE — Enhanced with Splash, Moderation & Error Boundary)
 - **Route**: `/games/connect-5` | **Archive**: `/games/connect-5/archive`

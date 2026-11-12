@@ -12,11 +12,12 @@ import React, {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowRight,
   Calendar,
-  ChevronLeft,
-  ChevronRight,
+  CheckCircle2,
+  Eye,
   Link2,
-  Lock,
+  Puzzle,
   Send,
   Share2,
   SkipForward,
@@ -24,15 +25,23 @@ import {
 } from "lucide-react";
 import {
   SIX_PICS_COUNT,
+  SIX_PICS_JIGSAW_PIECES,
+  SIX_PICS_JIGSAW_VIEWBOX,
+  SIX_PICS_MAX_IMAGE_SCORE,
+  SIX_PICS_MAX_SCORE,
+  SIX_PICS_PIECES_PER_IMAGE,
   buildSixPicsEmojiReceipt,
   buildSixPicsShareText,
   draftToSixPicsPuzzle,
-  matchSixPicsGuess,
+  getInitialRevealedPiece,
+  matchSixPicsImageGuess,
+  pickNextRandomPiece,
   renderSixPicsSceneDataUri,
-  scoreForSixPics,
+  scoreForSixPicsImage,
+  totalScoreForSixPics,
   validateSixPicsPuzzle,
-  type SixPicsAttempt,
   type SixPicsClueImage,
+  type SixPicsImageOutcome,
   type SixPicsPuzzle,
 } from "@/data/puzzles/6-pics";
 import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
@@ -70,10 +79,13 @@ import { cn } from "@/lib/utils";
 
 const subscribeNoop = () => () => {};
 
-interface SavedSixPicsProgress {
+interface SavedSixPicsProgressV2 {
+  version: 2;
   puzzleId: string;
   puzzleHash: string;
-  attempts: SixPicsAttempt[];
+  currentIndex: number;
+  currentRevealedPieces: number[];
+  outcomes: SixPicsImageOutcome[];
 }
 
 function isValidDateKey(value: string | null): value is string {
@@ -112,6 +124,131 @@ function SixPicsClueVisual({
         ) : undefined
       }
     />
+  );
+}
+
+/**
+ * 6-Piece Interlocking Jigsaw Overlay (`3×2` SVG puzzle pieces over the `4:3` picture).
+ * Covered pieces block 5/6 of the image at start; revealed pieces animate off smoothly.
+ */
+function SixPicsJigsawStage({
+  clue,
+  imageIndex,
+  revealedPieces,
+  fullyUncovered,
+  currentWorth,
+}: {
+  clue: SixPicsClueImage;
+  imageIndex: number;
+  revealedPieces: readonly number[];
+  fullyUncovered: boolean;
+  currentWorth: number;
+}) {
+  const revealedSet = useMemo(
+    () => new Set(fullyUncovered ? [0, 1, 2, 3, 4, 5] : revealedPieces),
+    [fullyUncovered, revealedPieces]
+  );
+  const coveredCount = SIX_PICS_PIECES_PER_IMAGE - revealedSet.size;
+
+  return (
+    <div
+      className="relative aspect-[4/3] w-full rounded-2xl border-2 border-black bg-neutral-100 overflow-hidden shadow-[4px_4px_0px_#000] select-none"
+      data-testid="six-pics-jigsaw-stage"
+    >
+      <SixPicsClueVisual
+        clue={clue}
+        index={imageIndex}
+        alt={`Hidden picture ${imageIndex + 1} of ${SIX_PICS_COUNT}`}
+      />
+
+      {/* Interlocking 6-Piece SVG Jigsaw Overlay */}
+      <svg
+        viewBox={SIX_PICS_JIGSAW_VIEWBOX}
+        preserveAspectRatio="none"
+        className="absolute inset-0 w-full h-full pointer-events-none"
+        aria-label={`${coveredCount} of ${SIX_PICS_PIECES_PER_IMAGE} puzzle pieces covering picture`}
+      >
+        <defs>
+          <linearGradient id="six-pics-piece-grad-a" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#27272a" />
+            <stop offset="100%" stopColor="#18181b" />
+          </linearGradient>
+          <linearGradient id="six-pics-piece-grad-b" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#3f3f46" />
+            <stop offset="100%" stopColor="#27272a" />
+          </linearGradient>
+        </defs>
+
+        {SIX_PICS_JIGSAW_PIECES.map((piece) => {
+          const isOpen = revealedSet.has(piece.index);
+          const checker = (piece.row + piece.col) % 2 === 0;
+          return (
+            <g
+              key={piece.index}
+              data-testid={`jigsaw-piece-${piece.index}`}
+              data-covered={isOpen ? "false" : "true"}
+              style={{
+                opacity: isOpen ? 0 : 1,
+                transform: isOpen ? "scale(0.92)" : "scale(1)",
+                transformOrigin: `${piece.center[0]}px ${piece.center[1]}px`,
+                transition: "opacity 260ms ease-out, transform 260ms ease-out",
+              }}
+            >
+              <path
+                d={piece.d}
+                fill={
+                  checker
+                    ? "url(#six-pics-piece-grad-a)"
+                    : "url(#six-pics-piece-grad-b)"
+                }
+                stroke="#f4d621"
+                strokeWidth={2.2}
+                strokeLinejoin="round"
+              />
+              <circle
+                cx={piece.center[0]}
+                cy={piece.center[1]}
+                r={13}
+                fill="#18181b"
+                stroke="#f4d621"
+                strokeOpacity={0.75}
+                strokeWidth={1.6}
+              />
+              <text
+                x={piece.center[0]}
+                y={piece.center[1] + 4}
+                textAnchor="middle"
+                fill="#f4d621"
+                fontSize="11"
+                fontWeight="800"
+                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+              >
+                {piece.index + 1}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Top Floating Status Pills */}
+      <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 pointer-events-none">
+        <span className="rounded-full bg-black/85 text-white border border-white/25 px-2.5 py-0.5 text-xs font-extrabold shadow">
+          Pic {imageIndex + 1} of {SIX_PICS_COUNT} ·{" "}
+          {fullyUncovered
+            ? "6/6 shown"
+            : `${revealedSet.size}/${SIX_PICS_PIECES_PER_IMAGE} shown`}
+        </span>
+
+        {!fullyUncovered && (
+          <span
+            className="rounded-full bg-[#f4d621] text-black border-2 border-black px-2.5 py-0.5 text-xs font-black shadow-[2px_2px_0px_#000]"
+            data-testid="six-pics-current-worth"
+          >
+            Worth {currentWorth} {currentWorth === 1 ? "pt" : "pts"}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -272,7 +409,7 @@ function SixPicsCustomLoader({ customId }: { customId: string }) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Gameplay Carousel & Post-Game 2×3 Grid                                   */
+/* Jigsaw Gameplay & Post-Game 2×3 Gallery                                  */
 /* ------------------------------------------------------------------------ */
 
 interface SixPicsBoardProps {
@@ -282,6 +419,18 @@ interface SixPicsBoardProps {
   isCustom: boolean;
   creatorHandle?: string;
   customId?: string;
+}
+
+function isSavedProgressV2(raw: unknown, puzzleHash: string): raw is SavedSixPicsProgressV2 {
+  if (!raw || typeof raw !== "object") return false;
+  const s = raw as Record<string, unknown>;
+  return (
+    s.version === 2 &&
+    s.puzzleHash === puzzleHash &&
+    typeof s.currentIndex === "number" &&
+    Array.isArray(s.currentRevealedPieces) &&
+    Array.isArray(s.outcomes)
+  );
 }
 
 function SixPicsBoard({
@@ -294,34 +443,64 @@ function SixPicsBoard({
 }: SixPicsBoardProps) {
   const router = useRouter();
 
-  const saved = useMemo<SavedSixPicsProgress | null>(() => {
+  const saved = useMemo<SavedSixPicsProgressV2 | null>(() => {
     if (isCustom) return null;
-    const s = getGameProgress<SavedSixPicsProgress>("6-pics", dateKey, puzzle.id);
-    if (!s || s.puzzleHash !== puzzleHash || !Array.isArray(s.attempts)) return null;
-    return s;
+    const raw = getGameProgress<Partial<SavedSixPicsProgressV2>>("6-pics", dateKey, puzzle.id);
+    return isSavedProgressV2(raw, puzzleHash) ? raw : null;
   }, [isCustom, dateKey, puzzle.id, puzzleHash]);
 
-  const [attempts, setAttempts] = useState<SixPicsAttempt[]>(saved?.attempts ?? []);
+  const initialFirstPiece = useMemo(
+    () => getInitialRevealedPiece(puzzle.images[0]!, 0, puzzle.id),
+    [puzzle.images, puzzle.id]
+  );
+
+  const [outcomes, setOutcomes] = useState<SixPicsImageOutcome[]>(
+    () => saved?.outcomes ?? []
+  );
+  const [currentIndex, setCurrentIndex] = useState<number>(() =>
+    Math.min(SIX_PICS_COUNT - 1, saved?.currentIndex ?? saved?.outcomes.length ?? 0)
+  );
+  const [currentRevealedPieces, setCurrentRevealedPieces] = useState<number[]>(() =>
+    saved?.currentRevealedPieces && saved.currentRevealedPieces.length > 0
+      ? saved.currentRevealedPieces
+      : [initialFirstPiece]
+  );
+  const [wrongGuesses, setWrongGuesses] = useState<string[]>([]);
   const [guessInput, setGuessInput] = useState("");
   const [splashDismissed, setSplashDismissed] = useState(isCustom);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [shaking, setShaking] = useState(false);
+  const [confirmingPass, setConfirmingPass] = useState(false);
+  const [awaitingAdvance, setAwaitingAdvance] = useState(false);
 
-  const solvedIndex = attempts.findIndex((a) => a.kind === "correct");
-  const won = solvedIndex >= 0;
-  const lost = !won && attempts.length >= SIX_PICS_COUNT;
-  const finished = won || lost;
-  const unlockedCount = finished
-    ? SIX_PICS_COUNT
-    : Math.min(SIX_PICS_COUNT, attempts.length + 1);
-  const score = scoreForSixPics(won ? solvedIndex + 1 : null);
-
-  const [activeSlide, setActiveSlide] = useState<number>(() =>
-    Math.min(SIX_PICS_COUNT - 1, (saved?.attempts.length ?? 0))
-  );
-  const touchStartXRef = useRef<number | null>(null);
+  const nextButtonRef = useRef<HTMLButtonElement | null>(null);
+  const guessInputRef = useRef<HTMLInputElement | null>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordedRef = useRef(false);
+
+  const finished = outcomes.length >= SIX_PICS_COUNT && !awaitingAdvance;
+  const totalScore = useMemo(() => totalScoreForSixPics(outcomes), [outcomes]);
+  const namedCount = useMemo(
+    () => outcomes.filter((o) => o.solved && o.points > 0).length,
+    [outcomes]
+  );
+  const totalExtraPiecesRemoved = useMemo(
+    () => outcomes.reduce((acc, o) => acc + o.extraPiecesRemoved, 0),
+    [outcomes]
+  );
+  const piecesSaved = 30 - totalExtraPiecesRemoved;
+
+  const activeImageIndex = Math.min(currentIndex, SIX_PICS_COUNT - 1);
+  const currentClue = puzzle.images[activeImageIndex]!;
+  const extraPiecesRemovedOnCurrent = Math.max(0, currentRevealedPieces.length - 1);
+  const remainingCoveredCount = Math.max(
+    0,
+    SIX_PICS_PIECES_PER_IMAGE - currentRevealedPieces.length
+  );
+  const currentWorth = scoreForSixPicsImage(true, extraPiecesRemovedOnCurrent);
+  const currentResolvedOutcome = awaitingAdvance
+    ? outcomes[activeImageIndex] ?? null
+    : null;
 
   useEffect(
     () => () => {
@@ -330,25 +509,59 @@ function SixPicsBoard({
     []
   );
 
+  // Focus the Next button when an image finishes so Enter advances effortlessly.
+  useEffect(() => {
+    if (awaitingAdvance) {
+      nextButtonRef.current?.focus();
+    } else if (splashDismissed && !finished) {
+      guessInputRef.current?.focus();
+    }
+  }, [awaitingAdvance, splashDismissed, finished, activeImageIndex]);
+
   // Persist daily/archive progress.
   useEffect(() => {
     if (isCustom) return;
-    saveGameProgress<SavedSixPicsProgress>("6-pics", dateKey, {
+    saveGameProgress<SavedSixPicsProgressV2>("6-pics", dateKey, {
+      version: 2,
       puzzleId: puzzle.id,
       puzzleHash,
-      attempts,
+      currentIndex,
+      currentRevealedPieces,
+      outcomes,
     });
-  }, [isCustom, dateKey, puzzle.id, puzzleHash, attempts]);
+  }, [isCustom, dateKey, puzzle.id, puzzleHash, currentIndex, currentRevealedPieces, outcomes]);
 
-  // Record completion stats once (wins via recordScoredCompletion; 0/6 loss increments played).
+  // Record completion stats once out of 36 max points + per-image piece efficiency buckets.
   useEffect(() => {
     if (!finished || isCustom || recordedRef.current) return;
     recordedRef.current = true;
     const current = getGameStats("6-pics");
     const lossKey = `loss_${dateKey}`;
     if (current.completedDates.includes(dateKey) || current.distribution[lossKey]) return;
-    if (won) {
-      recordScoredCompletion("6-pics", dateKey, score, SIX_PICS_COUNT);
+
+    const picBuckets: Record<string, number> = {};
+    for (const o of outcomes) {
+      if (o.solved && o.points >= 1 && o.points <= 6) {
+        const k = `pic_pts_${o.points}`;
+        picBuckets[k] = (picBuckets[k] ?? 0) + 1;
+      }
+    }
+
+    if (totalScore > 0) {
+      const updated = recordScoredCompletion(
+        "6-pics",
+        dateKey,
+        totalScore,
+        SIX_PICS_MAX_SCORE
+      );
+      const mergedDist = { ...updated.distribution };
+      for (const [k, delta] of Object.entries(picBuckets)) {
+        mergedDist[k] = (mergedDist[k] ?? 0) + delta;
+      }
+      setGameStats("6-pics", {
+        ...updated,
+        distribution: mergedDist,
+      });
     } else {
       setGameStats("6-pics", {
         ...current,
@@ -360,105 +573,157 @@ function SixPicsBoard({
         },
       });
     }
-  }, [finished, isCustom, dateKey, won, score]);
+  }, [finished, isCustom, dateKey, outcomes, totalScore]);
+
+  const handleRevealPiece = useCallback(() => {
+    if (finished || awaitingAdvance) return;
+    const nextPiece = pickNextRandomPiece(currentRevealedPieces);
+    if (nextPiece === null) return;
+    const nextRevealed = [...currentRevealedPieces, nextPiece];
+    setCurrentRevealedPieces(nextRevealed);
+    setConfirmingPass(false);
+    const nextWorth = scoreForSixPicsImage(true, nextRevealed.length - 1);
+    setFeedback(
+      nextRevealed.length >= SIX_PICS_PIECES_PER_IMAGE
+        ? `All 6 pieces uncovered! Worth ${nextWorth} pt.`
+        : `Piece #${nextPiece + 1} removed — ${nextRevealed.length}/6 shown (worth ${nextWorth} pts).`
+    );
+  }, [finished, awaitingAdvance, currentRevealedPieces]);
 
   const submitGuess = useCallback(
     (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (finished) return;
+      if (finished || awaitingAdvance) return;
       const trimmed = guessInput.trim();
       if (!trimmed) return;
 
-      const match = matchSixPicsGuess(trimmed, puzzle);
+      const match = matchSixPicsImageGuess(trimmed, currentClue);
       if (match.matched) {
-        const nextAttempts: SixPicsAttempt[] = [
-          ...attempts,
-          { kind: "correct", guess: trimmed },
-        ];
-        setAttempts(nextAttempts);
+        const pts = scoreForSixPicsImage(true, extraPiecesRemovedOnCurrent);
+        const outcome: SixPicsImageOutcome = {
+          revealedPieces: [...currentRevealedPieces],
+          extraPiecesRemoved: extraPiecesRemovedOnCurrent,
+          solved: true,
+          guess: trimmed,
+          points: pts,
+        };
+        setOutcomes((prev) => [...prev, outcome]);
         setGuessInput("");
         setFeedback(null);
+        setConfirmingPass(false);
+        setAwaitingAdvance(true);
         return;
       }
 
-      const nextAttempts: SixPicsAttempt[] = [
-        ...attempts,
-        { kind: "wrong", guess: trimmed },
-      ];
-      setAttempts(nextAttempts);
+      // Free wrong guess: shake + helpful feedback, zero point penalty, zero auto-reveal.
+      setWrongGuesses((prev) =>
+        prev.some((w) => w.toLowerCase() === trimmed.toLowerCase())
+          ? prev
+          : [...prev, trimmed]
+      );
       setGuessInput("");
+      setConfirmingPass(false);
       setShaking(true);
       if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-      shakeTimerRef.current = setTimeout(() => setShaking(false), 450);
-
-      if (nextAttempts.length < SIX_PICS_COUNT) {
-        const nextIdx = nextAttempts.length;
-        setActiveSlide(nextIdx);
-        setFeedback(`Not quite — Pic #${nextIdx + 1} unlocked!`);
-      } else {
-        setFeedback(null);
-      }
+      shakeTimerRef.current = setTimeout(() => setShaking(false), 420);
+      setFeedback(
+        remainingCoveredCount > 0
+          ? `Not quite (“${trimmed}”) — try again or Reveal Piece (-1 pt)!`
+          : `Not quite (“${trimmed}”) — try another word or Pass (0 pts).`
+      );
     },
-    [finished, guessInput, puzzle, attempts]
+    [
+      finished,
+      awaitingAdvance,
+      guessInput,
+      currentClue,
+      extraPiecesRemovedOnCurrent,
+      currentRevealedPieces,
+      remainingCoveredCount,
+    ]
   );
 
-  const handleSkip = useCallback(() => {
-    if (finished) return;
-    const nextAttempts: SixPicsAttempt[] = [...attempts, { kind: "skip" }];
-    setAttempts(nextAttempts);
+  const commitPass = useCallback(() => {
+    if (finished || awaitingAdvance) return;
+    const outcome: SixPicsImageOutcome = {
+      revealedPieces: [...currentRevealedPieces],
+      extraPiecesRemoved: extraPiecesRemovedOnCurrent,
+      solved: false,
+      points: 0,
+    };
+    setOutcomes((prev) => [...prev, outcome]);
     setGuessInput("");
-    if (nextAttempts.length < SIX_PICS_COUNT) {
-      const nextIdx = nextAttempts.length;
-      setActiveSlide(nextIdx);
-      setFeedback(`Revealed Pic #${nextIdx + 1} of ${SIX_PICS_COUNT}`);
-    } else {
-      setFeedback(null);
+    setFeedback(null);
+    setConfirmingPass(false);
+    setAwaitingAdvance(true);
+  }, [finished, awaitingAdvance, currentRevealedPieces, extraPiecesRemovedOnCurrent]);
+
+  const handlePassClick = useCallback(() => {
+    if (finished || awaitingAdvance) return;
+    if (remainingCoveredCount > 0 && !confirmingPass) {
+      setConfirmingPass(true);
+      return;
     }
-  }, [finished, attempts]);
+    commitPass();
+  }, [finished, awaitingAdvance, remainingCoveredCount, confirmingPass, commitPass]);
 
-  const goPrev = useCallback(() => {
-    setActiveSlide((s) => (s > 0 ? s - 1 : unlockedCount - 1));
-  }, [unlockedCount]);
-
-  const goNext = useCallback(() => {
-    setActiveSlide((s) => (s + 1 < unlockedCount ? s + 1 : 0));
-  }, [unlockedCount]);
+  const advanceToNextPicture = useCallback(() => {
+    const nextIdx = activeImageIndex + 1;
+    setAwaitingAdvance(false);
+    setWrongGuesses([]);
+    setGuessInput("");
+    setFeedback(null);
+    setConfirmingPass(false);
+    if (nextIdx < SIX_PICS_COUNT) {
+      const firstOpen = getInitialRevealedPiece(
+        puzzle.images[nextIdx]!,
+        nextIdx,
+        puzzle.id
+      );
+      setCurrentIndex(nextIdx);
+      setCurrentRevealedPieces([firstOpen]);
+    }
+  }, [activeImageIndex, puzzle.images, puzzle.id]);
 
   const shareText = useMemo(
     () =>
       buildSixPicsShareText({
         puzzleNumber: puzzle.puzzleNumber,
-        attempts,
+        themeAnswer: puzzle.themeAnswer,
+        outcomes,
         custom: isCustom,
         creatorHandle,
       }),
-    [puzzle.puzzleNumber, attempts, isCustom, creatorHandle]
+    [puzzle.puzzleNumber, puzzle.themeAnswer, outcomes, isCustom, creatorHandle]
   );
 
-  const shareUrl = isCustom && customId
-    ? `https://21games.ai/games/6-pics?b=${customId}`
-    : "https://21games.ai/games/6-pics";
+  const shareUrl =
+    isCustom && customId
+      ? `https://21games.ai/games/6-pics?b=${customId}`
+      : "https://21games.ai/games/6-pics";
+
+  const hasSavedProgress =
+    !finished &&
+    (outcomes.length > 0 || currentRevealedPieces.length > 1);
 
   if (!splashDismissed) {
     return (
       <GameSplashScreen
         gameSlug="6-pics"
         gameTitle="6 Pics"
-        tagline="Six progressive visual clues, one overarching secret theme."
-        theme={puzzle.title}
+        tagline="Use today's theme and uncover as few puzzle pieces as possible to name all 6 hidden pictures."
+        theme={puzzle.themeAnswer}
         author={puzzle.author}
         puzzleNumber={puzzle.puzzleNumber}
         dateKey={dateKey}
         showCreate
         isCompletedToday={isDateCompleted("6-pics", dateKey) || finished}
-        hasSavedProgress={attempts.length > 0 && !finished}
+        hasSavedProgress={hasSavedProgress}
         onPlay={() => setSplashDismissed(true)}
         onCreate={() => router.push("/games/6-pics?mode=create")}
       />
     );
   }
-
-  const currentSlideClue = puzzle.images[Math.min(activeSlide, unlockedCount - 1)]!;
 
   return (
     <GameShell
@@ -468,180 +733,226 @@ function SixPicsBoard({
       dateKey={dateKey}
       author={puzzle.author}
     >
-      <div className="max-w-xl mx-auto px-3 sm:px-4 py-2 space-y-4">
+      <div className="max-w-xl mx-auto px-2.5 sm:px-4 py-1.5 sm:py-2 space-y-3.5">
         {!finished ? (
           /* ================================================================
-           * GAMEPLAY: Guess Bar + Label-Free Single-Image Carousel (Q27-Q29)
+           * GAMEPLAY: Visible Theme + Guess/Reveal Bar + 6-Piece Jigsaw Stage
            * ================================================================ */
           <div className="space-y-3" data-testid="six-pics-gameplay">
-            <form
-              onSubmit={submitGuess}
-              className={cn(
-                "rounded-2xl border-2 border-black bg-white p-3 space-y-2.5 shadow-[3px_3px_0px_#000]",
-                shaking && "animate-bounce border-red-600"
-              )}
-            >
-              <div className="flex items-center justify-between text-xs font-bold text-neutral-600">
-                <span>
-                  Attempt {attempts.length + 1} of {SIX_PICS_COUNT} · Worth{" "}
-                  <strong>{SIX_PICS_COUNT - attempts.length}/6</strong>
-                </span>
-                <span>
-                  Unlocked: {unlockedCount}/{SIX_PICS_COUNT}
-                </span>
-              </div>
-
-              <div className="flex gap-2">
-                <Input
-                  value={guessInput}
-                  onChange={(e) => setGuessInput(e.target.value)}
-                  placeholder="Guess the overarching theme…"
-                  maxLength={48}
-                  aria-label="Theme guess"
-                  className="border-2 border-black font-semibold"
-                  data-testid="six-pics-guess-input"
-                />
-                <Button
-                  type="submit"
-                  disabled={!guessInput.trim()}
-                  className="bg-black text-white border-2 border-black font-headline font-black shrink-0"
-                  data-testid="six-pics-submit"
-                >
-                  <Send className="h-4 w-4 mr-1" /> Guess
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                {feedback ? (
-                  <p className="text-xs font-bold text-amber-800 truncate">{feedback}</p>
-                ) : (
-                  <p className="text-[11px] text-neutral-500">
-                    Pic #1 is free — wrong guess or skip unlocks the next picture.
-                  </p>
-                )}
-
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleSkip}
-                  className="h-8 px-2.5 text-xs font-bold border-2 border-black bg-[#f4d621]/35 hover:bg-[#f4d621]/65 shrink-0"
-                  data-testid="six-pics-skip"
-                >
-                  <SkipForward className="h-3.5 w-3.5 mr-1" />
-                  {unlockedCount < SIX_PICS_COUNT
-                    ? `Skip / Reveal Next Pic (${unlockedCount + 1}/${SIX_PICS_COUNT})`
-                    : "Give Up / Reveal Theme"}
-                </Button>
-              </div>
-            </form>
-
-            {/* Focused Single-Image Carousel (strictly label-free during gameplay) */}
+            {/* Overarching Theme + Running Score Banner */}
             <div
-              className="relative rounded-2xl border-2 border-black bg-white overflow-hidden shadow-[4px_4px_0px_#000]"
-              onTouchStart={(e) => {
-                touchStartXRef.current = e.touches[0]?.clientX ?? null;
-              }}
-              onTouchEnd={(e) => {
-                const startX = touchStartXRef.current;
-                const endX = e.changedTouches[0]?.clientX ?? null;
-                touchStartXRef.current = null;
-                if (startX === null || endX === null) return;
-                const delta = endX - startX;
-                if (Math.abs(delta) < 36 || unlockedCount <= 1) return;
-                if (delta < 0) goNext();
-                else goPrev();
-              }}
-              data-testid="six-pics-carousel"
+              className="rounded-2xl border-2 border-black bg-[#FFFBE6] px-3.5 py-2.5 shadow-[3px_3px_0px_#000] flex flex-wrap items-center justify-between gap-2"
+              data-testid="six-pics-theme-banner"
             >
-              <div className="aspect-[4/3] w-full bg-neutral-100 relative">
-                <SixPicsClueVisual
-                  clue={currentSlideClue}
-                  index={activeSlide}
-                  alt={`Visual clue ${activeSlide + 1} of ${SIX_PICS_COUNT}`}
-                />
-                <span className="absolute top-3 left-3 rounded-full bg-black/80 text-white px-2.5 py-0.5 text-xs font-bold">
-                  {activeSlide + 1} of {SIX_PICS_COUNT}
-                </span>
-
-                {unlockedCount > 1 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={goPrev}
-                      aria-label="Previous unlocked picture"
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white border-2 border-black flex items-center justify-center shadow"
-                    >
-                      <ChevronLeft className="h-5 w-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={goNext}
-                      aria-label="Next unlocked picture"
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white border-2 border-black flex items-center justify-center shadow"
-                    >
-                      <ChevronRight className="h-5 w-5" />
-                    </button>
-                  </>
-                )}
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-amber-800">
+                  Overarching Theme
+                </p>
+                <h2 className="font-headline font-black text-lg sm:text-xl text-black leading-tight truncate">
+                  {puzzle.themeAnswer}
+                </h2>
               </div>
 
-              {/* 6 Pagination Dots (Unlocked vs Locked 🔒) */}
-              <div
-                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-neutral-50 border-t-2 border-black"
-                role="tablist"
-                aria-label="Clue picture pagination"
-              >
-                {Array.from({ length: SIX_PICS_COUNT }, (_, idx) => {
-                  const isUnlocked = idx < unlockedCount;
-                  const isCurrent = idx === activeSlide;
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={!isUnlocked}
-                      onClick={() => setActiveSlide(idx)}
-                      aria-label={
-                        isUnlocked
-                          ? `View picture ${idx + 1} of ${SIX_PICS_COUNT}`
-                          : `Picture ${idx + 1} locked`
-                      }
-                      data-testid={`six-pics-dot-${idx}`}
-                      className={cn(
-                        "h-7 min-w-7 px-1.5 rounded-full text-xs font-black border-2 transition-all flex items-center justify-center",
-                        isCurrent
-                          ? "bg-[#f4d621] border-black text-black scale-105"
-                          : isUnlocked
-                          ? "bg-white border-black text-black hover:bg-neutral-100"
-                          : "bg-neutral-200 border-neutral-300 text-neutral-500 cursor-not-allowed"
-                      )}
-                    >
-                      {isUnlocked ? idx + 1 : <Lock className="h-3 w-3" aria-hidden="true" />}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="rounded-xl border-2 border-black bg-white px-2.5 py-1 text-xs font-black text-black">
+                  Score: {totalScore} / {SIX_PICS_MAX_SCORE}
+                </span>
+                <span className="hidden min-[380px]:inline-flex rounded-xl border border-black/25 bg-white/80 px-2 py-1 text-[11px] font-bold text-neutral-700">
+                  {namedCount}/{SIX_PICS_COUNT} named
+                </span>
               </div>
             </div>
 
-            {attempts.some((a) => a.kind === "wrong") && (
-              <div className="flex flex-wrap gap-1.5 items-center text-xs">
-                <span className="font-bold text-neutral-500">Past guesses:</span>
-                {attempts
-                  .filter((a): a is { kind: "wrong"; guess: string } => a.kind === "wrong")
-                  .map((a, i) => (
-                    <span
-                      key={i}
-                      className="rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 font-semibold"
+            {/* 6-Picture Progress Strip */}
+            <div
+              className="grid grid-cols-6 gap-1.5"
+              aria-label="Six pictures progress"
+            >
+              {Array.from({ length: SIX_PICS_COUNT }, (_, idx) => {
+                const done = outcomes[idx];
+                const isCurrent = idx === activeImageIndex && !done;
+                return (
+                  <div
+                    key={idx}
+                    data-testid={`six-pics-step-${idx}`}
+                    className={cn(
+                      "h-7 rounded-lg border-2 text-[11px] font-black flex items-center justify-center transition-all",
+                      done
+                        ? done.solved
+                          ? "bg-emerald-100 border-black text-emerald-950"
+                          : "bg-neutral-200 border-neutral-400 text-neutral-600"
+                        : isCurrent
+                        ? "bg-[#f4d621] border-black text-black shadow-[2px_2px_0px_#000]"
+                        : "bg-white border-neutral-300 text-neutral-400"
+                    )}
+                  >
+                    {done ? (done.solved ? `+${done.points}` : "0pt") : `#${idx + 1}`}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Guess Input OR Post-Solve Full Reveal Interstitial */}
+            {!awaitingAdvance ? (
+              <form
+                onSubmit={submitGuess}
+                className={cn(
+                  "rounded-2xl border-2 border-black bg-white p-3 space-y-2.5 shadow-[3px_3px_0px_#000]",
+                  shaking && "animate-bounce border-red-600"
+                )}
+              >
+                <div className="flex gap-2">
+                  <Input
+                    ref={guessInputRef}
+                    value={guessInput}
+                    onChange={(e) => setGuessInput(e.target.value)}
+                    placeholder={`Name Picture #${activeImageIndex + 1}…`}
+                    maxLength={48}
+                    aria-label={`Name picture ${activeImageIndex + 1}`}
+                    className="border-2 border-black font-semibold"
+                    data-testid="six-pics-guess-input"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={!guessInput.trim()}
+                    className="bg-black text-white border-2 border-black font-headline font-black shrink-0"
+                    data-testid="six-pics-submit"
+                  >
+                    <Send className="h-4 w-4 mr-1" /> Guess
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={remainingCoveredCount <= 0}
+                    onClick={handleRevealPiece}
+                    className="h-8 px-3 text-xs font-black border-2 border-black bg-[#f4d621] hover:bg-[#f4d621]/80 text-black disabled:opacity-50"
+                    data-testid="six-pics-reveal-piece"
+                  >
+                    <Puzzle className="h-3.5 w-3.5 mr-1.5" />
+                    {remainingCoveredCount > 0
+                      ? `Reveal Piece (-1 pt · ${remainingCoveredCount} left)`
+                      : "All 6 Pieces Open (1 pt)"}
+                  </Button>
+
+                  {confirmingPass ? (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={commitPass}
+                        className="h-8 px-2.5 text-xs font-black border-2 border-red-700 bg-red-50 text-red-800 hover:bg-red-100"
+                        data-testid="six-pics-confirm-pass"
+                      >
+                        Confirm Pass (0 pts)
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirmingPass(false)}
+                        className="h-8 px-2 text-xs font-bold"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handlePassClick}
+                      className="h-8 px-2.5 text-xs font-bold border-2 border-neutral-400 hover:border-black text-neutral-700"
+                      data-testid="six-pics-pass"
                     >
-                      {a.guess}
-                    </span>
-                  ))}
+                      <SkipForward className="h-3.5 w-3.5 mr-1" />
+                      Pass / Reveal Word (0 pts)
+                    </Button>
+                  )}
+                </div>
+
+                {feedback ? (
+                  <p className="text-xs font-bold text-amber-800">{feedback}</p>
+                ) : (
+                  <p className="text-[11px] text-neutral-500">
+                    1/6 of the picture is open for free — wrong guesses have no penalty!
+                  </p>
+                )}
+              </form>
+            ) : (
+              <div
+                className={cn(
+                  "rounded-2xl border-2 border-black p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-[3px_3px_0px_#000]",
+                  currentResolvedOutcome?.solved ? "bg-emerald-50" : "bg-neutral-100"
+                )}
+                data-testid="six-pics-pic-result"
+              >
+                <div className="min-w-0">
+                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-600">
+                    {currentResolvedOutcome?.solved
+                      ? `Correct! +${currentResolvedOutcome.points} / ${SIX_PICS_MAX_IMAGE_SCORE} pts`
+                      : "Passed · 0 / 6 pts"}
+                  </p>
+                  <p className="font-headline font-black text-lg text-black truncate">
+                    {currentResolvedOutcome?.solved && (
+                      <CheckCircle2 className="inline h-4 w-4 text-emerald-600 mr-1.5 -mt-0.5" />
+                    )}
+                    {currentClue.caption}
+                  </p>
+                </div>
+
+                <Button
+                  ref={nextButtonRef}
+                  type="button"
+                  onClick={advanceToNextPicture}
+                  className="bg-black text-white border-2 border-black font-headline font-black shrink-0"
+                  data-testid="six-pics-next-pic"
+                >
+                  {activeImageIndex + 1 < SIX_PICS_COUNT ? (
+                    <>
+                      Next Picture ({activeImageIndex + 2}/{SIX_PICS_COUNT})
+                      <ArrowRight className="h-4 w-4 ml-1.5" />
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-4 w-4 mr-1.5" />
+                      See Final Results
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Jigsaw-Covered Picture Stage */}
+            <SixPicsJigsawStage
+              clue={currentClue}
+              imageIndex={activeImageIndex}
+              revealedPieces={currentRevealedPieces}
+              fullyUncovered={awaitingAdvance}
+              currentWorth={currentWorth}
+            />
+
+            {wrongGuesses.length > 0 && !awaitingAdvance && (
+              <div className="flex flex-wrap gap-1.5 items-center text-xs">
+                <span className="font-bold text-neutral-500">Tried on this pic:</span>
+                {wrongGuesses.map((g, i) => (
+                  <span
+                    key={`${g}-${i}`}
+                    className="rounded-full bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 font-semibold"
+                  >
+                    {g}
+                  </span>
+                ))}
               </div>
             )}
           </div>
         ) : (
           /* ================================================================
-           * POST-GAME ENDING SCREEN: Bold Theme Header + 2×3 Captioned Grid (Q32)
+           * POST-GAME ENDING SCREEN: Theme + 36-Pt Score + 2×3 Gallery (Q32)
            * ================================================================ */
           <div
             className="rounded-2xl border-2 border-black bg-white p-4 sm:p-5 space-y-4 shadow-[4px_4px_0px_#000]"
@@ -649,7 +960,9 @@ function SixPicsBoard({
           >
             <div className="text-center space-y-1">
               <p className="text-xs font-extrabold uppercase tracking-wider text-amber-700">
-                {won ? `Solved! Score: ${score}/${SIX_PICS_COUNT}` : `Out of guesses · 0/${SIX_PICS_COUNT}`}
+                {totalScore === SIX_PICS_MAX_SCORE
+                  ? `Flawless! ${totalScore}/${SIX_PICS_MAX_SCORE} pts · 6/6 Named`
+                  : `Score: ${totalScore}/${SIX_PICS_MAX_SCORE} pts · ${namedCount}/${SIX_PICS_COUNT} Named · ${piecesSaved} Pieces Saved`}
               </p>
               <h2
                 className="font-headline font-black text-2xl sm:text-3xl tracking-tight text-neutral-900"
@@ -658,39 +971,55 @@ function SixPicsBoard({
                 {puzzle.themeAnswer}
               </h2>
               <p className="text-lg tracking-widest" aria-label="Emoji score receipt">
-                {buildSixPicsEmojiReceipt(attempts)}
+                {buildSixPicsEmojiReceipt(outcomes)}
               </p>
             </div>
 
-            {/* 2×3 Grid (2 columns, 3 rows) revealing all 6 images + numbered captions */}
+            {/* 2×3 Grid (2 columns, 3 rows) revealing all 6 images + numbered names + points */}
             <div
               className="grid grid-cols-2 gap-2.5 sm:gap-3"
               data-testid="six-pics-summary-grid"
             >
-              {puzzle.images.map((img, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-xl border-2 border-black overflow-hidden bg-neutral-50 flex flex-col"
-                >
-                  <div className="aspect-[4/3] w-full bg-neutral-100">
-                    <SixPicsClueVisual
-                      clue={img}
-                      index={idx}
-                      alt={`${idx + 1}. ${img.caption}`}
-                    />
+              {puzzle.images.map((img, idx) => {
+                const out = outcomes[idx];
+                const pts = out?.points ?? 0;
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-xl border-2 border-black overflow-hidden bg-neutral-50 flex flex-col"
+                  >
+                    <div className="aspect-[4/3] w-full bg-neutral-100 relative">
+                      <SixPicsClueVisual
+                        clue={img}
+                        index={idx}
+                        alt={`${idx + 1}. ${img.caption}`}
+                      />
+                      <span
+                        className={cn(
+                          "absolute top-2 right-2 rounded-full border border-black px-2 py-0.5 text-[10px] font-black shadow-2xs",
+                          pts >= 5
+                            ? "bg-emerald-300 text-black"
+                            : pts >= 1
+                            ? "bg-[#f4d621] text-black"
+                            : "bg-neutral-200 text-neutral-700"
+                        )}
+                      >
+                        {pts}/{SIX_PICS_MAX_IMAGE_SCORE} pts
+                      </span>
+                    </div>
+                    <div className="px-2.5 py-1.5 bg-white border-t-2 border-black text-xs font-extrabold text-neutral-900 truncate">
+                      {idx + 1}. {img.caption}
+                    </div>
                   </div>
-                  <div className="px-2.5 py-1.5 bg-white border-t-2 border-black text-xs font-extrabold text-neutral-900 truncate">
-                    {idx + 1}. {img.caption}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <ResultShareButtons
               title={
                 isCustom
-                  ? `6 Pics — ${puzzle.title}`
-                  : `6 Pics #${puzzle.puzzleNumber}`
+                  ? `6 Pics — ${puzzle.themeAnswer}`
+                  : `6 Pics #${puzzle.puzzleNumber} — ${puzzle.themeAnswer}`
               }
               text={shareText}
               url={shareUrl}
@@ -794,7 +1123,7 @@ function SixPicsCreator() {
       const saved = await saveCustomPuzzle({
         id,
         gameSlug: "6-pics",
-        title: puzzle.title,
+        title: `${puzzle.themeAnswer} — ${puzzle.title}`,
         creatorId: profile.id,
         creatorName: profile.displayName,
         creatorHandle: profile.handle,
@@ -805,7 +1134,7 @@ function SixPicsCreator() {
         return;
       }
       const blurb = formatCustomGameBlurb({
-        title: puzzle.title,
+        title: puzzle.themeAnswer,
         creatorHandle: profile.handle,
         creatorName: profile.displayName,
         shareUrl: saved.shareUrl,
@@ -815,7 +1144,7 @@ function SixPicsCreator() {
         url: saved.shareUrl,
         blurbWithUrl: blurb.blurbWithUrl,
         blurbText: blurb.blurbText,
-        title: puzzle.title,
+        title: puzzle.themeAnswer,
       });
     } finally {
       setPublishing(false);
@@ -828,7 +1157,7 @@ function SixPicsCreator() {
         <div>
           <h2 className="font-headline font-black text-2xl">Create your own 6 Pics</h2>
           <p className="text-sm text-neutral-600">
-            Choose a secret theme and 6 progressive visual clues. Friends unlock them one by one!
+            Set an overarching theme and 6 hidden pictures. Friends see 1/6 of each picture at first and score up to 36 points!
           </p>
         </div>
 

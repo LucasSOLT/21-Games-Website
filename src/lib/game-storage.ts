@@ -2204,12 +2204,19 @@ export function buildUnifiedGameProfileSummary(
     }
 
     case "6-pics": {
-      const guessDistribution = [1, 2, 3, 4, 5, 6].map((guessNum) => {
-        const pts = 7 - guessNum;
-        const count = stats.distribution[`score_${pts.toFixed(1)}`] ?? 0;
+      const hasPicPts = [1, 2, 3, 4, 5, 6].some(
+        (pts) => (stats.distribution[`pic_pts_${pts}`] ?? 0) > 0
+      );
+      const flawless =
+        stats.distribution.flawless ?? stats.distribution["score_36.0"] ?? 0;
+      const guessDistribution = [1, 2, 3, 4, 5, 6].map((piecesShown) => {
+        const pts = 7 - piecesShown;
+        const count = hasPicPts
+          ? stats.distribution[`pic_pts_${pts}`] ?? 0
+          : stats.distribution[`score_${pts.toFixed(1)}`] ?? 0;
         return {
-          guessNumber: guessNum,
-          pointsLabel: `${pts} pts`,
+          guessNumber: piecesShown,
+          pointsLabel: `${pts} ${pts === 1 ? "pt" : "pts"}`,
           count,
         };
       });
@@ -2222,7 +2229,8 @@ export function buildUnifiedGameProfileSummary(
           { label: "Win %", value: `${winPercent}%` },
           { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
           { label: "Max Streak", value: String(stats.maxStreak) },
-          { label: "Avg Score", value: computeAvgScoreOutOf(stats, 6) },
+          { label: "Avg Score", value: computeAvgScoreOutOf(stats, 36) },
+          { label: "Flawless 36/36", value: String(flawless) },
         ],
         guessDistribution,
       };

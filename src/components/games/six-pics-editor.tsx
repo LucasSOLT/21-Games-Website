@@ -33,11 +33,12 @@ const DEFAULT_SCENES: readonly SixPicsSceneKey[] = [
 
 export function emptySixPicsEditorState(): SixPicsEditorState {
   return {
-    title: "Connect the Six",
+    title: "Six Hidden Pictures",
     themeAnswer: "",
     aliasesCsv: "",
     rows: Array.from({ length: SIX_PICS_COUNT }, (_, i) => ({
       caption: "",
+      aliasesCsv: "",
       scene: DEFAULT_SCENES[i % DEFAULT_SCENES.length]!,
       imageUrl: "",
     })),
@@ -51,6 +52,7 @@ export function puzzleToSixPicsEditorState(puzzle: SixPicsPuzzle): SixPicsEditor
     aliasesCsv: puzzle.acceptedAliases.join(", "),
     rows: puzzle.images.map((img) => ({
       caption: img.caption,
+      aliasesCsv: (img.aliases ?? []).join(", "),
       scene: img.scene,
       imageUrl: img.imageUrl ?? "",
     })),
@@ -64,24 +66,7 @@ interface SixPicsEditorProps {
 }
 
 export function SixPicsEditor({ value, onChange, aiConfig }: SixPicsEditorProps) {
-  const [generatingAliases, setGeneratingAliases] = useState(false);
-
-  const handleAutoAliases = async () => {
-    const theme = value.themeAnswer.trim();
-    if (!theme) return;
-    setGeneratingAliases(true);
-    try {
-      const suggestions = await generate6PicsSynonyms(theme, aiConfig);
-      const existing = value.aliasesCsv
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const merged = [...new Set([...existing, ...suggestions])].slice(0, 16);
-      onChange({ ...value, aliasesCsv: merged.join(", ") });
-    } finally {
-      setGeneratingAliases(false);
-    }
-  };
+  const [generatingIdx, setGeneratingIdx] = useState<number | "all" | null>(null);
 
   const updateRow = (index: number, patch: Partial<SixPicsDraftRow>) => {
     const nextRows = value.rows.map((row, i) =>
@@ -90,65 +75,97 @@ export function SixPicsEditor({ value, onChange, aiConfig }: SixPicsEditorProps)
     onChange({ ...value, rows: nextRows });
   };
 
+  const handleAutoAliasesForRow = async (index: number) => {
+    const row = value.rows[index];
+    const word = row?.caption.trim();
+    if (!word) return;
+    setGeneratingIdx(index);
+    try {
+      const suggestions = await generate6PicsSynonyms(word, aiConfig);
+      const existing = (row.aliasesCsv ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const merged = [...new Set([...existing, ...suggestions])].slice(0, 16);
+      updateRow(index, { aliasesCsv: merged.join(", ") });
+    } finally {
+      setGeneratingIdx(null);
+    }
+  };
+
+  const handleAutoAliasesAll = async () => {
+    setGeneratingIdx("all");
+    try {
+      const nextRows = await Promise.all(
+        value.rows.map(async (row) => {
+          const word = row.caption.trim();
+          if (!word) return row;
+          const suggestions = await generate6PicsSynonyms(word, aiConfig);
+          const existing = (row.aliasesCsv ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const merged = [...new Set([...existing, ...suggestions])].slice(0, 16);
+          return { ...row, aliasesCsv: merged.join(", ") };
+        })
+      );
+      onChange({ ...value, rows: nextRows });
+    } finally {
+      setGeneratingIdx(null);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="space-y-1">
           <label className="block text-xs font-bold">
-            Overarching Theme Answer <span className="text-red-600">*</span>
+            Overarching Theme (Shown to Players at Top) <span className="text-red-600">*</span>
           </label>
-          <div className="flex gap-2">
-            <Input
-              value={value.themeAnswer}
-              onChange={(e) => onChange({ ...value, themeAnswer: e.target.value })}
-              placeholder="e.g., Hawaii"
-              maxLength={48}
-              data-testid="six-pics-theme-input"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!value.themeAnswer.trim() || generatingAliases}
-              onClick={handleAutoAliases}
-              className="shrink-0 border-2 border-black bg-[#f4d621]/40 hover:bg-[#f4d621]/70 font-bold text-xs"
-              data-testid="six-pics-auto-synonyms"
-            >
-              <Sparkles className="h-3.5 w-3.5 mr-1" />
-              {generatingAliases ? "Generating…" : "✨ Auto-Generate Synonyms/Aliases"}
-            </Button>
-          </div>
+          <Input
+            value={value.themeAnswer}
+            onChange={(e) => onChange({ ...value, themeAnswer: e.target.value })}
+            placeholder="e.g., Hawaii"
+            maxLength={48}
+            data-testid="six-pics-theme-input"
+          />
         </div>
 
         <div className="space-y-1">
-          <label className="block text-xs font-bold">
-            Editorial Subtitle (non-spoiler)
-          </label>
+          <label className="block text-xs font-bold">Editorial Subtitle</label>
           <Input
             value={value.title}
             onChange={(e) => onChange({ ...value, title: e.target.value })}
-            placeholder="Connect the Six"
+            placeholder="Six Hidden Pictures"
             maxLength={50}
           />
         </div>
       </div>
 
-      <div className="space-y-1">
-        <label className="block text-xs font-bold">
-          Accepted Synonyms / Aliases (comma-separated, 1-letter typo forgiveness automatic)
-        </label>
-        <Input
-          value={value.aliasesCsv}
-          onChange={(e) => onChange({ ...value, aliasesCsv: e.target.value })}
-          placeholder="hawaiian islands, aloha state, maui"
-          maxLength={320}
-          data-testid="six-pics-aliases-input"
-        />
-      </div>
-
       <div className="space-y-2">
-        <p className="text-xs font-extrabold uppercase tracking-wider text-neutral-600">
-          6 Progressive Visual Clues (#1 Free Start → #6 Clincher)
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-neutral-600">
+            6 Hidden Pictures (Each Covered by 5/6 Jigsaw Pieces at Start)
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={
+              generatingIdx !== null ||
+              value.rows.every((r) => !r.caption.trim())
+            }
+            onClick={() => void handleAutoAliasesAll()}
+            className="h-7 px-2.5 border-2 border-black bg-[#f4d621]/45 hover:bg-[#f4d621]/75 font-bold text-[11px]"
+            data-testid="six-pics-auto-synonyms"
+          >
+            <Sparkles className="h-3 w-3 mr-1" />
+            {generatingIdx === "all"
+              ? "Generating…"
+              : "✨ Auto-Generate Synonyms/Aliases"}
+          </Button>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {value.rows.map((row, idx) => {
             const fallbackUri = renderSixPicsSceneDataUri({ scene: row.scene }, idx);
@@ -160,13 +177,13 @@ export function SixPicsEditor({ value, onChange, aiConfig }: SixPicsEditorProps)
                 <div className="w-20 h-16 rounded-lg overflow-hidden border border-black/30 bg-white shrink-0">
                   <ImageWithFallback
                     src={row.imageUrl.trim() || fallbackUri}
-                    alt={`Clue ${idx + 1} preview`}
+                    alt={`Picture ${idx + 1} preview`}
                     className="w-full h-full object-cover"
                     fallbackSvgTitle={`Pic ${idx + 1}`}
                   />
                 </div>
                 <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-1">
                     <span className="text-xs font-black">Pic #{idx + 1}</span>
                     <select
                       aria-label={`Pic ${idx + 1} illustrated scene`}
@@ -183,12 +200,32 @@ export function SixPicsEditor({ value, onChange, aiConfig }: SixPicsEditorProps)
                       ))}
                     </select>
                   </div>
+                  <div className="flex gap-1">
+                    <Input
+                      value={row.caption}
+                      onChange={(e) => updateRow(idx, { caption: e.target.value })}
+                      placeholder={`Answer #${idx + 1} (e.g., Volcano)`}
+                      maxLength={50}
+                      className="h-8 text-xs font-semibold"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!row.caption.trim() || generatingIdx !== null}
+                      onClick={() => void handleAutoAliasesForRow(idx)}
+                      title="Auto-generate accepted synonyms for this picture"
+                      className="h-8 px-2 border border-black bg-[#f4d621]/35 hover:bg-[#f4d621]/70 text-[10px] font-bold shrink-0"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                    </Button>
+                  </div>
                   <Input
-                    value={row.caption}
-                    onChange={(e) => updateRow(idx, { caption: e.target.value })}
-                    placeholder={`Post-game caption #${idx + 1} (e.g., Ocean)`}
-                    maxLength={50}
-                    className="h-8 text-xs"
+                    value={row.aliasesCsv ?? ""}
+                    onChange={(e) => updateRow(idx, { aliasesCsv: e.target.value })}
+                    placeholder="Accepted synonyms (comma-separated)"
+                    maxLength={240}
+                    className="h-7 text-[11px]"
                   />
                   <Input
                     value={row.imageUrl}

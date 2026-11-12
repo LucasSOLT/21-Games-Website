@@ -105,11 +105,11 @@ export function SixPicsStudioTab({
         author: puzzle.author,
         editor: puzzle.editor,
       },
-      preview: `Theme: ${puzzle.themeAnswer} (${puzzle.images.map((i) => i.caption).join(" → ")})`,
+      preview: `Theme: ${puzzle.themeAnswer} · Answers: ${puzzle.images.map((i) => i.caption).join(", ")}`,
       details: [
-        `Theme answer: ${puzzle.themeAnswer}`,
-        `${puzzle.acceptedAliases.length} accepted synonym/alias entries + 1-letter typo forgiveness`,
-        `${SIX_PICS_COUNT} visual clues`,
+        `Visible overarching theme: ${puzzle.themeAnswer}`,
+        `${SIX_PICS_COUNT} jigsaw-covered pictures (36 pts max)`,
+        `Per-image accepted synonyms + 1-letter typo forgiveness`,
       ],
       playImmediately,
     });
@@ -128,10 +128,10 @@ export function SixPicsStudioTab({
             🖼️ 6 Pics Studio
           </Badge>
           <h3 className="font-headline font-black text-xl">
-            Curate 6 progressive visual clues &amp; theme aliases
+            Curate overarching theme &amp; 6 jigsaw-covered pictures
           </h3>
           <p className="text-xs text-gray-600">
-            Schedule {targetDate} or click “✨ Auto-Generate Synonyms/Aliases” to populate accepted alternate answers.
+            Schedule {targetDate} — players see the overarching theme at top and uncover 1/6 jigsaw pieces to name each picture (36 pts max).
           </p>
         </div>
         <div className="flex gap-2">

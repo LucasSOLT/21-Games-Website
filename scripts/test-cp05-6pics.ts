@@ -1,6 +1,8 @@
 /**
- * Checkpoint 5 — 6 Pics: 66-day bank, fuzzy Levenshtein matcher, progressive scoring,
- * label-free SVG scene engine, Creator Mode (`6p-`), `/admin` synonym generator, and archive.
+ * Checkpoint 5 — 6 Pics (6-Piece Jigsaw Reveal & Name Each Picture):
+ * 66-day bank, visible overarching theme, 6 interlocking SVG puzzle pieces per image
+ * (5 covering + 1 open at start), per-image fuzzy matcher, 36-point scoring (6 pts -> 1 pt per pic,
+ * 0 if missed), label-free SVG scene engine, Creator Mode (`6p-`), `/admin` synonym generator, & archive.
  * Run: node --experimental-strip-types scripts/test-cp05-6pics.ts
  */
 import fs from "node:fs";
@@ -15,11 +17,13 @@ const daily = await import("@/lib/daily-engine");
 const cfg = await import("@/lib/games-config");
 const share = await import("@/lib/custom-game-share");
 const ai = await import("@/lib/ai-helper");
+const mod = await import("@/lib/moderation");
 
-// ---- 66-day puzzle bank -------------------------------------------------------
+// ---- 66-day puzzle bank & public moderation -----------------------------------
 kit.eq(six.SIX_PICS_PUZZLES.length, 66, "bank has 66 puzzles");
 let allValid = true;
 let noThemeLeakInTitle = true;
+let allCleanModeration = true;
 for (const p of six.SIX_PICS_PUZZLES) {
   const v = six.validateSixPicsPuzzle(p);
   if (!v.valid) {
@@ -29,9 +33,19 @@ for (const p of six.SIX_PICS_PUZZLES) {
   if (p.title.toLowerCase().includes(p.themeAnswer.toLowerCase())) {
     noThemeLeakInTitle = false;
   }
+  if (!mod.checkContentModeration(`${p.themeAnswer} ${p.title}`, { mode: "public" }).allowed) {
+    allCleanModeration = false;
+  }
+  for (const img of p.images) {
+    const joined = [img.caption, ...(img.aliases ?? [])].join(" ");
+    if (!mod.checkContentModeration(joined, { mode: "public" }).allowed) {
+      allCleanModeration = false;
+    }
+  }
 }
 kit.assert(allValid, "all 66 bank puzzles pass validateSixPicsPuzzle");
 kit.assert(noThemeLeakInTitle, "editorial subtitle never spoils themeAnswer");
+kit.assert(allCleanModeration, "all 66 bank puzzles pass Tier 1 + Tier 2 public moderation");
 kit.eq(six.SIX_PICS_PUZZLES[0]!.themeAnswer, "Hawaii", "puzzle #1 matches Q32 Hawaii theme");
 
 // ---- Label-free SVG scene renderer -------------------------------------------
@@ -47,47 +61,88 @@ kit.assert(
   "all 84 scene presets render valid SVG with zero <text> labels during gameplay"
 );
 
-// ---- Fuzzy matcher & Levenshtein <= 1 for >= 5 chars (Q30) --------------------
+// ---- 6 interlocking jigsaw pieces & reveal mechanics --------------------------
+kit.eq(six.SIX_PICS_PIECES_PER_IMAGE, 6, "6 jigsaw pieces per image");
+kit.eq(six.SIX_PICS_MAX_IMAGE_SCORE, 6, "max 6 pts per image");
+kit.eq(six.SIX_PICS_MAX_SCORE, 36, "max 36 pts per 6-image puzzle");
+kit.eq(six.SIX_PICS_JIGSAW_PIECES.length, 6, "6 interlocking SVG jigsaw contours");
+kit.assert(
+  six.SIX_PICS_JIGSAW_PIECES.every((piece) => piece.d.startsWith("M ") && piece.d.includes("C ")),
+  "every jigsaw piece uses smooth cubic-Bezier interlocking tabs/blanks"
+);
+
 const hawaii = six.SIX_PICS_PUZZLES[0]!;
-kit.assert(six.matchSixPicsGuess("  THE Hawaii! ", hawaii).matched, "exact normalized match");
-kit.assert(six.matchSixPicsGuess("Aloha State", hawaii).matched, "accepted alias match");
-kit.assert(six.matchSixPicsGuess("Hawai", hawaii).matched, "1-letter deletion typo on 6-char theme");
-kit.assert(six.matchSixPicsGuess("Hawaiii", hawaii).matched, "1-letter insertion typo on 6-char theme");
-kit.assert(!six.matchSixPicsGuess("Alaska", hawaii).matched, "unrelated guess rejected");
+const firstOpen = six.getInitialRevealedPiece(hawaii.images[0]!, 0, hawaii.id);
+kit.assert(firstOpen >= 0 && firstOpen < 6, "initial open piece is within 0..5 (5 covering at start)");
 
-const shortTheme = { themeAnswer: "Cat", acceptedAliases: ["feline"] };
-kit.assert(six.matchSixPicsGuess("cat", shortTheme).matched, "short 3-char exact match");
+const revealedSeq = [firstOpen];
+while (revealedSeq.length < 6) {
+  const next = six.pickNextRandomPiece(revealedSeq, () => 0.42);
+  kit.assert(next !== null && !revealedSeq.includes(next), "pickNextRandomPiece picks a unique covered piece");
+  if (next !== null) revealedSeq.push(next);
+}
+kit.eq(new Set(revealedSeq).size, 6, "all 6 jigsaw pieces uncovered after 5 Reveal Piece clicks");
+kit.eq(six.pickNextRandomPiece(revealedSeq), null, "pickNextRandomPiece returns null when 6/6 uncovered");
+
+// ---- Per-image fuzzy matcher (aliases, plural/singular, Levenshtein <= 1) -----
+const volcanoClue = hawaii.images[1]!; // "Volcano"
+kit.assert(six.matchSixPicsImageGuess("  a Volcano! ", volcanoClue).matched, "exact normalized image caption match");
+kit.assert(six.matchSixPicsImageGuess("Volcanos", volcanoClue).matched, "plural/singular stem match");
+kit.assert(six.matchSixPicsImageGuess("Lava", volcanoClue).matched, "accepted image alias match");
+kit.assert(six.matchSixPicsImageGuess("Volcan", volcanoClue).matched, "1-letter typo forgiveness on >=5-char image name");
+kit.assert(!six.matchSixPicsImageGuess("Surfboard", volcanoClue).matched, "wrong image name rejected");
+
+const shortClue = { scene: "sun" as const, caption: "Sun", aliases: ["solar"] };
+kit.assert(six.matchSixPicsImageGuess("sun", shortClue).matched, "short 3-char exact match");
+kit.assert(!six.matchSixPicsImageGuess("son", shortClue).matched, "short <5-char caption rejects 1-letter typo");
+kit.assert(six.matchSixPicsImageGuess("soler", shortClue).matched, ">=5-char alias allows 1-letter typo");
+
+const customUrlClue = {
+  scene: "volcano" as const,
+  caption: "Mount Fuji",
+  aliases: ["Fuji"],
+  imageUrl: "https://images.example.com/fuji.jpg",
+};
+kit.assert(six.matchSixPicsImageGuess("Mount Fuji", customUrlClue).matched, "custom URL caption matches");
 kit.assert(
-  !six.matchSixPicsGuess("car", shortTheme).matched,
-  "short <5-char theme does NOT allow 1-letter typo forgiveness"
-);
-kit.assert(
-  six.matchSixPicsGuess("felin", shortTheme).matched,
-  ">=5-char alias still gets 1-letter typo forgiveness"
+  !six.matchSixPicsImageGuess("Kilauea", customUrlClue).matched,
+  "custom imageUrl isolates matching from built-in scene default aliases"
 );
 
-// ---- Scoring 6/6 down to 0/6 (Q29 & Q31) -------------------------------------
+// ---- 36-point jigsaw scoring & share receipt ----------------------------------
 kit.eq(
-  [1, 2, 3, 4, 5, 6].map((n) => six.scoreForSixPics(n)),
+  [0, 1, 2, 3, 4, 5].map((extra) => six.scoreForSixPicsImage(true, extra)),
   [6, 5, 4, 3, 2, 1],
-  "scoring 6/6 on Pic #1 down to 1/6 on Pic #6"
+  "6 pts at 0 extra pieces removed (1/6 shown) down to 1 pt at 5 extra pieces removed (6/6 shown)"
 );
-kit.eq(six.scoreForSixPics(null), 0, "missed all 6 attempts -> 0/6");
+kit.eq(six.scoreForSixPicsImage(false, 0), 0, "unsolved/passed image awards 0 points");
 
-const receipt = six.buildSixPicsEmojiReceipt([
-  { kind: "wrong", guess: "ocean" },
-  { kind: "skip" },
-  { kind: "correct", guess: "Hawaii" },
-]);
-kit.eq(receipt, "🟥🟨🟩⬜⬜⬜", "6-tile emoji receipt");
+const sampleOutcomes = [
+  { revealedPieces: [4], extraPiecesRemoved: 0, solved: true, points: 6 },
+  { revealedPieces: [4, 1], extraPiecesRemoved: 1, solved: true, points: 5 },
+  { revealedPieces: [4, 1, 2], extraPiecesRemoved: 2, solved: true, points: 4 },
+  { revealedPieces: [4, 1, 2, 0, 3], extraPiecesRemoved: 4, solved: true, points: 2 },
+  { revealedPieces: [0, 1, 2, 3, 4, 5], extraPiecesRemoved: 5, solved: true, points: 1 },
+  { revealedPieces: [2, 5], extraPiecesRemoved: 1, solved: false, points: 0 },
+];
+kit.eq(six.totalScoreForSixPics(sampleOutcomes), 18, "totalScoreForSixPics sums 6 image outcomes (18/36)");
+kit.eq(
+  six.buildSixPicsEmojiReceipt(sampleOutcomes),
+  "🟩🟩🟨🟧🟧⬜",
+  "6-tile emoji receipt encodes piece efficiency & misses"
+);
+
 const shareStr = six.buildSixPicsShareText({
   puzzleNumber: 7,
-  attempts: [
-    { kind: "wrong", guess: "ocean" },
-    { kind: "correct", guess: "Hawaii" },
-  ],
+  themeAnswer: "Hawaii",
+  outcomes: sampleOutcomes,
 });
-kit.assert(shareStr.startsWith("6 Pics #7\n5/6\n🟥🟩⬜⬜⬜⬜"), "share text score + emojis");
+kit.assert(
+  shareStr.includes("6 Pics #7 — Hawaii") &&
+    shareStr.includes("18/36 pts · 5/6 named") &&
+    shareStr.includes("🟩🟩🟨🟧🟧⬜"),
+  "share text includes puzzle #, visible theme, X/36 score, named count, and emojis"
+);
 
 // ---- AI / local synonym helper & Creator link --------------------------------
 const autoSyns = await ai.generate6PicsSynonyms("Ocean", { preferredProvider: "local" });
@@ -118,7 +173,10 @@ for (const needle of [
   "GameSplashScreen",
   "ImageWithFallback",
   "ResultShareButtons",
-  "Skip / Reveal Next Pic",
+  "six-pics-jigsaw-stage",
+  "Overarching Theme",
+  "Reveal Piece",
+  "Pass / Reveal Word",
   "grid-cols-2",
   "mode === \"create\"",
   "6p-",

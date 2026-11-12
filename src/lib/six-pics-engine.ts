@@ -1,11 +1,15 @@
 /**
- * 6 Pics (`6-pics`) — fuzzy theme matcher, progressive unlock scoring, creator draft
- * converter, and deterministic illustrated SVG scene engine (`GAME_DESIGN_BIBLE.md` Q27–Q33).
+ * 6 Pics (`6-pics`) — 6-piece interlocking jigsaw reveal engine, per-image fuzzy
+ * synonym matcher, 36-point scoring math, creator draft converter, and deterministic
+ * illustrated SVG scene engine (`GAME_DESIGN_BIBLE.md` Q27–Q33).
  */
 
 import { fnv1a32 } from "@/lib/seeded-random";
 
 export const SIX_PICS_COUNT = 6;
+export const SIX_PICS_PIECES_PER_IMAGE = 6;
+export const SIX_PICS_MAX_IMAGE_SCORE = 6;
+export const SIX_PICS_MAX_SCORE = SIX_PICS_COUNT * SIX_PICS_MAX_IMAGE_SCORE; // 36
 
 export const SIX_PICS_SCENES = [
   "waves",
@@ -97,39 +101,344 @@ export const SIX_PICS_SCENES = [
 export type SixPicsSceneKey = (typeof SIX_PICS_SCENES)[number];
 
 export interface SixPicsClueImage {
-  /** Short post-game caption (`"Ocean"`, `"Volcano"`), NEVER rendered during gameplay. */
+  /** Primary target answer name of this picture (e.g. `"Volcano"`, `"Compass"`). */
   caption: string;
+  /** Optional accepted alternate names / synonyms for this specific picture. */
+  aliases?: string[];
   /** Deterministic vector illustration motif key. */
   scene: SixPicsSceneKey;
   /** Background/accent colors `[bgTop, bgBottom, accent]`. */
   palette?: [string, string, string];
   /** Optional external/Supabase/custom SVG URL rendered via `<ImageWithFallback>`. */
   imageUrl?: string;
+  /** Optional deterministic starting open jigsaw piece (`0..5`). */
+  initialPiece?: number;
 }
 
 export interface SixPicsPuzzle {
   id: string;
   puzzleNumber: number;
-  /** Non-spoiler editorial label (never contains `themeAnswer`). */
+  /** Editorial subtitle. */
   title: string;
-  /** Secret overarching theme answer revealed post-game. */
+  /** Visible overarching theme displayed at the top of the board to help players. */
   themeAnswer: string;
-  /** Accepted synonyms/aliases (normalized at match time). */
+  /** Kept for backward compatibility with existing overrides/custom payloads. */
   acceptedAliases: string[];
-  /** Exactly 6 progressive visual clues (`#1` easiest/broadest or subtle → `#6` clincher). */
+  /** Exactly 6 hidden pictures covered by 6 jigsaw pieces each (5 covering at start). */
   images: SixPicsClueImage[];
   author: string;
   editor: string;
   customDate?: string;
 }
 
+/** Per-image completion record in the 36-point jigsaw reveal game. */
+export interface SixPicsImageOutcome {
+  /** Jigsaw piece indices (`0..5`) that were revealed prior to solving/passing (includes initial free piece). */
+  revealedPieces: number[];
+  /** Extra pieces removed via "Reveal Piece" (`0..5`). */
+  extraPiecesRemoved: number;
+  /** True if the player named this image correctly; false if passed/missed. */
+  solved: boolean;
+  /** Player's winning guess (if solved). */
+  guess?: string;
+  /** Earned points (`6 - extraPiecesRemoved` in `1..6` when solved, `0` when missed). */
+  points: number;
+}
+
+/** Legacy attempt union retained for backward compatibility. */
 export type SixPicsAttempt =
   | { kind: "wrong"; guess: string }
   | { kind: "skip" }
   | { kind: "correct"; guess: string };
 
 // ---------------------------------------------------------------------------
-// Normalization & Fuzzy Levenshtein Matcher (Q30)
+// Built-In Scene Synonym Dictionary (when using vector scenes without custom imageUrl)
+// ---------------------------------------------------------------------------
+
+export const SCENE_DEFAULT_ALIASES: Record<SixPicsSceneKey, readonly string[]> = {
+  waves: ["waves", "wave", "ocean", "sea", "surf", "ocean waves", "water"],
+  volcano: ["volcano", "eruption", "lava", "crater", "mount"],
+  "palm-island": ["island", "palm island", "palm tree", "palm", "atoll", "tropical island"],
+  surfboard: ["surfboard", "surfing", "surf", "board"],
+  campfire: ["campfire", "fire", "bonfire", "flames", "luau fire"],
+  "flower-lei": ["lei", "flower lei", "hula lei", "garland", "wreath", "flowers"],
+  tent: ["tent", "camping tent", "campsite", "pitched tent"],
+  "pine-trees": ["pine trees", "trees", "pines", "forest", "woods", "evergreens"],
+  compass: ["compass", "navigation"],
+  lantern: ["lantern", "lamp", "camp lantern", "light"],
+  backpack: ["backpack", "rucksack", "pack", "knapsack", "daypack", "bag"],
+  "stars-sky": ["stars", "night sky", "starry sky", "constellations", "sky", "cosmos"],
+  "coffee-cup": ["coffee", "coffee cup", "espresso", "mug", "cup", "latte", "hot coffee", "tea"],
+  croissant: ["croissant", "pastry", "crescent roll", "bun"],
+  beans: ["coffee beans", "beans", "roasted beans", "espresso beans"],
+  book: ["book", "open book", "novel", "hardcover", "paperback", "storybook"],
+  headphones: ["headphones", "headset", "earphones", "cans"],
+  "cafe-table": ["table", "cafe table", "bistro table", "patio table", "desk"],
+  sun: ["sun", "sunshine", "sunlight", "sunrise", "sunny"],
+  "planet-ring": ["planet", "saturn", "ringed planet"],
+  rocket: ["rocket", "spaceship", "rocket ship", "spacecraft", "shuttle"],
+  "moon-crescent": ["moon", "crescent moon", "half moon", "lunar crescent"],
+  telescope: ["telescope", "observatory", "spyglass"],
+  meteor: ["meteor", "comet", "shooting star", "asteroid", "fireball"],
+  "cake-candles": ["cake", "birthday cake", "candles", "frosted cake"],
+  balloons: ["balloons", "balloon", "party balloons"],
+  "gift-box": ["gift", "present", "gift box", "wrapped gift", "wrapped present", "box"],
+  "party-hat": ["party hat", "hat", "cone hat", "birthday hat"],
+  confetti: ["confetti", "streamers", "sprinkles"],
+  envelope: ["envelope", "letter", "invitation", "card", "mail", "diploma"],
+  popcorn: ["popcorn", "popcorn bucket", "buttered popcorn"],
+  clapperboard: ["clapperboard", "slate", "clapboard", "film slate", "action slate", "clapper"],
+  "film-reel": ["film reel", "reel", "movie reel", "film"],
+  ticket: ["ticket", "movie ticket", "stub", "ticket stub", "admit one"],
+  spotlight: ["spotlight", "stage light", "searchlight", "beam", "light"],
+  "red-carpet": ["red carpet", "carpet", "runway", "aisle"],
+  snowflake: ["snowflake", "snow", "ice crystal", "frost"],
+  mittens: ["mittens", "mitten", "gloves", "glove", "winter gloves"],
+  "mug-steam": ["mug", "hot cocoa", "hot chocolate", "tea", "cup", "steaming mug", "cocoa"],
+  pinecone: ["pinecone", "pine cone", "acorn"],
+  sled: ["sled", "toboggan", "sleigh"],
+  fireplace: ["fireplace", "hearth", "chimney", "fire"],
+  anchor: ["anchor", "ship anchor"],
+  lighthouse: ["lighthouse", "beacon", "watchtower"],
+  sailboat: ["sailboat", "boat", "ship", "yacht", "sailing ship", "sails"],
+  seashell: ["seashell", "shell", "scallop", "clam"],
+  binoculars: ["binoculars", "field glasses", "spyglass"],
+  seagull: ["seagull", "gull", "bird", "seabird"],
+  guitar: ["guitar", "acoustic guitar", "electric guitar"],
+  "piano-keys": ["piano", "piano keys", "keyboard", "keys"],
+  vinyl: ["vinyl", "record", "vinyl record", "lp", "album"],
+  microphone: ["microphone", "mic", "vocal mic"],
+  "music-notes": ["music notes", "notes", "musical notes", "music", "sheet music"],
+  stage: ["stage", "curtains", "theater stage", "concert stage"],
+  "pizza-slice": ["pizza", "pizza slice", "pepperoni pizza", "slice"],
+  tomato: ["tomato", "tomatoes", "red tomato"],
+  "chef-hat": ["chef hat", "toque", "baker hat", "chefs hat"],
+  "rolling-pin": ["rolling pin", "dough roller", "roller"],
+  "oven-flame": ["oven", "brick oven", "pizza oven", "wood oven", "stove"],
+  "olive-branch": ["olive", "olives", "olive branch", "branch"],
+  bicycle: ["bicycle", "bike", "cycling"],
+  camera: ["camera", "photo camera"],
+  passport: ["passport", "travel passport"],
+  suitcase: ["suitcase", "luggage", "bag", "briefcase", "carry on"],
+  airplane: ["airplane", "plane", "jet", "aircraft", "flight", "paper plane"],
+  globe: ["globe", "world", "earth", "world globe"],
+  castle: ["castle", "fortress", "palace", "tower", "keep"],
+  crown: ["crown", "tiara", "royal crown"],
+  shield: ["shield", "crest", "coat of arms"],
+  "dragon-wing": ["dragon", "dragon wing", "wing", "wyvern"],
+  sword: ["sword", "blade", "dagger", "rapier"],
+  "treasure-key": ["key", "skeleton key", "golden key", "treasure key"],
+  "watering-can": ["watering can", "sprinkler", "pitcher"],
+  sunflower: ["sunflower", "flower", "daisy", "blossom"],
+  seedling: ["seedling", "sprout", "plant", "sapling", "leaf", "herbs"],
+  butterfly: ["butterfly", "moth", "monarch"],
+  wheelbarrow: ["wheelbarrow", "barrow", "garden cart", "cart"],
+  "bee-hive": ["beehive", "bee hive", "hive", "honeycomb", "bees"],
+  "chess-knight": ["knight", "chess knight", "chess piece", "chess", "horse"],
+  dice: ["dice", "die", "game dice"],
+  hourglass: ["hourglass", "sand timer", "timer", "sandglass"],
+  trophy: ["trophy", "cup", "award", "champion cup"],
+  "puzzle-piece": ["puzzle piece", "jigsaw", "jigsaw piece", "puzzle"],
+  "playing-card": ["playing card", "card", "ace", "diamond card", "cards"],
+};
+
+// ---------------------------------------------------------------------------
+// 6-Piece Interlocking Jigsaw Geometry (`viewBox="0 0 300 225"`, 3 cols × 2 rows)
+// ---------------------------------------------------------------------------
+
+export const SIX_PICS_JIGSAW_VIEWBOX = "0 0 300 225";
+
+/**
+ * Generates a horizontal jigsaw edge from `(xA, y)` to `(xB, y)`.
+ * `tabSign` is in screen `+y` (`+1` bulges downward, `-1` bulges upward, `0` straight outer border).
+ * Because control offsets are symmetric around `0.5`, calling `jigsawHEdge(xB, xA, y, tabSign)`
+ * traces the exact mathematical reverse of `jigsawHEdge(xA, xB, y, tabSign)` with zero gap.
+ */
+function jigsawHEdge(xA: number, xB: number, y: number, tabSign: -1 | 0 | 1): string {
+  if (tabSign === 0) return `L ${xB} ${y}`;
+  const dx = xB - xA;
+  const xm = (xA + xB) / 2;
+  const b = tabSign * 19;
+  const fmt = (n: number) => Number(n.toFixed(2));
+  return [
+    `L ${fmt(xA + 0.34 * dx)} ${fmt(y)}`,
+    `C ${fmt(xA + 0.38 * dx)} ${fmt(y + 0.14 * b)}, ${fmt(xA + 0.28 * dx)} ${fmt(y + b)}, ${fmt(xm)} ${fmt(y + b)}`,
+    `C ${fmt(xA + 0.72 * dx)} ${fmt(y + b)}, ${fmt(xA + 0.62 * dx)} ${fmt(y + 0.14 * b)}, ${fmt(xA + 0.66 * dx)} ${fmt(y)}`,
+    `L ${fmt(xB)} ${fmt(y)}`,
+  ].join(" ");
+}
+
+/**
+ * Generates a vertical jigsaw edge from `(x, yA)` to `(x, yB)`.
+ * `tabSign` is in screen `+x` (`+1` bulges rightward, `-1` bulges leftward, `0` straight outer border).
+ */
+function jigsawVEdge(x: number, yA: number, yB: number, tabSign: -1 | 0 | 1): string {
+  if (tabSign === 0) return `L ${x} ${yB}`;
+  const dy = yB - yA;
+  const ym = (yA + yB) / 2;
+  const b = tabSign * 19;
+  const fmt = (n: number) => Number(n.toFixed(2));
+  return [
+    `L ${fmt(x)} ${fmt(yA + 0.34 * dy)}`,
+    `C ${fmt(x + 0.14 * b)} ${fmt(yA + 0.38 * dy)}, ${fmt(x + b)} ${fmt(yA + 0.28 * dy)}, ${fmt(x + b)} ${fmt(ym)}`,
+    `C ${fmt(x + b)} ${fmt(yA + 0.72 * dy)}, ${fmt(x + 0.14 * b)} ${fmt(yA + 0.62 * dy)}, ${fmt(x)} ${fmt(yA + 0.66 * dy)}`,
+    `L ${fmt(x)} ${fmt(yB)}`,
+  ].join(" ");
+}
+
+export interface JigsawPieceSpec {
+  index: number;
+  row: 0 | 1;
+  col: 0 | 1 | 2;
+  /** Closed SVG `<path d="...">` contour in `0 0 300 225` space. */
+  d: string;
+  /** Visual center `[cx, cy]` for piece number emblem. */
+  center: [number, number];
+}
+
+function buildJigsawPieces(): readonly JigsawPieceSpec[] {
+  const xs = [0, 100, 200, 300] as const;
+  const ys = [0, 112.5, 225] as const;
+  // Shared horizontal interior edges at y = 112.5 for col 0, 1, 2
+  const midH: readonly (-1 | 1)[] = [1, -1, 1];
+  // Shared vertical interior edges at x = 100 and x = 200 for row 0 and row 1
+  const midV: readonly [readonly (-1 | 1)[], readonly (-1 | 1)[]] = [
+    [1, -1],
+    [-1, 1],
+  ];
+
+  const pieces: JigsawPieceSpec[] = [];
+  for (let row = 0 as 0 | 1; row < 2; row = (row + 1) as 0 | 1) {
+    for (let col = 0 as 0 | 1 | 2; col < 3; col = (col + 1) as 0 | 1 | 2) {
+      const index = row * 3 + col;
+      const xL = xs[col]!;
+      const xR = xs[col + 1]!;
+      const yT = ys[row]!;
+      const yB = ys[row + 1]!;
+
+      const topSign: -1 | 0 | 1 = row === 0 ? 0 : midH[col]!;
+      const bottomSign: -1 | 0 | 1 = row === 1 ? 0 : midH[col]!;
+      const leftSign: -1 | 0 | 1 = col === 0 ? 0 : midV[row]![col - 1]!;
+      const rightSign: -1 | 0 | 1 = col === 2 ? 0 : midV[row]![col]!;
+
+      const d = [
+        `M ${xL} ${yT}`,
+        jigsawHEdge(xL, xR, yT, topSign),
+        jigsawVEdge(xR, yT, yB, rightSign),
+        jigsawHEdge(xR, xL, yB, bottomSign),
+        jigsawVEdge(xL, yB, yT, leftSign),
+        "Z",
+      ].join(" ");
+
+      pieces.push({
+        index,
+        row,
+        col,
+        d,
+        center: [(xL + xR) / 2, (yT + yB) / 2],
+      });
+    }
+  }
+  return pieces;
+}
+
+/** Pre-computed 6 interlocking SVG jigsaw piece contours (`Piece 0..5`). */
+export const SIX_PICS_JIGSAW_PIECES: readonly JigsawPieceSpec[] = buildJigsawPieces();
+
+/**
+ * Pieces guaranteed to intersect meaningful subject artwork for each vector scene
+ * (`0,1,2` = top row L/C/R; `3,4,5` = bottom row L/C/R).
+ */
+const WIDE_SCENES = new Set<SixPicsSceneKey>([
+  "waves",
+  "tent",
+  "pine-trees",
+  "stars-sky",
+  "book",
+  "headphones",
+  "cafe-table",
+  "planet-ring",
+  "balloons",
+  "confetti",
+  "envelope",
+  "clapperboard",
+  "ticket",
+  "spotlight",
+  "red-carpet",
+  "sled",
+  "fireplace",
+  "sailboat",
+  "binoculars",
+  "seagull",
+  "piano-keys",
+  "stage",
+  "pizza-slice",
+  "rolling-pin",
+  "olive-branch",
+  "bicycle",
+  "camera",
+  "suitcase",
+  "airplane",
+  "castle",
+  "crown",
+  "dragon-wing",
+  "sword",
+  "treasure-key",
+  "watering-can",
+  "butterfly",
+  "wheelbarrow",
+]);
+
+/**
+ * Deterministically picks the 1st free open piece (`0..5`) for an image so `5` pieces
+ * cover the image at the start (`1/6` visible) and the revealed piece always shows part
+ * of the illustration.
+ */
+export function getInitialRevealedPiece(
+  clue: Pick<SixPicsClueImage, "scene" | "initialPiece" | "imageUrl">,
+  imageIndex: number,
+  puzzleSeed = "daily"
+): number {
+  if (
+    typeof clue.initialPiece === "number" &&
+    Number.isInteger(clue.initialPiece) &&
+    clue.initialPiece >= 0 &&
+    clue.initialPiece < SIX_PICS_PIECES_PER_IMAGE
+  ) {
+    return clue.initialPiece;
+  }
+  const pool = clue.imageUrl
+    ? [0, 1, 2, 3, 4, 5]
+    : WIDE_SCENES.has(clue.scene)
+    ? [0, 1, 2, 3, 4, 5]
+    : [1, 4];
+  const h = fnv1a32(`${puzzleSeed}:pic:${imageIndex}:${clue.scene}`);
+  return pool[h % pool.length]!;
+}
+
+/**
+ * Picks 1 random unrevealed jigsaw piece (`0..5`) to remove when clicking "Reveal Piece".
+ * Returns `null` if all 6 pieces are already revealed.
+ */
+export function pickNextRandomPiece(
+  revealedPieces: readonly number[],
+  randomFn: () => number = Math.random
+): number | null {
+  const revealedSet = new Set(revealedPieces);
+  const remaining: number[] = [];
+  for (let p = 0; p < SIX_PICS_PIECES_PER_IMAGE; p++) {
+    if (!revealedSet.has(p)) remaining.push(p);
+  }
+  if (remaining.length === 0) return null;
+  const idx = Math.min(
+    remaining.length - 1,
+    Math.max(0, Math.floor(randomFn() * remaining.length))
+  );
+  return remaining[idx]!;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization & Fuzzy Per-Image Levenshtein Matcher (Q30)
 // ---------------------------------------------------------------------------
 
 export function normalizeSixPicsText(raw: string): string {
@@ -141,6 +450,26 @@ export function normalizeSixPicsText(raw: string): string {
     .trim()
     .replace(/^(the|a|an)\s+/i, "")
     .trim();
+}
+
+/** Converts simple English plurals to singular stem for fair noun matching (`waves` <-> `wave`). */
+function singularizeSimple(phrase: string): string {
+  return phrase
+    .split(" ")
+    .map((w) => {
+      if (w.length <= 3) return w;
+      if (w.endsWith("ies") && w.length > 4) return `${w.slice(0, -3)}y`;
+      if (w.endsWith("ves") && w.length > 4) return `${w.slice(0, -3)}f`;
+      if (w.endsWith("oes") && w.length > 4) return w.slice(0, -2);
+      if (w.endsWith("ses") || w.endsWith("xes") || w.endsWith("ches") || w.endsWith("shes")) {
+        return w.slice(0, -2);
+      }
+      if (w.endsWith("s") && !w.endsWith("ss") && !w.endsWith("us") && !w.endsWith("is")) {
+        return w.slice(0, -1);
+      }
+      return w;
+    })
+    .join(" ");
 }
 
 /** Standard Wagner–Fischer edit distance. */
@@ -174,28 +503,31 @@ export interface SixPicsMatchResult {
   matchedCandidate?: string;
 }
 
-/**
- * Checks whether `guess` matches `themeAnswer` or any `acceptedAliases`.
- * - Normalizes case, whitespace, punctuation, and leading articles (`a/an/the`).
- * - Also compares space-collapsed compound forms (`"coffeeshop"` vs `"coffee shop"`).
- * - Grants 1-letter typo forgiveness (`levenshteinDistance <= 1`) for candidate answers
- *   with `>= 5` characters (Q30).
- */
-export function matchSixPicsGuess(
+function matchAgainstCandidateList(
   guess: string,
-  puzzle: Pick<SixPicsPuzzle, "themeAnswer" | "acceptedAliases">
+  rawCandidates: readonly string[]
 ): SixPicsMatchResult {
   const g = normalizeSixPicsText(guess);
   if (!g) return { matched: false, exact: false };
   const gCompact = g.replace(/\s+/g, "");
+  const gSing = singularizeSimple(g);
 
-  const candidates = [puzzle.themeAnswer, ...(puzzle.acceptedAliases ?? [])]
-    .map((c) => normalizeSixPicsText(c))
-    .filter((c) => c.length > 0);
+  const candidates = [
+    ...new Set(
+      rawCandidates
+        .map((c) => normalizeSixPicsText(c))
+        .filter((c) => c.length > 0)
+    ),
+  ];
 
   for (const cand of candidates) {
     const candCompact = cand.replace(/\s+/g, "");
-    if (g === cand || (candCompact.length >= 4 && gCompact === candCompact)) {
+    const candSing = singularizeSimple(cand);
+    if (
+      g === cand ||
+      (gSing.length >= 3 && gSing === candSing) ||
+      (candCompact.length >= 4 && gCompact === candCompact)
+    ) {
       return { matched: true, exact: true, matchedCandidate: cand };
     }
   }
@@ -215,44 +547,137 @@ export function matchSixPicsGuess(
   return { matched: false, exact: false };
 }
 
+/**
+ * Checks whether `guess` matches a specific picture's `caption` or `aliases`
+ * (plus built-in vector scene synonyms when `imageUrl` is not overriding the scene).
+ */
+export function matchSixPicsImageGuess(
+  guess: string,
+  image: Pick<SixPicsClueImage, "caption" | "aliases" | "scene" | "imageUrl">
+): SixPicsMatchResult {
+  const sceneSyns = image.imageUrl ? [] : SCENE_DEFAULT_ALIASES[image.scene] ?? [];
+  return matchAgainstCandidateList(guess, [
+    image.caption,
+    ...(image.aliases ?? []),
+    ...sceneSyns,
+  ]);
+}
+
+/**
+ * Legacy/general matcher checking `themeAnswer` + `acceptedAliases`.
+ */
+export function matchSixPicsGuess(
+  guess: string,
+  puzzle: Pick<SixPicsPuzzle, "themeAnswer" | "acceptedAliases">
+): SixPicsMatchResult {
+  return matchAgainstCandidateList(guess, [
+    puzzle.themeAnswer,
+    ...(puzzle.acceptedAliases ?? []),
+  ]);
+}
+
 // ---------------------------------------------------------------------------
-// Scoring & Share Formatting (Q29 & Q31)
+// 36-Point Scoring & Share Formatting (Q29, Q31 & Q32)
 // ---------------------------------------------------------------------------
 
 /**
- * Solved on Pic #1 = `6` (`6/6`), Pic #2 = `5` (`5/6`), ..., Pic #6 = `1` (`1/6`),
- * missed after all 6 attempts = `0` (`0/6`).
+ * Scores a single picture (`0..6` points):
+ * - `0` extra pieces removed (`1/6` visible) -> `6` pts
+ * - `1` extra piece removed (`2/6` visible)  -> `5` pts
+ * - `2` extra pieces removed (`3/6` visible) -> `4` pts
+ * - `3` extra pieces removed (`4/6` visible) -> `3` pts
+ * - `4` extra pieces removed (`5/6` visible) -> `2` pts
+ * - `5` extra pieces removed (`6/6` visible) -> `1` pt
+ * - Not answered correctly / Passed          -> `0` pts
  */
+export function scoreForSixPicsImage(
+  solved: boolean,
+  extraPiecesRemoved: number
+): number {
+  if (!solved) return 0;
+  const clamped = Math.max(0, Math.min(5, Math.floor(extraPiecesRemoved)));
+  return SIX_PICS_MAX_IMAGE_SCORE - clamped;
+}
+
+/** Sums total points across all 6 pictures (`0..36`). */
+export function totalScoreForSixPics(
+  outcomes: readonly Pick<SixPicsImageOutcome, "points">[]
+): number {
+  let sum = 0;
+  for (let i = 0; i < Math.min(SIX_PICS_COUNT, outcomes.length); i++) {
+    const pts = outcomes[i]?.points ?? 0;
+    sum += Math.max(0, Math.min(SIX_PICS_MAX_IMAGE_SCORE, pts));
+  }
+  return sum;
+}
+
+/** Legacy 1..6 single-solve scorer preserved for backward compatibility. */
 export function scoreForSixPics(solvedOnPicNumber: number | null): number {
   if (solvedOnPicNumber === null) return 0;
   if (solvedOnPicNumber < 1 || solvedOnPicNumber > SIX_PICS_COUNT) return 0;
   return SIX_PICS_COUNT - solvedOnPicNumber + 1;
 }
 
-export function buildSixPicsEmojiReceipt(attempts: readonly SixPicsAttempt[]): string {
+function isImageOutcome(
+  item: SixPicsImageOutcome | SixPicsAttempt | undefined
+): item is SixPicsImageOutcome {
+  return Boolean(item && typeof item === "object" && "points" in item);
+}
+
+/**
+ * Builds a 6-emoji receipt across the 6 pictures:
+ * - `🟩` = `5–6` pts (`0–1` extra pieces removed)
+ * - `🟨` = `3–4` pts (`2–3` extra pieces removed)
+ * - `🟧` = `1–2` pts (`4–5` extra pieces removed)
+ * - `⬜` = `0` pts (passed / missed)
+ */
+export function buildSixPicsEmojiReceipt(
+  items: readonly (SixPicsImageOutcome | SixPicsAttempt)[]
+): string {
   const tiles: string[] = [];
   for (let i = 0; i < SIX_PICS_COUNT; i++) {
-    const a = attempts[i];
-    if (!a) tiles.push("⬜");
-    else if (a.kind === "correct") tiles.push("🟩");
-    else if (a.kind === "skip") tiles.push("🟨");
-    else tiles.push("🟥");
+    const entry = items[i];
+    if (!entry) {
+      tiles.push("⬜");
+    } else if (isImageOutcome(entry)) {
+      if (!entry.solved || entry.points <= 0) tiles.push("⬜");
+      else if (entry.points >= 5) tiles.push("🟩");
+      else if (entry.points >= 3) tiles.push("🟨");
+      else tiles.push("🟧");
+    } else if (entry.kind === "correct") {
+      tiles.push("🟩");
+    } else if (entry.kind === "skip") {
+      tiles.push("🟨");
+    } else {
+      tiles.push("🟥");
+    }
   }
   return tiles.join("");
 }
 
 export function buildSixPicsShareText(options: {
   puzzleNumber: number;
-  attempts: readonly SixPicsAttempt[];
+  themeAnswer?: string;
+  outcomes?: readonly SixPicsImageOutcome[];
+  attempts?: readonly SixPicsAttempt[];
   custom?: boolean;
   creatorHandle?: string;
 }): string {
-  const winIdx = options.attempts.findIndex((a) => a.kind === "correct");
-  const score = scoreForSixPics(winIdx >= 0 ? winIdx + 1 : null);
+  const themeSuffix = options.themeAnswer ? ` — ${options.themeAnswer}` : "";
   const header = options.custom
-    ? `6 Pics${options.creatorHandle ? ` by ${options.creatorHandle}` : " (friend puzzle)"}`
-    : `6 Pics #${options.puzzleNumber}`;
-  return `${header}\n${score}/${SIX_PICS_COUNT}\n${buildSixPicsEmojiReceipt(options.attempts)}`;
+    ? `6 Pics${options.creatorHandle ? ` by ${options.creatorHandle}` : " (friend puzzle)"}${themeSuffix}`
+    : `6 Pics #${options.puzzleNumber}${themeSuffix}`;
+
+  if (options.outcomes) {
+    const total = totalScoreForSixPics(options.outcomes);
+    const named = options.outcomes.filter((o) => o.solved && o.points > 0).length;
+    return `${header}\n${total}/${SIX_PICS_MAX_SCORE} pts · ${named}/${SIX_PICS_COUNT} named\n${buildSixPicsEmojiReceipt(options.outcomes)}`;
+  }
+
+  const attempts = options.attempts ?? [];
+  const winIdx = attempts.findIndex((a) => a.kind === "correct");
+  const score = scoreForSixPics(winIdx >= 0 ? winIdx + 1 : null);
+  return `${header}\n${score}/${SIX_PICS_COUNT}\n${buildSixPicsEmojiReceipt(attempts)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,29 +710,50 @@ export function validateSixPicsPuzzle(payload: unknown): SixPicsValidation {
   if (theme.length < 2 || theme.length > 48) {
     errors.push("themeAnswer must be 2–48 characters.");
   }
-  if (!Array.isArray(p.acceptedAliases) || p.acceptedAliases.length > 24 ||
-      !p.acceptedAliases.every((a) => typeof a === "string" && a.trim().length <= 48)) {
+  if (
+    p.acceptedAliases !== undefined &&
+    (!Array.isArray(p.acceptedAliases) ||
+      p.acceptedAliases.length > 24 ||
+      !p.acceptedAliases.every((a) => typeof a === "string" && a.trim().length <= 48))
+  ) {
     errors.push("acceptedAliases must be an array of up to 24 strings.");
   }
   if (!Array.isArray(p.images) || p.images.length !== SIX_PICS_COUNT) {
-    errors.push(`images must contain exactly ${SIX_PICS_COUNT} clue cards.`);
+    errors.push(`images must contain exactly ${SIX_PICS_COUNT} picture cards.`);
     return { valid: false, errors };
   }
   p.images.forEach((raw, idx) => {
     const n = idx + 1;
     if (!raw || typeof raw !== "object") {
-      errors.push(`Image ${n} must be an object.`);
+      errors.push(`Picture ${n} must be an object.`);
       return;
     }
     const img = raw as Record<string, unknown>;
-    if (typeof img.caption !== "string" || img.caption.trim().length < 1 || img.caption.length > 60) {
-      errors.push(`Image ${n}: caption must be 1–60 characters.`);
+    if (
+      typeof img.caption !== "string" ||
+      img.caption.trim().length < 1 ||
+      img.caption.length > 60
+    ) {
+      errors.push(`Picture ${n}: answer name must be 1–60 characters.`);
     }
-    if (typeof img.scene !== "string" || !(SIX_PICS_SCENES as readonly string[]).includes(img.scene)) {
-      errors.push(`Image ${n}: scene must be a valid scene preset.`);
+    if (
+      img.aliases !== undefined &&
+      (!Array.isArray(img.aliases) ||
+        img.aliases.length > 24 ||
+        !img.aliases.every((a) => typeof a === "string" && a.trim().length <= 48))
+    ) {
+      errors.push(`Picture ${n}: aliases must be an array of up to 24 strings.`);
+    }
+    if (
+      typeof img.scene !== "string" ||
+      !(SIX_PICS_SCENES as readonly string[]).includes(img.scene)
+    ) {
+      errors.push(`Picture ${n}: scene must be a valid scene preset.`);
     }
     if (!isValidImageUrl(img.imageUrl)) {
-      errors.push(`Image ${n}: imageUrl must be a valid http(s), data:image, or relative path.`);
+      errors.push(
+        `Picture ${n}: imageUrl must be a valid http(s), data:image, or relative path.`
+      );
     }
   });
   if (typeof p.title !== "string" || p.title.trim().length === 0) {
@@ -322,6 +768,7 @@ export function isSixPicsPuzzle(payload: unknown): payload is SixPicsPuzzle {
 
 export interface SixPicsDraftRow {
   caption: string;
+  aliasesCsv?: string;
   scene: SixPicsSceneKey;
   imageUrl: string;
 }
@@ -330,7 +777,7 @@ export function draftToSixPicsPuzzle(options: {
   id: string;
   title: string;
   themeAnswer: string;
-  aliasesCsv: string;
+  aliasesCsv?: string;
   rows: SixPicsDraftRow[];
   creatorName: string;
 }): { puzzle: SixPicsPuzzle | null; errors: string[] } {
@@ -338,23 +785,36 @@ export function draftToSixPicsPuzzle(options: {
   const themeNorm = normalizeSixPicsText(theme);
   const aliases = [
     ...new Set(
-      options.aliasesCsv
+      (options.aliasesCsv ?? "")
         .split(",")
         .map((a) => a.trim())
         .filter((a) => a.length > 0 && normalizeSixPicsText(a) !== themeNorm)
     ),
   ].slice(0, 20);
 
-  const images: SixPicsClueImage[] = options.rows.map((r) => ({
-    caption: r.caption.trim(),
-    scene: r.scene,
-    ...(r.imageUrl.trim() ? { imageUrl: r.imageUrl.trim() } : {}),
-  }));
+  const images: SixPicsClueImage[] = options.rows.map((r) => {
+    const cap = r.caption.trim();
+    const capNorm = normalizeSixPicsText(cap);
+    const rowAliases = [
+      ...new Set(
+        (r.aliasesCsv ?? "")
+          .split(",")
+          .map((a) => a.trim())
+          .filter((a) => a.length > 0 && normalizeSixPicsText(a) !== capNorm)
+      ),
+    ].slice(0, 20);
+    return {
+      caption: cap,
+      ...(rowAliases.length > 0 ? { aliases: rowAliases } : {}),
+      scene: r.scene,
+      ...(r.imageUrl.trim() ? { imageUrl: r.imageUrl.trim() } : {}),
+    };
+  });
 
   const puzzle: SixPicsPuzzle = {
     id: options.id,
     puzzleNumber: 0,
-    title: options.title.trim() || "Six Visual Clues",
+    title: options.title.trim() || "Six Hidden Pictures",
     themeAnswer: theme,
     acceptedAliases: aliases,
     images,
@@ -571,7 +1031,8 @@ function sceneForegroundSvg(scene: SixPicsSceneKey, accent: string): string {
 
 /**
  * Generates a deterministic, label-free SVG illustration string (`viewBox="0 0 200 170"`).
- * Zero text is embedded so clues remain 100% label-free during gameplay (Q28).
+ * Zero text is embedded so pictures remain 100% label-free during gameplay (Q28).
+ * Foreground subject is scaled (`1.24x`) so jigsaw cutouts reveal rich visual lines.
  */
 export function renderSixPicsSceneSvg(
   clue: Pick<SixPicsClueImage, "scene" | "palette">,
@@ -588,7 +1049,10 @@ export function renderSixPicsSceneSvg(
     `<stop offset="0%" stop-color="${bgTop}"/><stop offset="100%" stop-color="${bgBottom}"/>` +
     `</linearGradient></defs>` +
     `<rect x="0" y="0" width="200" height="170" rx="16" fill="url(#${gradId})"/>` +
+    `<circle cx="100" cy="85" r="72" fill="#ffffff" fill-opacity="0.32"/>` +
+    `<g transform="translate(100 85) scale(1.24) translate(-100 -85)">` +
     sceneForegroundSvg(clue.scene, accent) +
+    `</g>` +
     `</svg>`
   );
 }
