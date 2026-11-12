@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -19,6 +25,7 @@ import {
   User,
   Volume2,
   Wand2,
+  ZoomIn,
 } from "lucide-react";
 import {
   decodeShareable21Board,
@@ -69,6 +76,15 @@ import {
   type ModerationMode,
 } from "@/lib/moderation";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_ZOOM_COLUMNS,
+  getZoomGridClasses,
+  getZoomTextClasses,
+  getZoomTileSizeClasses,
+  readZoomColumns,
+  subscribeZoomColumns,
+  writeZoomColumns,
+} from "@/lib/zoom-layout";
 
 interface SpeechRecognitionEventLike {
   resultIndex: number;
@@ -236,6 +252,11 @@ function TwentyOneThingsBoardView({
 }) {
   const { toast } = useToast();
   const { profile, isAuthenticated, isLoading: authLoading, openAccountModal } = useAuth();
+  const zoomCols = useSyncExternalStore(
+    subscribeZoomColumns,
+    readZoomColumns,
+    () => DEFAULT_ZOOM_COLUMNS
+  );
 
   const [mode, setMode] = useState<"play" | "create">(initialMode);
   const [pendingCreateAfterAuth, setPendingCreateAfterAuth] = useState(false);
@@ -1171,6 +1192,35 @@ function TwentyOneThingsBoardView({
       dateKey={activeDateKey}
       author={board.creatorName}
       headerRightSlot={
+        <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2">
+        {effectiveMode === "play" && (
+          <div
+            role="group"
+            aria-label="Grid zoom: 3 columns or 2 columns"
+            data-testid="zoom-cols-toggle"
+            className="inline-flex items-center rounded-full border-2 border-black bg-white p-0.5 shrink-0"
+          >
+            {([3, 2] as const).map((cols) => (
+              <button
+                key={cols}
+                type="button"
+                aria-pressed={zoomCols === cols}
+                aria-label={`${cols} columns${cols === 2 ? " (zoomed in)" : ""}`}
+                title={cols === 2 ? "Zoom in: 2 larger columns" : "Compact: 3 columns"}
+                onClick={() => writeZoomColumns(cols)}
+                className={cn(
+                  "rounded-full px-1.5 min-[375px]:px-2 sm:px-2.5 h-6 sm:h-7 text-[10px] min-[375px]:text-[11px] sm:text-xs font-black whitespace-nowrap transition-colors",
+                  zoomCols === cols
+                    ? "bg-black text-white"
+                    : "text-gray-700 hover:text-black"
+                )}
+              >
+                {cols === 2 && <ZoomIn className="inline h-3 w-3 mr-0.5 -mt-0.5" />}
+                {cols} cols
+              </button>
+            ))}
+          </div>
+        )}
         <Button
           variant={effectiveMode === "create" ? "default" : "outline"}
           size="sm"
@@ -1209,6 +1259,7 @@ function TwentyOneThingsBoardView({
           <Mic className="h-3 w-3 min-[375px]:h-3.5 min-[375px]:w-3.5 mr-0.5 min-[375px]:mr-1" />
           {effectiveMode === "play" ? "Create Your Own" : "Back to Board"}
         </Button>
+        </div>
       }
     >
       {effectiveMode === "create" ? (
@@ -1709,9 +1760,14 @@ function TwentyOneThingsBoardView({
           </div>
 
           <div
-            className="grid grid-cols-3 gap-1 min-[375px]:gap-1.5 sm:gap-2.5 select-none"
+            className={getZoomGridClasses(zoomCols)}
             role="grid"
-            aria-label="21 Things 3 by 7 Grid"
+            aria-label={
+              zoomCols === 2
+                ? "21 Things zoomed 2 column grid"
+                : "21 Things 3 by 7 Grid"
+            }
+            data-zoom-cols={zoomCols}
           >
             {board.items.slice(0, 21).map((item, idx) => {
               const in6 = pick6.includes(idx);
@@ -1787,7 +1843,8 @@ function TwentyOneThingsBoardView({
                   }
                   onClick={() => handleTileTap(idx)}
                   className={cn(
-                    "relative min-h-[45px] sm:min-h-[64px] rounded-xl border-2 px-1 py-0.5 min-[375px]:px-1.5 min-[375px]:py-1 sm:px-3 sm:py-2 text-center flex flex-col items-center justify-center transition-all duration-200",
+                    "relative text-center flex flex-col items-center justify-center transition-all duration-200",
+                    getZoomTileSizeClasses(zoomCols),
                     tileClasses
                   )}
                 >
@@ -1796,7 +1853,7 @@ function TwentyOneThingsBoardView({
                       {badgeLabel}
                     </span>
                   )}
-                  <span className="text-[9.5px] leading-[1.1] min-[375px]:text-[10.5px] min-[375px]:leading-[1.15] sm:text-sm sm:leading-tight font-bold sm:line-clamp-2 break-words">
+                  <span className={getZoomTextClasses(zoomCols)}>
                     {item}
                   </span>
                 </button>
