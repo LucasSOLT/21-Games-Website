@@ -11,6 +11,7 @@ const SUITES = [
   ["--test", "src/lib/__tests__/win-screen-share.test.ts"],
   ["scripts/test-cp01-zoom.ts"],
   ["scripts/test-cp02-multigame.ts"],
+  ["scripts/test-cp03-9rhymes.ts"],
 ];
 
 let failed = false;

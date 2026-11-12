@@ -25,6 +25,12 @@ import {
   type SeventeenSyllablesPuzzle,
 } from "@/data/puzzles/17-syllables";
 import {
+  generateSeededNineRhymesPuzzle,
+  isNineRhymesPuzzle,
+  NINE_RHYMES_PUZZLES,
+  type NineRhymesPuzzle,
+} from "@/data/puzzles/9-rhymes";
+import {
   getPuzzleNumberForDate,
   getRotationIndexForDate,
 } from "@/lib/date-keys";
@@ -164,6 +170,24 @@ const seventeenSource: PuzzleSource<SeventeenSyllablesPuzzle> = {
   }),
 };
 
+const nineRhymesSource: PuzzleSource<NineRhymesPuzzle> = {
+  slug: "9-rhymes",
+  validate: isNineRhymesPuzzle,
+  fromBank(dateKey) {
+    const base =
+      NINE_RHYMES_PUZZLES[getRotationIndexForDate(dateKey, NINE_RHYMES_PUZZLES.length)]!;
+    return { ...base, puzzleNumber: getPuzzleNumberForDate(dateKey), customDate: dateKey };
+  },
+  generateSeeded: (dateKey) =>
+    generateSeededNineRhymesPuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
+  summarize: (p) => ({
+    title: p.title,
+    author: p.author,
+    editor: p.editor,
+    puzzleNumber: p.puzzleNumber,
+  }),
+};
+
 // ---------------------------------------------------------------------------
 // Registry (new countdown games register below as they ship)
 // ---------------------------------------------------------------------------
@@ -171,6 +195,7 @@ const seventeenSource: PuzzleSource<SeventeenSyllablesPuzzle> = {
 export const PUZZLE_SOURCES: Partial<Record<AllGameSlug, PuzzleSource<never>>> = {
   "21-things": twentyOneSource as unknown as PuzzleSource<never>,
   "17-syllables": seventeenSource as unknown as PuzzleSource<never>,
+  "9-rhymes": nineRhymesSource as unknown as PuzzleSource<never>,
   "connect-5": connect5Source as unknown as PuzzleSource<never>,
 };
 

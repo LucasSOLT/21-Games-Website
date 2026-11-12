@@ -5,7 +5,11 @@ import type {
 } from "@/data/puzzles/21-things";
 import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
-import type { AllGameSlug, PlayableGameSlug } from "@/lib/games-config";
+import {
+  GAME_PROGRESS_PREFIX,
+  type AllGameSlug,
+  type PlayableGameSlug,
+} from "@/lib/games-config";
 import { getPuzzleSource } from "@/lib/puzzle-sources";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -1945,4 +1949,62 @@ export async function saveAdminOverrideForGame(
     rawError,
     diagnosticReport,
   };
+}
+
+// ============================================================================
+// Generic per-date progress + scored-completion helpers (9 Rhymes, 6 Pics, …)
+// ============================================================================
+
+function progressKey(gameSlug: AllGameSlug, dateKey: string): string {
+  return `${GAME_PROGRESS_PREFIX[gameSlug]}${dateKey}`;
+}
+
+export function getGameProgress<T extends { puzzleId?: string }>(
+  gameSlug: AllGameSlug,
+  dateKey: string,
+  puzzleId?: string
+): T | null {
+  const saved = safeReadJson<T | null>(progressKey(gameSlug, dateKey), null);
+  if (!saved || typeof saved !== "object") return null;
+  if (puzzleId !== undefined && saved.puzzleId !== puzzleId) return null;
+  return saved;
+}
+
+export function saveGameProgress<T extends object>(
+  gameSlug: AllGameSlug,
+  dateKey: string,
+  progress: T
+): void {
+  safeWriteJson(progressKey(gameSlug, dateKey), progress);
+}
+
+export function clearGameProgress(gameSlug: AllGameSlug, dateKey: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(progressKey(gameSlug, dateKey));
+}
+
+/**
+ * Records a finished score-based puzzle (any score counts as a completed day for streaks).
+ * Also maintains `distribution`: `score_<x.x>` buckets, `score_total_x10` (sum of score*10),
+ * `flawless` (perfect scores) so Q4 stats (average score, flawless count) can be derived.
+ */
+export function recordScoredCompletion(
+  gameSlug: AllGameSlug,
+  dateKey: string,
+  score: number,
+  maxScore: number,
+  elapsedSeconds: number = 0
+): GameStats {
+  const before = getGameStats(gameSlug as PlayableGameSlug);
+  if (before.completedDates.includes(dateKey)) return before;
+  const stats = recordGameWin(gameSlug as PlayableGameSlug, dateKey, elapsedSeconds);
+  const bucket = `score_${score.toFixed(1)}`;
+  stats.distribution[bucket] = (stats.distribution[bucket] ?? 0) + 1;
+  stats.distribution.score_total_x10 =
+    (stats.distribution.score_total_x10 ?? 0) + Math.round(score * 10);
+  if (score >= maxScore) {
+    stats.distribution.flawless = (stats.distribution.flawless ?? 0) + 1;
+  }
+  setGameStats(gameSlug as PlayableGameSlug, stats);
+  return stats;
 }

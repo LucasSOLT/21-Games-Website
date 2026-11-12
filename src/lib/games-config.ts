@@ -120,7 +120,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "rhymes",
     slug: "9-rhymes",
     showCreate: true,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "Daily rhyming text chat",
     description:
       "Text with Nine to solve 9 daily rhyming clues in an iMessage-style chat.",

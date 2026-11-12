@@ -62,7 +62,12 @@ import {
   saveAdmin17SyllablesOverride,
   saveAdmin21ThingsOverride,
   saveAdminConnect5Override,
+  saveAdminOverrideForGame,
 } from "@/lib/game-storage";
+import type { AllGameSlug } from "@/lib/games-config";
+import { collectPayloadStrings } from "@/lib/custom-puzzles";
+import type { GenericPublishRequest } from "@/components/admin/generic-publish";
+import { NineRhymesStudioTab } from "@/components/admin/nine-rhymes-studio-tab";
 import {
   classifyDiagnosticError,
   type DiagnosticReport,
@@ -91,6 +96,7 @@ import {
   check17SyllablesPuzzleModeration,
   checkConnect5PuzzleModeration,
   check21ThingsBoardModeration,
+  moderateFields,
 } from "@/lib/moderation";
 import { cn } from "@/lib/utils";
 
@@ -99,7 +105,7 @@ const subscribeNoop = () => () => {};
 
 interface PendingPublishState {
   isOpen: boolean;
-  gameSlug: "connect-5" | "21-things" | "17-syllables";
+  gameSlug: AllGameSlug;
   gameTitle: string;
   targetDate: string;
   isToday: boolean;
@@ -156,7 +162,7 @@ export default function AdminPage() {
     (
       error: unknown,
       context: {
-        gameSlug: "connect-5" | "21-things" | "17-syllables";
+        gameSlug: AllGameSlug;
         targetDate: string;
         action: "save" | "fetch" | "sync" | "validate";
         customMessage?: string;
@@ -905,6 +911,116 @@ export default function AdminPage() {
     });
   };
 
+  /**
+   * Generic confirm-then-publish flow shared by the newer studio tabs (9 Rhymes, 6 Pics,
+   * Eightfold Echo, Four Score, Move Two, 1 Win): permission check → public moderation →
+   * confirmation modal → `saveAdminOverrideForGame` (+ diagnostics / retry).
+   */
+  const requestGenericPublish = (req: GenericPublishRequest) => {
+    if (!editPerm.canEdit) {
+      toast({
+        title: "Permission Denied",
+        description: editPerm.reason || "You cannot edit today's live or past puzzles.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const mod = moderateFields(
+      collectPayloadStrings(req.payload, "puzzle"),
+      "public"
+    );
+    if (!mod.allowed) {
+      toast({
+        title: "Content Moderation Error",
+        description: mod.reason,
+        variant: "destructive",
+      });
+      return;
+    }
+    const dateStatus: "Today" | "Future" | "Past" = editPerm.isToday
+      ? "Today"
+      : editPerm.isFuture
+      ? "Future"
+      : "Past";
+    const date = targetDate;
+    const authCtx = { userEmail: profile?.email ?? null, userRole: profile?.role ?? null };
+
+    const finish = (playImmediately: boolean) => {
+      setPendingPublish(null);
+      toast({
+        title: `${req.gameTitle} Saved Globally for ${date}!`,
+        description: `Persisted to Supabase: "${req.meta.title}" is now live across all sessions.`,
+      });
+      if (playImmediately) router.push(`/games/${req.gameSlug}?date=${date}`);
+    };
+
+    setPendingPublish({
+      isOpen: true,
+      gameSlug: req.gameSlug,
+      gameTitle: req.gameTitle,
+      targetDate: date,
+      isToday: editPerm.isToday,
+      dateStatus,
+      playImmediately: Boolean(req.playImmediately),
+      summary: {
+        title: req.meta.title,
+        creatorOrAuthor: req.meta.author || "SOL Theory",
+        preview: req.preview,
+        details: req.details,
+      },
+      onConfirm: async () => {
+        setIsPublishing(true);
+        try {
+          const res = await saveAdminOverrideForGame(
+            req.gameSlug,
+            date,
+            req.payload,
+            req.meta,
+            authCtx
+          );
+          if (res.remotePersisted) {
+            finish(Boolean(req.playImmediately));
+            return;
+          }
+          setPendingPublish(null);
+          const doRetry = async () => {
+            setIsRetryingSync(true);
+            try {
+              const retry = await saveAdminOverrideForGame(
+                req.gameSlug,
+                date,
+                req.payload,
+                req.meta,
+                authCtx
+              );
+              if (retry.remotePersisted) {
+                setIsDiagnosticOpen(false);
+                setDiagnosticReport(null);
+                setRetrySyncFn(null);
+                finish(Boolean(req.playImmediately));
+              } else {
+                openDiagnosticError(
+                  retry.rawError || retry.error || `Retry failed to persist ${req.gameTitle} to Supabase.`,
+                  { gameSlug: req.gameSlug, targetDate: date, action: "save" },
+                  doRetry
+                );
+              }
+            } finally {
+              setIsRetryingSync(false);
+            }
+          };
+          openDiagnosticError(
+            res.rawError || res.error || `Failed to persist ${req.gameTitle} puzzle to Supabase cloud database.`,
+            { gameSlug: req.gameSlug, targetDate: date, action: "save" },
+            doRetry
+          );
+        } finally {
+          setIsPublishing(false);
+        }
+      },
+    });
+  };
+
   const handleUpdateRole = async (targetUser: UserProfile, newRole: UserRole) => {
     if (!profile) return;
     if (isInitialGameMaster(targetUser.email)) {
@@ -1127,6 +1243,9 @@ export default function AdminPage() {
             </TabsTrigger>
             <TabsTrigger value="17-syllables">
               🎋 17 Syllables Creator
+            </TabsTrigger>
+            <TabsTrigger value="9-rhymes">
+              💬 9 Rhymes Creator
             </TabsTrigger>
             <TabsTrigger value="bank">
               📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
@@ -1807,6 +1926,15 @@ export default function AdminPage() {
           {/* ================================================================
            * TAB 3: PRE-SEEDED 66-DAY PUZZLE BANK
            * ================================================================ */}
+          <TabsContent value="9-rhymes">
+            <NineRhymesStudioTab
+              targetDate={targetDate}
+              canEdit={editPerm.canEdit}
+              editReason={editPerm.reason}
+              onPublish={requestGenericPublish}
+            />
+          </TabsContent>
+
           <TabsContent value="bank">
             <div className="rounded-2xl border-2 border-black bg-white p-5 space-y-4">
               <div className="flex items-center justify-between">
