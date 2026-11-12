@@ -48,13 +48,14 @@
 - **Sign-in rules**: email + password required (min 6 chars on sign-up/reset, non-empty and non-whitespace-only on sign-in, passed verbatim without silently `.trim()`-mutating valid leading/trailing spaces, and zero auto-generated or default fallback passwords). **Signup** requires email confirmation: with no session returned the UI shows "check your inbox" and activates nothing. **Magic link** only *sends* the OTP email; it never creates a local session — the session exists only after the user follows the emailed link and Supabase returns a verified JWT. No local/offline fallback accounts; passwords are never stored (legacy plaintext `password` fields are scrubbed on load).
 - **Trust model (client)**: browser storage is attacker-editable and is never trusted. A session counts only if GoTrue confirms it (`auth.getUser(jwt)`), the profile/ban lookup succeeded (**any lookup error fails closed** — no verified profile, never "not banned"), and the role comes from the server-verified profile (storage role is clamped to `user` unless it is a root-GM email or matches the last verified profile). Banned accounts are signed out immediately and auth storage is cleared. Game-Master UI (`/admin` studio, creator tools) additionally requires the verified JWT email to be on the root roster. UI gating is cosmetic (static export) — **Postgres RLS is the real security boundary**.
 - **Custom creator gates**: `17 Syllables` and `21 Things` custom creators (`?mode=create`) require a signed-in, non-banned account; every user-authored field (incl. theme/creator name) passes Tier-1 moderation.
-- **Database (Supabase `trwyrfhicbnfhlbiztau`)**: RLS on every table; `anon` has SELECT only on `daily_puzzles`, `twenty_one_boards`, `twenty_one_responses`, `twenty_one_journeys` (+ bounded INSERT on responses/journeys) and **no access at all to `user_profiles`** (no email enumeration). `authenticated` users read/update only their own profile, and **column-level grants** limit what they can write to `display_name, handle, avatar_color, connect5_stats, twenty_one_stats, recent_picks, created_board_ids, updated_at` (INSERT additionally `id, email`); `role`, `is_banned`, `banned_*`, `email`, `id`, `created_at` are not API-writable. The `enforce_user_profile_security()` trigger is the second layer: it classifies callers from `auth.role()`, the `request.jwt.claims` JSON GUC, the legacy GUC, `auth.uid()`, and `session_user` — **never `current_user`** (always the owner inside `SECURITY DEFINER`) — and only `service_role` or a JWT-less non-API session (migrations / SQL editor / GoTrue) bypasses it, raising `42501` on any unauthorized `INSERT` or `UPDATE`.
+- **Database (Supabase `trwyrfhicbnfhlbiztau`, migrations `20261111000001`, `20261111000002`, `20261112000001`, `20261112000002`)**: RLS on every table (`daily_puzzles`, `user_profiles`, `twenty_one_boards`, `twenty_one_responses`, `twenty_one_journeys`, `custom_puzzles`, `one_win_submissions`); `anon` has SELECT only on public puzzle/community tables (+ bounded moderated INSERT on `twenty_one_responses`, `twenty_one_journeys`, and `one_win_submissions`) and **no access at all to `user_profiles`** (no email enumeration). `authenticated` users read/update only their own profile, and **column-level grants** limit what they can write to `display_name, handle, avatar_color, connect5_stats, twenty_one_stats, all_game_stats, recent_picks, created_board_ids, updated_at` (INSERT additionally `id, email`); `role`, `is_banned`, `banned_*`, `email`, `id`, `created_at` are not API-writable. The `enforce_user_profile_security()` trigger is the second layer: it classifies callers from `auth.role()`, the `request.jwt.claims` JSON GUC, the legacy GUC, `auth.uid()`, and `session_user` — **never `current_user`** (always the owner inside `SECURITY DEFINER`) — and only `service_role` or a JWT-less non-API session (migrations / SQL editor / GoTrue) bypasses it, raising `42501` on any unauthorized `INSERT` or `UPDATE`.
 - **New-table rule**: any new table must enable RLS and define explicit grants + policies in the *same* migration — Supabase's default privileges (plus migration `20261111000001`'s `alter default privileges`) hand `anon` SELECT and `authenticated` SELECT/INSERT/UPDATE on every new `public` table, so a table without RLS would be wide open.
-- **Verification (must stay green)**: `scripts/test-step2-5-auth-lockdown.ts`, `scripts/verify-auth-security-lockdown.ts`, and `scripts/test-step2-5-escalation.ts` (real Postgres + real PostgREST + signed `authenticated` JWTs; reproduces the old self-promotion bug and proves both column-grant and trigger layers independently).
+- **Universal Completion Share Invariant**: Every completion screen across all 9 countdown games renders two distinct actions: **Share** (`nativeShareResultsOnly` — calls `navigator.share({ title, text: fullTextWithUrl })` with no separate `url` property so iOS/macOS Messages retains emojis + score + link, and never writes to clipboard) and **Copy results** (`copyResultsOnly` — writes to clipboard only with `"Copied!"` feedback for `2000ms`, and never invokes `navigator.share`).
+- **Verification (must stay green)**: `scripts/test-step2-5-auth-lockdown.ts`, `scripts/verify-auth-security-lockdown.ts`, `scripts/test-step2-5-escalation.ts`, `npm test` (`CP1–CP10`), and `npm run generate-batch -- --dry-run`.
 
 ---
 
-## 1. Platform Vision & The `21 → 1` Countdown Lineup (Part A: Q1–Q4)
+## 1. Platform Vision & The `21 → 1` Countdown Lineup (Part A: Q1–Q4 — ALL 9 LIVE)
 
 ### Q1. Homepage 9-Card Countdown Grid (`21 → 17 → 9 → 8 → 6 → 5 → 4 → 2 → 1`)
 - Remove *The 11th Hour* from the active 9-card grid and replace it with **Four Score (`#4`)**.
@@ -84,13 +85,13 @@
 - Requires authentication to publish; generates compact `?b=<short_id>` links (`< 75` chars) stored in Supabase `custom_puzzles` / `twenty_one_boards`, invokes native `navigator.share` + clipboard copy with `@handle` attribution, applies Tier 2 moderation (allows casual swearing, blocks Tier 1 slurs), and routes directly to the custom game without ever redirecting to today's daily game.
 - Disabled (`showCreate: false`) on **4 games**: `Eightfold Echo`, `Four Score`, `Move Two`, and `1 Win`.
 
-### Q4. Unified Daily Score & Profile Viewer Stats
-- Expand `GameStats` in `src/lib/game-storage.ts`, `user_profiles` in Supabase, and the NYT-style `ProfileViewerModal` + `/account` page so every one of the 9 games has its own dedicated stats tab/row:
-  - **21 Things**: Played, Current/Max Streak, Recent `#1` Gratitude Picks log.
+### Q4. Unified Daily Score & Profile Viewer Stats (`UnifiedNineGameStats`)
+- Expand `GameStats` in `src/lib/game-storage.ts`, `user_profiles.all_game_stats` in Supabase, and the NYT-style `ProfileViewerModal` + `/account` page (`src/components/account/unified-nine-game-stats.tsx`) so every one of the 9 games has its own dedicated stats card in strict `21 → 1` countdown order:
+  - **21 Things**: Played, Current/Max Streak, `#1` Picks Logged, Boards Created, Recent `#1` Gratitude Picks log, Created Boards list.
   - **17 Syllables**: Played, Win %, Current/Max Streak, Average Star Rating (`⭐⭐⭐`).
   - **9 Rhymes**: Played, Current/Max Streak, Average Score (`x / 9`), Flawless `9/9` count.
   - **Eightfold Echo**: Played, Win %, Current/Max Streak, Best Time (`MM:SS`), Zero-Mistake solves.
-  - **6 Pics**: Played, Win %, Current/Max Streak, Average Score (`x / 6`), Guess Distribution (`1–6`).
+  - **6 Pics**: Played, Win %, Current/Max Streak, Average Score (`x / 6`), visual `1–6` Guess Distribution bars.
   - **Connect 5**: Played, Win %, Current/Max Streak, Best Time (`MM:SS`), Average Time.
   - **Four Score**: Played, Win %, Current/Max Streak, Total `80` Equations Solved.
   - **Move Two**: Played, Win %, Current/Max Streak, Best Moves vs. Par, `⭐⭐⭐` Par count.
@@ -100,11 +101,12 @@
 
 ## 2. Game-by-Game Finalized Specifications (Parts B–H: Q5–Q48)
 
-### Game #21 — `21 Things` (LIVE — Enhanced with Splash, Moderation & Error Boundary)
+### Game #21 — `21 Things` (LIVE — Enhanced with 3-Col ↔ 2-Col Zoom, Splash, Moderation & Error Boundary)
 - **Route**: `/games/21-things` | **Archive**: `/games/21-things/archive`
 - **Core Loop**: Single-screen `3×7` grid narrowing funnel (`21 → 6 [Yellow] → 3 [Purple] → 1 [Green]`), voice/text reflection on the `#1` item, real community journey feed (`twenty_one_responses`), and Creator Mode (`?b=21t-xxxxxxxx`).
 - **New Enhancements**:
   - Wrap in `<GameSplashScreen>` and `<GameErrorBoundary>`.
+  - **Accessibility Zoom Layout Toggle (`R6`)**: Direct `3 Col` ↔ `2 Col` toggle pill in the top header bar persisted in `localStorage` (`solgames_21t_grid_cols`), enlarging tiles into a square-proportioned 2-column layout with crisp legible typography for mobile and visually impaired players.
   - Enforce Tier 1 + Tier 2 moderation on public daily reflections (strictly clean) vs. private custom boards (Tier 1 slurs blocked, casual swearing allowed).
 
 ### Game #17 — `17 Syllables` (Daily 5-7-5 Haiku Reconstruction Puzzle) — Q5 to Q11

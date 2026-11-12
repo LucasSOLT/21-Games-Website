@@ -10,12 +10,10 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
-  Flame,
   KeyRound,
   Lock,
   LogOut,
   Mail,
-  Play,
   Plus,
   RefreshCw,
   Smartphone,
@@ -34,6 +32,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/components/account/auth-provider";
+import { UnifiedNineGameStats } from "@/components/account/unified-nine-game-stats";
+import { ALL_GAME_SLUGS } from "@/lib/games-config";
 import {
   AVATAR_COLOR_OPTIONS,
   formatMemberSince,
@@ -45,8 +45,9 @@ import {
 } from "@/lib/user-auth";
 import {
   fetchUserCreated21BoardById,
-  getGameStats,
+  getAllLocalGameStats,
   getUserCreated21Boards,
+  type AllGameStatsMap,
   type GameStats,
 } from "@/lib/game-storage";
 import {
@@ -179,18 +180,14 @@ export function GuestAuthPanel({
   const [signInInvalidMode, setSignInInvalidMode] = useState(false);
   const [signUpDuplicateMode, setSignUpDuplicateMode] = useState(false);
 
-  // Live on-device guest stats
-  const [guestC5Stats, setGuestC5Stats] = useState<GameStats>(() =>
-    getGameStats("connect-5")
-  );
-  const [guest21Stats, setGuest21Stats] = useState<GameStats>(() =>
-    getGameStats("21-things")
+  // Live on-device guest stats across all 9 countdown games (21 -> 1)
+  const [guestAllStats, setGuestAllStats] = useState<AllGameStatsMap>(() =>
+    getAllLocalGameStats()
   );
 
   useEffect(() => {
     const refreshGuestStats = () => {
-      setGuestC5Stats(getGameStats("connect-5"));
-      setGuest21Stats(getGameStats("21-things"));
+      setGuestAllStats(getAllLocalGameStats());
     };
     window.addEventListener("solgames:stats-updated", refreshGuestStats);
     window.addEventListener("solgames:profile-sync", refreshGuestStats);
@@ -202,12 +199,22 @@ export function GuestAuthPanel({
     };
   }, []);
 
-  const guestTotalPlayed = guestC5Stats.played + guest21Stats.played;
-  const guestMaxStreak = Math.max(
-    guestC5Stats.maxStreak,
-    guest21Stats.maxStreak,
-    guestC5Stats.currentStreak,
-    guest21Stats.currentStreak
+  const guestTotalPlayed = ALL_GAME_SLUGS.reduce(
+    (acc, slug) => acc + guestAllStats[slug].played,
+    0
+  );
+  const guestActiveStreaks = ALL_GAME_SLUGS.reduce(
+    (acc, slug) => acc + (guestAllStats[slug].currentStreak > 0 ? 1 : 0),
+    0
+  );
+  const guestMaxStreak = ALL_GAME_SLUGS.reduce(
+    (acc, slug) =>
+      Math.max(
+        acc,
+        guestAllStats[slug].maxStreak,
+        guestAllStats[slug].currentStreak
+      ),
+    0
   );
 
   const resetBanners = () => {
@@ -422,9 +429,9 @@ export function GuestAuthPanel({
               {guestMaxStreak} max streak
             </p>
             <p className="text-[11px] sm:text-xs text-gray-700 mt-0.5">
-              Connect 5: {guestC5Stats.played} played ({guestC5Stats.currentStreak}{" "}
-              streak) · 21 Things: {guest21Stats.won} completed (
-              {guest21Stats.currentStreak} streak)
+              All 9 countdown games (21 → 1): {guestActiveStreaks} active{" "}
+              {guestActiveStreaks === 1 ? "streak" : "streaks"} ready to back up
+              to your cloud profile.
             </p>
           </div>
         </div>
@@ -1168,12 +1175,6 @@ export function LoggedInProfileDashboard({
     };
   }, [profile.createdBoardIds]);
 
-  const c5 = profile.connect5Stats;
-  const t21 = profile.twentyOneStats;
-  const c5WinRate = c5.played > 0 ? Math.round((c5.won / c5.played) * 100) : 0;
-  const c5AvgSeconds = computeAverageSolveTime(c5);
-  const c5Strip = buildLast7DaysStrip(c5.completedDates);
-  const t21Strip = buildLast7DaysStrip(t21.completedDates);
   const totalCreatedCount = Math.max(
     profile.boardsCreatedCount,
     createdBoards.length
@@ -1452,410 +1453,168 @@ export function LoggedInProfileDashboard({
         )}
       </div>
 
-      {/* Section Title: Your Stats & Streaks */}
+      {/* Section Title: Unified 9-Game Countdown Stats & Streaks */}
       <div className="flex items-center justify-between">
         <h4 className="font-headline text-base sm:text-lg font-black text-black flex items-center gap-2">
           <Trophy className="h-5 w-5 text-[#F9D423]" />
-          Your Stats &amp; Streaks
+          Your 9-Game Stats &amp; Streaks (21 → 1)
         </h4>
         <span className="text-xs font-semibold text-gray-500">
-          Auto-synced across games
+          Auto-synced across all 9 games
         </span>
       </div>
 
-      {/* Two Game Stats Cards */}
-      <div className="grid grid-cols-1 gap-4">
-        {/* 1. CONNECT 5 CARD */}
-        <div className="rounded-2xl border-2 border-black bg-white p-4 sm:p-5 shadow-[3px_3px_0px_#000] space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-2 border-black bg-[#2ECC71] font-headline text-sm font-black text-black">
-                C5
-              </span>
-              <div>
-                <h5 className="font-headline text-base font-black text-black leading-tight">
-                  Connect 5
-                </h5>
-                <p className="text-[11px] text-gray-500 font-medium">
-                  Daily 5-Word Compound Chain
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Badge className="border-2 border-black bg-[#FFFBE6] text-black font-black text-xs px-2.5 py-0.5">
-                <Flame className="h-3.5 w-3.5 text-orange-500 mr-1 fill-orange-500" />
-                {c5.currentStreak} Streak
-              </Badge>
-              <Link
-                href="/games/connect-5"
-                onClick={onNavigateAway}
-                className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-[#2ECC71] px-2.5 py-1 text-xs font-black text-black hover:bg-[#27ae60] transition-colors"
-              >
-                Play
-                <Play className="h-3 w-3 fill-current" />
-              </Link>
-            </div>
-          </div>
-
-          {/* 6 Stat Metrics for Connect 5 */}
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center">
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {c5.played}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Played
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {c5WinRate}%
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Win %
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-[#FFFBE6] p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {c5.currentStreak} 🔥
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-600">
-                Current
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {c5.maxStreak}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Max Streak
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-emerald-50/70 p-2.5">
-              <div className="font-mono text-base sm:text-lg font-black text-black">
-                {formatSolveTime(c5.bestTimeSeconds)}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-600">
-                Fastest
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-mono text-base sm:text-lg font-black text-black">
-                {formatSolveTime(c5AvgSeconds)}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Avg Time
-              </div>
-            </div>
-          </div>
-
-          {/* Last 7 Days Completion Strip */}
-          <div className="rounded-xl border border-black/15 bg-gray-50/80 p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-gray-600">
-                Last 7 Days Completion Strip
-              </span>
-              <Link
-                href="/games/connect-5/archive"
-                onClick={onNavigateAway}
-                className="text-[11px] font-bold text-black underline hover:text-[#2ECC71]"
-              >
-                Full Archive →
-              </Link>
-            </div>
-            <div className="grid grid-cols-7 gap-1.5 text-center">
-              {c5Strip.map((item) => (
-                <div
-                  key={item.dateKey}
-                  title={item.shortLabel}
-                  className="flex flex-col items-center gap-1"
-                >
-                  <div
-                    className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-black transition-all",
-                      item.completed
-                        ? "border-black bg-[#2ECC71] text-black shadow-[1px_1px_0px_#000]"
-                        : item.isToday
-                        ? "border-black border-dashed bg-white text-gray-400"
-                        : "border-gray-300 bg-white text-gray-300"
-                    )}
-                  >
-                    {item.completed ? "✓" : "·"}
-                  </div>
-                  <span
-                    className={cn(
-                      "text-[10px] font-bold",
-                      item.isToday ? "text-black underline" : "text-gray-500"
-                    )}
-                  >
-                    {item.dayInitial}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* 2. 21 THINGS CARD */}
-        <div className="rounded-2xl border-2 border-black bg-white p-4 sm:p-5 shadow-[3px_3px_0px_#000] space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border-2 border-black bg-[#daa8d0] font-headline text-sm font-black text-black">
-                21
-              </span>
-              <div>
-                <h5 className="font-headline text-base font-black text-black leading-tight">
-                  21 Things
-                </h5>
-                <p className="text-[11px] text-gray-500 font-medium">
-                  21 → 6 → 3 → 1 Social Gratitude Funnel
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Badge className="border-2 border-black bg-[#FFFBE6] text-black font-black text-xs px-2.5 py-0.5">
-                <Flame className="h-3.5 w-3.5 text-orange-500 mr-1 fill-orange-500" />
-                {t21.currentStreak} Streak
-              </Badge>
-              <Link
-                href="/games/21-things"
-                onClick={onNavigateAway}
-                className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-[#daa8d0] px-2.5 py-1 text-xs font-black text-black hover:bg-[#c992be] transition-colors"
-              >
-                Play
-                <Play className="h-3 w-3 fill-current" />
-              </Link>
-            </div>
-          </div>
-
-          {/* 4 Stat Metrics for 21 Things */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {t21.won}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Boards Completed
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-[#FFFBE6] p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {t21.currentStreak} 🔥
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-600">
-                Current Streak
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-gray-50 p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {t21.maxStreak}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-500">
-                Max Streak
-              </div>
-            </div>
-            <div className="rounded-xl border border-black/15 bg-[#f7eef5] p-2.5">
-              <div className="font-headline text-lg sm:text-xl font-black text-black">
-                {totalCreatedCount}
-              </div>
-              <div className="text-[10px] font-bold uppercase text-gray-600">
-                Boards Created
-              </div>
-            </div>
-          </div>
-
-          {/* Last 7 Days Completion Strip for 21 Things */}
-          <div className="rounded-xl border border-black/15 bg-gray-50/80 p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-black uppercase tracking-wider text-gray-600">
-                Last 7 Days Completion Strip
-              </span>
-              <Link
-                href="/games/21-things/archive"
-                onClick={onNavigateAway}
-                className="text-[11px] font-bold text-black underline hover:text-[#9D50BB]"
-              >
-                Full Archive →
-              </Link>
-            </div>
-            <div className="grid grid-cols-7 gap-1.5 text-center">
-              {t21Strip.map((item) => (
-                <div
-                  key={item.dateKey}
-                  title={item.shortLabel}
-                  className="flex flex-col items-center gap-1"
-                >
-                  <div
-                    className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-black transition-all",
-                      item.completed
-                        ? "border-black bg-[#2ECC71] text-black shadow-[1px_1px_0px_#000]"
-                        : item.isToday
-                        ? "border-black border-dashed bg-white text-gray-400"
-                        : "border-gray-300 bg-white text-gray-300"
-                    )}
-                  >
-                    {item.completed ? "✓" : "·"}
-                  </div>
-                  <span
-                    className={cn(
-                      "text-[10px] font-bold",
-                      item.isToday ? "text-black underline" : "text-gray-500"
-                    )}
-                  >
-                    {item.dayInitial}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent #1 Resonance Picks */}
-          <div className="space-y-2 pt-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-gray-700">
-                Recent #1 Resonance Picks ({profile.recentPicks.length})
-              </span>
-            </div>
-
-            {profile.recentPicks.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600 flex items-center justify-between gap-2">
-                <span>
-                  Complete a 21 → 6 → 3 → 1 board to save your #1 resonance
-                  picks here.
+      <UnifiedNineGameStats
+        remoteStats={profile.allGameStats}
+        boardsCreatedCount={totalCreatedCount}
+        onNavigateAway={onNavigateAway}
+        twentyOneExtraSlot={
+          <>
+            {/* Recent #1 Resonance Picks */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase tracking-wider text-gray-700">
+                  Recent #1 Resonance Picks ({profile.recentPicks.length})
                 </span>
-                <Link
-                  href="/games/21-things"
-                  onClick={onNavigateAway}
-                  className="shrink-0 font-black text-black underline"
-                >
-                  Play Now →
-                </Link>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {profile.recentPicks
-                  .slice(0, isModalView ? 3 : 8)
-                  .map((pick, idx) => (
-                    <div
-                      key={`${pick.boardId}-${pick.pick1Item}-${idx}`}
-                      className="rounded-xl border-2 border-black/15 bg-[#f7eef5]/60 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="inline-flex items-center rounded-md border border-black bg-[#F9D423] px-2 py-0.5 text-xs font-black text-black">
-                            #1 · {pick.pick1Item}
-                          </span>
-                          <span className="text-[11px] font-bold text-gray-600 truncate">
-                            {pick.boardTitle}
-                          </span>
-                        </div>
-                        {pick.reflectionNote && (
-                          <p className="text-xs italic text-gray-700 line-clamp-2">
-                            &ldquo;{pick.reflectionNote}&rdquo;
-                          </p>
-                        )}
-                      </div>
-                      <Link
-                        href={buildResonancePickHref(pick)}
-                        onClick={onNavigateAway}
-                        className="shrink-0 self-start sm:self-center inline-flex items-center gap-1 rounded-lg border border-black bg-white px-2.5 py-1 text-[11px] font-black text-black hover:bg-gray-100"
-                      >
-                        Board →
-                      </Link>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
 
-          {/* My Created 21 Things Boards */}
-          <div className="space-y-2 pt-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-gray-700">
-                My Created 21 Things Boards ({createdBoards.length})
-              </span>
-              <Link
-                href="/games/21-things?mode=create"
-                onClick={onNavigateAway}
-                className="inline-flex items-center gap-1 text-xs font-black text-[#9D50BB] hover:underline"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Create Board
-              </Link>
+              {profile.recentPicks.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600 flex items-center justify-between gap-2">
+                  <span>
+                    Complete a 21 → 6 → 3 → 1 board to save your #1 resonance
+                    picks here.
+                  </span>
+                  <Link
+                    href="/games/21-things"
+                    onClick={onNavigateAway}
+                    className="shrink-0 font-black text-black underline"
+                  >
+                    Play Now →
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {profile.recentPicks
+                    .slice(0, isModalView ? 3 : 8)
+                    .map((pick, idx) => (
+                      <div
+                        key={`${pick.boardId}-${pick.pick1Item}-${idx}`}
+                        className="rounded-xl border-2 border-black/15 bg-[#f7eef5]/60 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      >
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center rounded-md border border-black bg-[#F9D423] px-2 py-0.5 text-xs font-black text-black">
+                              #1 · {pick.pick1Item}
+                            </span>
+                            <span className="text-[11px] font-bold text-gray-600 truncate">
+                              {pick.boardTitle}
+                            </span>
+                          </div>
+                          {pick.reflectionNote && (
+                            <p className="text-xs italic text-gray-700 line-clamp-2">
+                              &ldquo;{pick.reflectionNote}&rdquo;
+                            </p>
+                          )}
+                        </div>
+                        <Link
+                          href={buildResonancePickHref(pick)}
+                          onClick={onNavigateAway}
+                          className="shrink-0 self-start sm:self-center inline-flex items-center gap-1 rounded-lg border border-black bg-white px-2.5 py-1 text-[11px] font-black text-black hover:bg-gray-100"
+                        >
+                          Board →
+                        </Link>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
 
-            {createdBoards.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600 flex items-center justify-between gap-2">
-                <span>
-                  Voice-brainstorm or type your own 21 Things board to share
-                  with friends.
+            {/* My Created 21 Things Boards */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase tracking-wider text-gray-700">
+                  My Created 21 Things Boards ({createdBoards.length})
                 </span>
                 <Link
                   href="/games/21-things?mode=create"
                   onClick={onNavigateAway}
-                  className="shrink-0 font-black text-black underline"
+                  className="inline-flex items-center gap-1 text-xs font-black text-[#9D50BB] hover:underline"
                 >
-                  Create →
+                  <Plus className="h-3.5 w-3.5" />
+                  Create Board
                 </Link>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {createdBoards
-                  .slice(0, isModalView ? 3 : 10)
-                  .map((createdBoard) => {
-                    const isCopied = copiedBoardId === createdBoard.id;
-                    return (
-                      <div
-                        key={createdBoard.id}
-                        className="rounded-xl border-2 border-black/15 bg-gray-50 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
-                      >
-                        <div className="min-w-0">
-                          <div className="font-headline text-sm font-black text-black truncate">
-                            {createdBoard.title}
+
+              {createdBoards.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600 flex items-center justify-between gap-2">
+                  <span>
+                    Voice-brainstorm or type your own 21 Things board to share
+                    with friends.
+                  </span>
+                  <Link
+                    href="/games/21-things?mode=create"
+                    onClick={onNavigateAway}
+                    className="shrink-0 font-black text-black underline"
+                  >
+                    Create →
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {createdBoards
+                    .slice(0, isModalView ? 3 : 10)
+                    .map((createdBoard) => {
+                      const isCopied = copiedBoardId === createdBoard.id;
+                      return (
+                        <div
+                          key={createdBoard.id}
+                          className="rounded-xl border-2 border-black/15 bg-gray-50 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-headline text-sm font-black text-black truncate">
+                              {createdBoard.title}
+                            </div>
+                            <div className="text-[11px] text-gray-500">
+                              By {createdBoard.creatorName} · 21 Tiles
+                            </div>
                           </div>
-                          <div className="text-[11px] text-gray-500">
-                            By {createdBoard.creatorName} · 21 Tiles
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyBoardLink(createdBoard)}
+                              className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-white px-2.5 py-1 text-xs font-black text-black hover:bg-gray-100 transition-colors"
+                            >
+                              {isCopied ? (
+                                <>
+                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                  Copied!
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" />
+                                  Copy Link
+                                </>
+                              )}
+                            </button>
+
+                            <Link
+                              href={buildBoardPlayHref(createdBoard)}
+                              onClick={onNavigateAway}
+                              className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-[#F9D423] px-2.5 py-1 text-xs font-black text-black hover:bg-[#f0c808] transition-colors"
+                            >
+                              Play
+                            </Link>
                           </div>
                         </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleCopyBoardLink(createdBoard)}
-                            className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-white px-2.5 py-1 text-xs font-black text-black hover:bg-gray-100 transition-colors"
-                          >
-                            {isCopied ? (
-                              <>
-                                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                Copied!
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" />
-                                Copy Link
-                              </>
-                            )}
-                          </button>
-
-                          <Link
-                            href={buildBoardPlayHref(createdBoard)}
-                            onClick={onNavigateAway}
-                            className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-[#F9D423] px-2.5 py-1 text-xs font-black text-black hover:bg-[#f0c808] transition-colors"
-                          >
-                            Play
-                          </Link>
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </>
+        }
+      />
 
       {/* Footer Actions */}
       <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t-2 border-black/10">
@@ -1936,8 +1695,8 @@ export function ProfileViewerModal() {
           </DialogTitle>
           <DialogDescription className="text-xs sm:text-sm text-gray-600">
             {profile
-              ? "Your NYT Games-style daily streaks, solve times, and 21 Things resonance boards."
-              : "Save your daily streaks, solve times, and 21 Things boards across all your devices."}
+              ? "Your daily streaks, signature scores, personal 1 Win journal, and custom boards across all 9 countdown games (21 → 1)."
+              : "Save your daily streaks, signature scores, and custom boards across all 9 countdown games (21 → 1)."}
           </DialogDescription>
         </DialogHeader>
 

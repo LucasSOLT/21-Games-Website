@@ -130,7 +130,7 @@ behold=Look at with wonder
 unfold=Open out
 `),
   family("ound", "-ound", `
-sound=What your ears pick up
+sound=What your ears hear
 round=Shaped like a ball
 found=Past tense of "find"
 ground=The earth beneath your feet

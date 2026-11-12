@@ -74,6 +74,7 @@ import { SixPicsStudioTab } from "@/components/admin/six-pics-studio-tab";
 import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
 import { MoveTwoStudioTab } from "@/components/admin/move-two-studio-tab";
 import { OneWinStudioTab } from "@/components/admin/one-win-studio-tab";
+import { MonthlyBufferPanel } from "@/components/admin/monthly-buffer-panel";
 import { HaikuSliceCutter } from "@/components/admin/haiku-slice-cutter";
 import {
   classifyDiagnosticError,
@@ -1222,6 +1223,14 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+
+        {/* Monthly Rolling Buffer (Month M+2) Batch Verifier & AI Provider Toggle (§0.2 & §0.3) */}
+        <MonthlyBufferPanel
+          onSelectDateAndGame={(dateKey, gameSlug) => {
+            setSelectedDate(dateKey);
+            setActiveTab(gameSlug);
+          }}
+        />
 
         {/* Date Guarding Banner (for Admins on Today or Past Dates) */}
         {!editPerm.canEdit && (

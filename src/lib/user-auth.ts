@@ -3,16 +3,21 @@ import {
   type TwentyOneJourney,
 } from "@/data/puzzles/21-things";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
+import { ALL_GAME_SLUGS } from "@/lib/games-config";
 import {
   DEFAULT_STATS,
   getAdmin21ThingsOverrides,
+  getAllLocalGameStats,
   getAllLocalPlayerJourneys,
   getGameStats,
   getUserCreated21Boards,
+  mergeAllGameStatsMaps,
   mergeTwoGameStats,
+  normalizeAllGameStatsMap,
   normalizeGameStats,
   registerProfileSyncCallback,
   setGameStats,
+  type AllGameStatsMap,
   type GameStats,
 } from "@/lib/game-storage";
 import { assetPath } from "@/lib/asset-path";
@@ -91,6 +96,7 @@ export interface UserProfile {
   memberSince: string;
   connect5Stats: GameStats;
   twentyOneStats: GameStats;
+  allGameStats?: AllGameStatsMap;
   boardsCreatedCount: number;
   createdBoardIds: string[];
   recentPicks: RecentResonancePick[];
@@ -538,6 +544,27 @@ export function normalizeUserProfile(
       )
     : null;
 
+  const rawAllMap = normalizeAllGameStatsMap(
+    (raw.allGameStats ??
+      (rawRecord.all_game_stats as
+        | Partial<Record<string, Partial<GameStats>>>
+        | undefined)) ??
+      null
+  );
+  const c5Norm = mergeTwoGameStats(
+    rawAllMap["connect-5"],
+    normalizeGameStats(raw.connect5Stats ?? DEFAULT_STATS)
+  );
+  const t21Norm = mergeTwoGameStats(
+    rawAllMap["21-things"],
+    normalizeGameStats(raw.twentyOneStats ?? DEFAULT_STATS)
+  );
+  const allGameStats: AllGameStatsMap = {
+    ...rawAllMap,
+    "connect-5": c5Norm,
+    "21-things": t21Norm,
+  };
+
   return {
     id: raw.id || `usr_${email.replace(/[^a-z0-9]/g, "_")}`,
     email,
@@ -549,8 +576,9 @@ export function normalizeUserProfile(
     bannedAt,
     bannedReason,
     memberSince: raw.memberSince || new Date().toISOString(),
-    connect5Stats: normalizeGameStats(raw.connect5Stats ?? DEFAULT_STATS),
-    twentyOneStats: normalizeGameStats(raw.twentyOneStats ?? DEFAULT_STATS),
+    connect5Stats: c5Norm,
+    twentyOneStats: t21Norm,
+    allGameStats,
     boardsCreatedCount: Math.max(
       Number(raw.boardsCreatedCount ?? 0) || 0,
       createdBoardIds.length
@@ -862,6 +890,10 @@ async function fetchSupabaseUserProfileRow(
     twentyOneStats: normalizeGameStats(
       (data.twenty_one_stats as Partial<GameStats>) ?? DEFAULT_STATS
     ),
+    allGameStats: normalizeAllGameStatsMap(
+      (data.all_game_stats as Partial<Record<string, Partial<GameStats>>>) ??
+        null
+    ),
     recentPicks: Array.isArray(data.recent_picks)
       ? (data.recent_picks as RecentResonancePick[])
       : [],
@@ -892,27 +924,58 @@ async function upsertSupabaseUserProfileRow(
     avatar_color: profile.avatarColor,
     connect5_stats: profile.connect5Stats,
     twenty_one_stats: profile.twentyOneStats,
+    all_game_stats: profile.allGameStats,
     recent_picks: profile.recentPicks,
     created_board_ids: profile.createdBoardIds,
     updated_at: profile.lastSyncedAt,
   };
 
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("user_profiles")
       .update(safeColumns)
       .eq("id", profile.id)
       .select("id");
+
+    if (
+      error &&
+      error.message &&
+      error.message.toLowerCase().includes("all_game_stats")
+    ) {
+      const { all_game_stats: _omit, ...legacySafeColumns } = safeColumns;
+      void _omit;
+      const fallback = await supabase
+        .from("user_profiles")
+        .update(legacySafeColumns)
+        .eq("id", profile.id)
+        .select("id");
+      data = fallback.data;
+      error = fallback.error;
+    }
+
     if (error) return;
     if (Array.isArray(data) && data.length > 0) return;
 
     // No row yet (signup trigger lag / legacy account): create a minimal own row.
     // The server forces role='user' and is_banned=false for self-created rows.
-    await supabase.from("user_profiles").insert({
+    const ins = await supabase.from("user_profiles").insert({
       id: profile.id,
       email: normalizeEmail(profile.email),
       ...safeColumns,
     });
+    if (
+      ins.error &&
+      ins.error.message &&
+      ins.error.message.toLowerCase().includes("all_game_stats")
+    ) {
+      const { all_game_stats: _omit, ...legacySafeColumns } = safeColumns;
+      void _omit;
+      await supabase.from("user_profiles").insert({
+        id: profile.id,
+        email: normalizeEmail(profile.email),
+        ...legacySafeColumns,
+      });
+    }
   } catch {
     // Local profile already saved
   }
@@ -979,6 +1042,11 @@ export async function fetchAllUserProfiles(): Promise<UserProfile[]> {
                 ),
                 twentyOneStats: normalizeGameStats(
                   (row.twenty_one_stats as Partial<GameStats>) ?? DEFAULT_STATS
+                ),
+                allGameStats: normalizeAllGameStatsMap(
+                  (row.all_game_stats as Partial<
+                    Record<string, Partial<GameStats>>
+                  >) ?? null
                 ),
                 recentPicks: Array.isArray(row.recent_picks)
                   ? (row.recent_picks as RecentResonancePick[])
@@ -1226,15 +1294,24 @@ export async function syncProfileAndMergeGuestStats(
   try {
     const normalizedBase = normalizeUserProfile(baseProfile);
 
-    const localC5 = getGameStats("connect-5");
-    const local21 = getGameStats("21-things");
+    const localAll = getAllLocalGameStats();
+    const mergedAll = mergeAllGameStatsMaps(normalizedBase.allGameStats, localAll);
+    mergedAll["connect-5"] = mergeTwoGameStats(
+      mergedAll["connect-5"],
+      mergeTwoGameStats(normalizedBase.connect5Stats, getGameStats("connect-5"))
+    );
+    mergedAll["21-things"] = mergeTwoGameStats(
+      mergedAll["21-things"],
+      mergeTwoGameStats(normalizedBase.twentyOneStats, getGameStats("21-things"))
+    );
 
-    const mergedC5 = mergeTwoGameStats(normalizedBase.connect5Stats, localC5);
-    const merged21 = mergeTwoGameStats(normalizedBase.twentyOneStats, local21);
+    const mergedC5 = mergedAll["connect-5"];
+    const merged21 = mergedAll["21-things"];
 
-    // Write merged stats back to localStorage so GameShell and game boards reflect merged streaks
-    setGameStats("connect-5", mergedC5);
-    setGameStats("21-things", merged21);
+    // Write merged stats back to localStorage for all 9 games so GameShell & game boards reflect merged streaks
+    for (const slug of ALL_GAME_SLUGS) {
+      setGameStats(slug, mergedAll[slug]);
+    }
 
     // Merge user-created 21 Things board IDs
     const localCreatedBoards = getUserCreated21Boards();
@@ -1254,6 +1331,7 @@ export async function syncProfileAndMergeGuestStats(
       ...normalizedBase,
       connect5Stats: mergedC5,
       twentyOneStats: merged21,
+      allGameStats: mergedAll,
       createdBoardIds: mergedCreatedBoardIds,
       boardsCreatedCount: mergedCreatedBoardIds.length,
       recentPicks: mergedRecentPicks,
@@ -1374,6 +1452,10 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
       connect5Stats: remoteRow?.connect5Stats ?? sameUserLocal?.connect5Stats,
       twentyOneStats:
         remoteRow?.twentyOneStats ?? sameUserLocal?.twentyOneStats,
+      allGameStats: mergeAllGameStatsMaps(
+        remoteRow?.allGameStats,
+        sameUserLocal?.allGameStats
+      ),
       createdBoardIds:
         remoteRow?.createdBoardIds ?? sameUserLocal?.createdBoardIds ?? [],
       recentPicks: remoteRow?.recentPicks ?? sameUserLocal?.recentPicks ?? [],
@@ -1584,6 +1666,7 @@ export async function signUpWithEmail(
       memberSince: data.user.created_at || new Date().toISOString(),
       connect5Stats: remoteRow?.connect5Stats,
       twentyOneStats: remoteRow?.twentyOneStats,
+      allGameStats: remoteRow?.allGameStats,
       createdBoardIds: remoteRow?.createdBoardIds,
       recentPicks: remoteRow?.recentPicks,
       authMode: "supabase",
@@ -1748,6 +1831,7 @@ export async function signInWithEmail(
         new Date().toISOString(),
       connect5Stats: remoteRow?.connect5Stats,
       twentyOneStats: remoteRow?.twentyOneStats,
+      allGameStats: remoteRow?.allGameStats,
       createdBoardIds: remoteRow?.createdBoardIds,
       recentPicks: remoteRow?.recentPicks,
       authMode: "supabase",

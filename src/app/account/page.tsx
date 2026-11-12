@@ -4,7 +4,6 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
-  Play,
   ShieldCheck,
   Trophy,
   UserCheck,
@@ -12,37 +11,22 @@ import {
 import { useAuth } from "@/components/account/auth-provider";
 import { AccountNavButton } from "@/components/account/account-nav-button";
 import {
-  buildLast7DaysStrip,
-  computeAverageSolveTime,
-  formatSolveTime,
   GuestAuthPanel,
   LoggedInProfileDashboard,
 } from "@/components/account/profile-viewer-modal";
-import {
-  getGameStats,
-  getUserCreated21Boards,
-  type GameStats,
-} from "@/lib/game-storage";
+import { UnifiedNineGameStats } from "@/components/account/unified-nine-game-stats";
+import { getUserCreated21Boards } from "@/lib/game-storage";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 
 export default function AccountPage() {
   const { profile, isLoading } = useAuth();
 
-  const [guestC5, setGuestC5] = useState<GameStats>(() =>
-    getGameStats("connect-5")
-  );
-  const [guest21, setGuest21] = useState<GameStats>(() =>
-    getGameStats("21-things")
-  );
   const [guestCreatedCount, setGuestCreatedCount] = useState<number>(
     () => getUserCreated21Boards().length
   );
 
   useEffect(() => {
     const syncLocalPreview = () => {
-      setGuestC5(getGameStats("connect-5"));
-      setGuest21(getGameStats("21-things"));
       setGuestCreatedCount(getUserCreated21Boards().length);
     };
     window.addEventListener("solgames:stats-updated", syncLocalPreview);
@@ -57,12 +41,6 @@ export default function AccountPage() {
     };
   }, []);
 
-  const c5Strip = buildLast7DaysStrip(guestC5.completedDates);
-  const t21Strip = buildLast7DaysStrip(guest21.completedDates);
-  const guestC5WinRate =
-    guestC5.played > 0 ? Math.round((guestC5.won / guestC5.played) * 100) : 0;
-  const guestC5Avg = computeAverageSolveTime(guestC5);
-
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black flex flex-col">
       {/* Top Navigation Bar */}
@@ -74,21 +52,33 @@ export default function AccountPage() {
               className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span>All Games</span>
+              <span>All 9 Games</span>
             </Link>
 
-            <div className="hidden sm:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200">
+            <div className="hidden md:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200">
               <Link
                 href="/games/21-things"
-                className="rounded-full px-3 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
+                className="rounded-full px-2.5 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
               >
-                21 Things
+                #21 Things
+              </Link>
+              <Link
+                href="/games/9-rhymes"
+                className="rounded-full px-2.5 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
+              >
+                #9 Rhymes
               </Link>
               <Link
                 href="/games/connect-5"
-                className="rounded-full px-3 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
+                className="rounded-full px-2.5 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
               >
-                Connect 5
+                #5 Connect
+              </Link>
+              <Link
+                href="/games/1-win"
+                className="rounded-full px-2.5 py-1 text-xs font-bold text-gray-700 hover:text-black transition-all"
+              >
+                #1 Win
               </Link>
             </div>
           </div>
@@ -98,7 +88,7 @@ export default function AccountPage() {
               Account &amp; Profile
             </h1>
             <p className="text-[11px] text-gray-500 hidden xs:block">
-              SOL Theory Games · Stats &amp; Streaks
+              SOL Theory Games · Countdown 21 → 1 Stats &amp; Streaks
             </p>
           </div>
 
@@ -109,12 +99,12 @@ export default function AccountPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 mx-auto w-full max-w-4xl px-3 sm:px-6 py-6 sm:py-10 space-y-6">
+      <main className="flex-1 mx-auto w-full max-w-5xl px-3 sm:px-6 py-6 sm:py-10 space-y-6">
         {/* Editorial Page Banner */}
         <div className="rounded-2xl border-2 border-black bg-white p-5 sm:p-6 shadow-[4px_4px_0px_#000]">
           <div className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#9D50BB] mb-1.5">
             <UserCheck className="h-4 w-4" />
-            SOL Theory Games · Player Hub
+            SOL Theory Games · Unified 9-Game Player Hub
           </div>
           <h2 className="font-headline text-2xl sm:text-3xl font-black text-black tracking-tight">
             {profile
@@ -123,8 +113,8 @@ export default function AccountPage() {
           </h2>
           <p className="text-xs sm:text-sm text-gray-600 mt-1 max-w-2xl">
             {profile
-              ? "Your Connect 5 solve times, daily streaks, and 21 Things resonance journeys are automatically synced."
-              : "Save your daily streaks, solve times, and custom 21 Things boards across all your devices—free forever."}
+              ? "Your daily streaks, signature scores, personal 1 Win journal, and custom boards across all 9 countdown games (21 → 1) are automatically synced."
+              : "Save your daily streaks, scores, personal 1 Win journal, and custom boards across all 9 countdown games (21 → 1)—free forever."}
           </p>
         </div>
 
@@ -141,18 +131,18 @@ export default function AccountPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Auth Forms */}
-            <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 sm:p-6 shadow-[4px_4px_0px_#000]">
+            <div className="lg:col-span-5 rounded-2xl border-2 border-black bg-white p-5 sm:p-6 shadow-[4px_4px_0px_#000]">
               <GuestAuthPanel initialTab="signin" />
             </div>
 
-            {/* Right Column: On-Device Guest Stats Preview */}
-            <div className="lg:col-span-6 space-y-4">
+            {/* Right Column: On-Device Guest Stats Preview across all 9 Countdown Games */}
+            <div className="lg:col-span-7 space-y-4">
               <div className="rounded-2xl border-2 border-black bg-white p-5 shadow-[4px_4px_0px_#000] space-y-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Trophy className="h-5 w-5 text-[#F9D423]" />
                     <h3 className="font-headline text-base sm:text-lg font-black text-black">
-                      On-Device Guest Stats
+                      On-Device 9-Game Guest Stats
                     </h3>
                   </div>
                   <Badge
@@ -164,175 +154,23 @@ export default function AccountPage() {
                 </div>
 
                 <p className="text-xs text-gray-600">
-                  These stats are currently stored in this browser. Sign in or
-                  create an account to merge and back them up automatically.
+                  These stats across all 9 countdown games (21 → 1) are stored
+                  in this browser. Sign in or create an account to merge and
+                  back them up automatically.
                 </p>
 
-                {/* Guest Connect 5 Preview */}
-                <div className="rounded-xl border-2 border-black/15 bg-gray-50 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-black bg-[#2ECC71] font-headline text-xs font-black text-black">
-                        C5
-                      </span>
-                      <span className="font-headline text-sm font-black text-black">
-                        Connect 5
-                      </span>
-                    </div>
-                    <Link
-                      href="/games/connect-5"
-                      className="inline-flex items-center gap-1 text-xs font-black text-black underline"
-                    >
-                      Play <Play className="h-3 w-3 fill-current" />
-                    </Link>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="rounded-lg bg-white border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guestC5.played}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-500">
-                        Played
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-white border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guestC5WinRate}%
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-500">
-                        Win %
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-[#FFFBE6] border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guestC5.currentStreak} 🔥
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-600">
-                        Streak
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-white border border-black/10 p-2">
-                      <div className="font-mono text-sm font-black">
-                        {formatSolveTime(guestC5.bestTimeSeconds ?? guestC5Avg)}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-500">
-                        Best
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-1 text-center pt-1">
-                    {c5Strip.map((item) => (
-                      <div
-                        key={item.dateKey}
-                        title={item.shortLabel}
-                        className="flex flex-col items-center gap-0.5"
-                      >
-                        <div
-                          className={cn(
-                            "flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-black",
-                            item.completed
-                              ? "border-black bg-[#2ECC71] text-black"
-                              : "border-gray-300 bg-white text-gray-300"
-                          )}
-                        >
-                          {item.completed ? "✓" : "·"}
-                        </div>
-                        <span className="text-[9px] font-bold text-gray-500">
-                          {item.dayInitial}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Guest 21 Things Preview */}
-                <div className="rounded-xl border-2 border-black/15 bg-gray-50 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-black bg-[#daa8d0] font-headline text-xs font-black text-black">
-                        21
-                      </span>
-                      <span className="font-headline text-sm font-black text-black">
-                        21 Things
-                      </span>
-                    </div>
-                    <Link
-                      href="/games/21-things"
-                      className="inline-flex items-center gap-1 text-xs font-black text-black underline"
-                    >
-                      Play <Play className="h-3 w-3 fill-current" />
-                    </Link>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="rounded-lg bg-white border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guest21.won}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-500">
-                        Done
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-[#FFFBE6] border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guest21.currentStreak} 🔥
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-600">
-                        Streak
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-white border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guest21.maxStreak}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-500">
-                        Max
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-[#f7eef5] border border-black/10 p-2">
-                      <div className="font-headline text-base font-black">
-                        {guestCreatedCount}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase text-gray-600">
-                        Created
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-1 text-center pt-1">
-                    {t21Strip.map((item) => (
-                      <div
-                        key={item.dateKey}
-                        title={item.shortLabel}
-                        className="flex flex-col items-center gap-0.5"
-                      >
-                        <div
-                          className={cn(
-                            "flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-black",
-                            item.completed
-                              ? "border-black bg-[#2ECC71] text-black"
-                              : "border-gray-300 bg-white text-gray-300"
-                          )}
-                        >
-                          {item.completed ? "✓" : "·"}
-                        </div>
-                        <span className="text-[9px] font-bold text-gray-500">
-                          {item.dayInitial}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <UnifiedNineGameStats
+                  boardsCreatedCount={guestCreatedCount}
+                  compact={true}
+                />
 
                 <div className="rounded-xl border border-black/10 bg-[#f7eef5]/50 p-3 flex items-start gap-2.5 text-xs text-gray-700">
                   <ShieldCheck className="h-4 w-4 shrink-0 text-[#9D50BB] mt-0.5" />
                   <span>
                     <strong>Zero Progress Lost:</strong> Signing in or creating
                     an account automatically merges your guest completions,
-                    fastest times, and created 21 Things boards into your
-                    profile.
+                    streaks, best times, and created boards across all 9 games
+                    into your cloud profile.
                   </span>
                 </div>
               </div>

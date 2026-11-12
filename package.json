@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "node scripts/run-tests.mjs",
     "lint": "eslint",
+    "generate-batch": "node --experimental-strip-types --no-warnings scripts/generate-monthly-batch.ts",
     "build:solworld": "NEXT_PUBLIC_BASE_PATH=/solgames next build",
     "deploy:solworld": "npm run build:solworld && rsync -a --delete out/ ../SOL-World/solgames/ && rsync -a --delete out/ ../SOL-World/dist/solgames/ && rsync -a --delete out/ ../SOL-World/public/solgames/"
   },

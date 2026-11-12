@@ -6,6 +6,7 @@ import type {
 import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import {
+  ALL_GAME_SLUGS,
   GAME_PROGRESS_PREFIX,
   type AllGameSlug,
   type PlayableGameSlug,
@@ -404,7 +405,14 @@ export function mergeTwoGameStats(
     ...normA.distribution,
   };
   for (const [key, val] of Object.entries(normB.distribution)) {
-    mergedDistribution[key] = Math.max(mergedDistribution[key] ?? 0, val);
+    if (
+      key === "best_over_par_plus_100" &&
+      mergedDistribution[key] !== undefined
+    ) {
+      mergedDistribution[key] = Math.min(mergedDistribution[key]!, val);
+    } else {
+      mergedDistribution[key] = Math.max(mergedDistribution[key] ?? 0, val);
+    }
   }
 
   return {
@@ -2007,4 +2015,288 @@ export function recordScoredCompletion(
   }
   setGameStats(gameSlug as PlayableGameSlug, stats);
   return stats;
+}
+
+// ============================================================================
+// Unified 9-Game Profile Stats & Q4 Signature Metrics (21 -> 1 Countdown Order)
+// ============================================================================
+
+export type AllGameStatsMap = Record<AllGameSlug, GameStats>;
+
+export function createDefaultAllGameStatsMap(): AllGameStatsMap {
+  const out = {} as AllGameStatsMap;
+  for (const slug of ALL_GAME_SLUGS) {
+    out[slug] = normalizeGameStats(DEFAULT_STATS);
+  }
+  return out;
+}
+
+export function normalizeAllGameStatsMap(
+  raw?: Partial<Record<string, Partial<GameStats> | null>> | null
+): AllGameStatsMap {
+  const out = createDefaultAllGameStatsMap();
+  if (!raw || typeof raw !== "object") return out;
+  for (const slug of ALL_GAME_SLUGS) {
+    if (raw[slug]) {
+      out[slug] = normalizeGameStats(raw[slug]);
+    }
+  }
+  return out;
+}
+
+export function getAllLocalGameStats(): AllGameStatsMap {
+  const out = createDefaultAllGameStatsMap();
+  for (const slug of ALL_GAME_SLUGS) {
+    out[slug] = getGameStats(slug);
+  }
+  return out;
+}
+
+export function mergeAllGameStatsMaps(
+  a?: Partial<Record<string, Partial<GameStats> | null>> | null,
+  b?: Partial<Record<string, Partial<GameStats> | null>> | null
+): AllGameStatsMap {
+  const normA = normalizeAllGameStatsMap(a);
+  const normB = normalizeAllGameStatsMap(b);
+  const out = createDefaultAllGameStatsMap();
+  for (const slug of ALL_GAME_SLUGS) {
+    out[slug] = mergeTwoGameStats(normA[slug], normB[slug]);
+  }
+  return out;
+}
+
+export interface UnifiedMetricCell {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}
+
+export interface UnifiedGameProfileSummary {
+  slug: AllGameSlug;
+  stats: GameStats;
+  winPercent: number;
+  metrics: UnifiedMetricCell[];
+  guessDistribution?: Array<{ guessNumber: number; pointsLabel: string; count: number }>;
+}
+
+function fmtSeconds(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
+    return "—";
+  }
+  const rounded = Math.round(seconds);
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function computeAvg17Stars(dist: Record<string, number>): string {
+  let weighted = 0;
+  let count = 0;
+  for (const [k, v] of Object.entries(dist)) {
+    if (k.startsWith("stars_") && v > 0) {
+      const starVal = Number.parseFloat(k.slice("stars_".length));
+      if (Number.isFinite(starVal)) {
+        weighted += starVal * v;
+        count += v;
+      }
+    }
+  }
+  if (count <= 0) return "—";
+  const avg = weighted / count;
+  return `${avg.toFixed(1)} ⭐`;
+}
+
+function computeAvgScoreOutOf(
+  stats: GameStats,
+  maxScore: number
+): string {
+  const totalX10 = stats.distribution.score_total_x10;
+  if (typeof totalX10 === "number" && stats.played > 0) {
+    const avg = totalX10 / 10 / stats.played;
+    return `${avg.toFixed(1)} / ${maxScore}`;
+  }
+  let weighted = 0;
+  let count = 0;
+  for (const [k, v] of Object.entries(stats.distribution)) {
+    if (k.startsWith("score_") && k !== "score_total_x10" && v > 0) {
+      const val = Number.parseFloat(k.slice("score_".length));
+      if (Number.isFinite(val)) {
+        weighted += val * v;
+        count += v;
+      }
+    }
+  }
+  if (count <= 0) return "—";
+  return `${(weighted / count).toFixed(1)} / ${maxScore}`;
+}
+
+/**
+ * Derives the exact Q4 signature profile metrics for any of the 9 countdown games.
+ */
+export function buildUnifiedGameProfileSummary(
+  slug: AllGameSlug,
+  rawStats?: Partial<GameStats> | null
+): UnifiedGameProfileSummary {
+  const stats = normalizeGameStats(rawStats);
+  const winPercent =
+    stats.played > 0 ? Math.round((stats.won / stats.played) * 100) : 0;
+
+  switch (slug) {
+    case "21-things":
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "#1 Picks Logged", value: String(stats.won) },
+        ],
+      };
+
+    case "17-syllables":
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Avg Star Rating", value: computeAvg17Stars(stats.distribution) },
+        ],
+      };
+
+    case "9-rhymes": {
+      const flawless =
+        stats.distribution.flawless ?? stats.distribution["score_9.0"] ?? 0;
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Avg Score", value: computeAvgScoreOutOf(stats, 9) },
+          { label: "Flawless 9/9", value: String(flawless) },
+        ],
+      };
+    }
+
+    case "eightfold-echo": {
+      const zeroMistakes = stats.distribution.zero_mistakes ?? 0;
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Best Time", value: fmtSeconds(stats.bestTimeSeconds) },
+          { label: "Zero-Mistake", value: String(zeroMistakes) },
+        ],
+      };
+    }
+
+    case "6-pics": {
+      const guessDistribution = [1, 2, 3, 4, 5, 6].map((guessNum) => {
+        const pts = 7 - guessNum;
+        const count = stats.distribution[`score_${pts.toFixed(1)}`] ?? 0;
+        return {
+          guessNumber: guessNum,
+          pointsLabel: `${pts} pts`,
+          count,
+        };
+      });
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Avg Score", value: computeAvgScoreOutOf(stats, 6) },
+        ],
+        guessDistribution,
+      };
+    }
+
+    case "connect-5": {
+      const avgTime =
+        stats.totalTimeSeconds > 0 && stats.won > 0
+          ? Math.round(stats.totalTimeSeconds / stats.won)
+          : stats.bestTimeSeconds;
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Best Time", value: fmtSeconds(stats.bestTimeSeconds) },
+          { label: "Avg Time", value: fmtSeconds(avgTime) },
+        ],
+      };
+    }
+
+    case "four-score":
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "80s Solved", value: String(stats.won) },
+        ],
+      };
+
+    case "move-2": {
+      const bestEncoded = stats.distribution.best_over_par_plus_100;
+      let bestVsPar = "—";
+      if (typeof bestEncoded === "number" && stats.won > 0) {
+        const diff = bestEncoded - 100;
+        bestVsPar =
+          diff === 0 ? "Par (0)" : diff > 0 ? `+${diff} vs Par` : `${diff} vs Par`;
+      }
+      const parStars3 =
+        stats.distribution.par_stars_3 ?? stats.distribution.stars_3 ?? 0;
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Played", value: String(stats.played) },
+          { label: "Win %", value: `${winPercent}%` },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+          { label: "Best vs. Par", value: bestVsPar },
+          { label: "⭐⭐⭐ Par Count", value: String(parStars3) },
+        ],
+      };
+    }
+
+    case "1-win":
+      return {
+        slug,
+        stats,
+        winPercent,
+        metrics: [
+          { label: "Daily Wins Logged", value: String(stats.won) },
+          { label: "Current Streak", value: `${stats.currentStreak} 🔥`, highlight: true },
+          { label: "Max Streak", value: String(stats.maxStreak) },
+        ],
+      };
+  }
 }

@@ -76,10 +76,23 @@ export function resolveOpenRouterKey(config?: AIHelperConfig): string | undefine
  * Picks the provider to try first. Preferred provider wins when it has a key; otherwise
  * Gemini (default) → OpenRouter → local.
  */
+function readStoredProviderPref(): AIProvider | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage?.getItem("solgames_ai_provider_pref");
+    if (raw === "gemini" || raw === "openrouter" || raw === "local") {
+      return raw;
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return undefined;
+}
+
 export function resolveAIProvider(config?: AIHelperConfig): AIProvider {
   const hasGemini = Boolean(resolveGeminiKey(config));
   const hasRouter = Boolean(resolveOpenRouterKey(config));
-  const pref = config?.preferredProvider;
+  const pref = config?.preferredProvider ?? readStoredProviderPref();
   if (pref === "local") return "local";
   if (pref === "openrouter" && hasRouter) return "openrouter";
   if (pref === "gemini" && hasGemini) return "gemini";

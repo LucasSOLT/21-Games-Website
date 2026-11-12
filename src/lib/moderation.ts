@@ -79,7 +79,7 @@ export const INNOCENT_ALLOWLIST: ReadonlySet<string> = new Set([
   // Botanical / culinary / literary
   "snigger", "sniggers", "sniggered", "sniggering", "sniggerer", "sniggerers",
   "chigger", "chiggers", "nigella", "shiitake", "shitake",
-  "spice", "spicy", "spices", "hospice", "hospices", "auspicious", "suspicion", "suspicious",
+  "spice", "spicy", "spices", "spiced", "spicing", "hospice", "hospices", "auspicious", "suspicion", "suspicious",
   "raccoon", "cocoon", "conspicuous", "despicable"
 ]);
 
