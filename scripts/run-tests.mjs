@@ -17,6 +17,7 @@ const SUITES = [
   ["scripts/test-cp06-four-score.ts"],
   ["scripts/test-cp07-parity.ts"],
   ["scripts/test-cp08-move-two.ts"],
+  ["scripts/test-cp09-one-win.ts"],
 ];
 
 let failed = false;

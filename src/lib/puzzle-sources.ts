@@ -55,6 +55,12 @@ import {
   type MoveTwoPuzzle,
 } from "@/data/puzzles/move-2";
 import {
+  ONE_WIN_PUZZLES,
+  generateSeededOneWinPuzzle,
+  isOneWinPuzzle,
+  type OneWinPromptPuzzle,
+} from "@/data/puzzles/1-win";
+import {
   getPuzzleNumberForDate,
   getRotationIndexForDate,
 } from "@/lib/date-keys";
@@ -308,8 +314,32 @@ const moveTwoSource: PuzzleSource<MoveTwoPuzzle> = {
   }),
 };
 
+const oneWinSource: PuzzleSource<OneWinPromptPuzzle> = {
+  slug: "1-win",
+  validate: isOneWinPuzzle,
+  fromBank(dateKey) {
+    const base =
+      ONE_WIN_PUZZLES[
+        getRotationIndexForDate(dateKey, ONE_WIN_PUZZLES.length)
+      ]!;
+    return {
+      ...base,
+      puzzleNumber: getPuzzleNumberForDate(dateKey),
+      customDate: dateKey,
+    };
+  },
+  generateSeeded: (dateKey) =>
+    generateSeededOneWinPuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
+  summarize: (p) => ({
+    title: p.title,
+    author: p.author,
+    editor: p.editor,
+    puzzleNumber: p.puzzleNumber,
+  }),
+};
+
 // ---------------------------------------------------------------------------
-// Registry (new countdown games register below as they ship)
+// Registry (all 9 countdown games registered in 21 -> 1 order)
 // ---------------------------------------------------------------------------
 
 export const PUZZLE_SOURCES: Partial<Record<AllGameSlug, PuzzleSource<never>>> = {
@@ -321,6 +351,7 @@ export const PUZZLE_SOURCES: Partial<Record<AllGameSlug, PuzzleSource<never>>> =
   "connect-5": connect5Source as unknown as PuzzleSource<never>,
   "four-score": fourScoreSource as unknown as PuzzleSource<never>,
   "move-2": moveTwoSource as unknown as PuzzleSource<never>,
+  "1-win": oneWinSource as unknown as PuzzleSource<never>,
 };
 
 export function getPuzzleSource<T = unknown>(

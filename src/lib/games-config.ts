@@ -187,7 +187,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "win",
     slug: "1-win",
     showCreate: false,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "Daily community win",
     description:
       "Share 1 win from your day and see how many players around the world share it.",

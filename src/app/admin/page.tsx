@@ -73,6 +73,7 @@ import { EightfoldEchoStudioTab } from "@/components/admin/eightfold-echo-studio
 import { SixPicsStudioTab } from "@/components/admin/six-pics-studio-tab";
 import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
 import { MoveTwoStudioTab } from "@/components/admin/move-two-studio-tab";
+import { OneWinStudioTab } from "@/components/admin/one-win-studio-tab";
 import { HaikuSliceCutter } from "@/components/admin/haiku-slice-cutter";
 import {
   classifyDiagnosticError,
@@ -1275,6 +1276,9 @@ export default function AdminPage() {
             <TabsTrigger value="move-2">
               🎲 Move Two
             </TabsTrigger>
+            <TabsTrigger value="1-win">
+              🏆 1 Win
+            </TabsTrigger>
             <TabsTrigger value="bank">
               📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
             </TabsTrigger>
@@ -2013,6 +2017,15 @@ export default function AdminPage() {
 
           <TabsContent value="move-2">
             <MoveTwoStudioTab
+              targetDate={targetDate}
+              canEdit={editPerm.canEdit}
+              editReason={editPerm.reason}
+              onPublish={requestGenericPublish}
+            />
+          </TabsContent>
+
+          <TabsContent value="1-win">
+            <OneWinStudioTab
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
