@@ -6,6 +6,7 @@
 
 import { toast } from "@/hooks/use-toast";
 import { assetPath } from "@/lib/asset-path";
+import { CUSTOM_LINK_PREFIX, type CustomLinkGameSlug } from "@/lib/games-config";
 
 export interface ShareCustomGameOptions {
   title: string;
@@ -48,6 +49,67 @@ export function generateShortGameId(prefix = "21t"): string {
     rand += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return `${cleanPrefix}-${rand}`;
+}
+
+/** Maximum length of a full custom-game short share link. */
+export const MAX_CUSTOM_SHARE_URL_LENGTH = 75;
+
+const CUSTOM_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+/** Matches `<prefix>-<8 lowercase alphanumerics>` for every supported custom-link prefix. */
+export const CUSTOM_GAME_ID_REGEX = /^(21t|17s|9r|6p|c5)-[a-z0-9]{8}$/;
+
+export function isCustomLinkGameSlug(slug: string): slug is CustomLinkGameSlug {
+  return Object.prototype.hasOwnProperty.call(CUSTOM_LINK_PREFIX, slug);
+}
+
+/** True when `id` is a well-formed compact custom-game id (`21t-`, `17s-`, `9r-`, `6p-`, `c5-`). */
+export function isValidCustomGameId(id: string): boolean {
+  return CUSTOM_GAME_ID_REGEX.test(id);
+}
+
+/** Resolves which game a `?b=<id>` belongs to from its prefix (null when malformed). */
+export function getGameSlugFromCustomId(id: string): CustomLinkGameSlug | null {
+  if (!isValidCustomGameId(id)) return null;
+  const prefix = id.slice(0, id.indexOf("-"));
+  const entry = (Object.entries(CUSTOM_LINK_PREFIX) as [CustomLinkGameSlug, string][]).find(
+    ([, p]) => p === prefix
+  );
+  return entry ? entry[0] : null;
+}
+
+/** Generates a fresh compact custom id for a game, e.g. `9r-x7k9p2m4`. */
+export function generateCustomGameId(gameSlug: CustomLinkGameSlug): string {
+  const prefix = CUSTOM_LINK_PREFIX[gameSlug];
+  const bytes = new Uint8Array(8);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let rand = "";
+  for (const b of bytes) rand += CUSTOM_ID_ALPHABET.charAt(b % CUSTOM_ID_ALPHABET.length);
+  return `${prefix}-${rand}`;
+}
+
+/** Compact share URL for any custom game: `https://21games.ai/games/<slug>?b=<id>` (< 75 chars). */
+export function buildCustomGameShareUrl(
+  gameSlug: CustomLinkGameSlug,
+  id: string
+): string {
+  const origin =
+    typeof window !== "undefined" && window.location?.origin
+      ? window.location.origin
+      : "https://21games.ai";
+  return `${origin}${assetPath(`/games/${gameSlug}`)}?b=${encodeURIComponent(id)}`;
+}
+
+/** Internal Next.js href for any custom game id. */
+export function buildCustomGamePlayHref(
+  gameSlug: CustomLinkGameSlug,
+  id: string
+): string {
+  return `/games/${gameSlug}?b=${encodeURIComponent(id)}`;
 }
 
 /**

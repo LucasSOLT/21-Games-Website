@@ -13,12 +13,13 @@ import {
   getArchiveEntriesForGame,
   parseDateKeyToLocalNoon,
 } from "@/lib/daily-engine";
+import { getAdminOverridesForGame, isDateCompleted } from "@/lib/game-storage";
 import {
-  getAdmin21ThingsOverrides,
-  getAdminConnect5Overrides,
-  isDateCompleted,
-} from "@/lib/game-storage";
-import type { PlayableGameSlug } from "@/lib/games-config";
+  ALL_GAMES,
+  GAME_ACCENT_HEX,
+  getPlayableGameSlugs,
+  type PlayableGameSlug,
+} from "@/lib/games-config";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { AccountNavButton } from "@/components/account/account-nav-button";
@@ -54,20 +55,14 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
   const entries = useMemo(() => {
     void puzzleSyncVersion;
     const activeDate = mounted ? new Date() : SSR_ANCHOR_DATE;
-    const c5Overrides = mounted ? getAdminConnect5Overrides() : undefined;
-    const t21Overrides = mounted ? getAdmin21ThingsOverrides() : undefined;
-    return getArchiveEntriesForGame(
-      gameSlug,
-      60,
-      activeDate,
-      c5Overrides,
-      t21Overrides
-    );
+    const overrides = mounted ? getAdminOverridesForGame(gameSlug) : undefined;
+    return getArchiveEntriesForGame(gameSlug, 60, activeDate, overrides);
   }, [gameSlug, mounted, puzzleSyncVersion]);
 
-  const gameTitle = gameSlug === "21-things" ? "21 Things" : "Connect 5";
-  const accentBg =
-    gameSlug === "21-things" ? "bg-[#daa8d0]" : "bg-[#2ECC71]";
+  const gameConfig = ALL_GAMES.find((g) => g.slug === gameSlug);
+  const gameTitle = gameConfig?.name ?? gameSlug;
+  const accentHex = GAME_ACCENT_HEX[gameSlug];
+  const playableSlugs = getPlayableGameSlugs();
 
   const filtered = entries.filter(
     (entry) =>
@@ -101,28 +96,26 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
           </div>
 
           <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2 shrink-0">
-            <Link
-              href="/games/21-things/archive"
-              className={cn(
-                "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
-                gameSlug === "21-things"
-                  ? "bg-[#daa8d0] text-black border-black"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-black"
-              )}
-            >
-              21 Things<span className="hidden md:inline"> Archive</span>
-            </Link>
-            <Link
-              href="/games/connect-5/archive"
-              className={cn(
-                "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
-                gameSlug === "connect-5"
-                  ? "bg-[#2ECC71] text-black border-black"
-                  : "bg-white text-gray-600 border-gray-200 hover:border-black"
-              )}
-            >
-              Connect 5<span className="hidden md:inline"> Archive</span>
-            </Link>
+            {playableSlugs.map((slug) => {
+              const cfg = ALL_GAMES.find((g) => g.slug === slug);
+              const active = slug === gameSlug;
+              return (
+                <Link
+                  key={slug}
+                  href={`/games/${slug}/archive`}
+                  style={active ? { backgroundColor: GAME_ACCENT_HEX[slug] } : undefined}
+                  className={cn(
+                    "rounded-full px-2 min-[375px]:px-2.5 sm:px-3 py-1 text-[10px] min-[375px]:text-[11px] sm:text-xs font-bold border transition-all whitespace-nowrap",
+                    active
+                      ? "text-black border-black"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-black"
+                  )}
+                >
+                  {cfg?.name ?? slug}
+                  <span className="hidden lg:inline"> Archive</span>
+                </Link>
+              );
+            })}
             <AccountNavButton variant="compact" />
           </div>
         </div>
@@ -130,10 +123,8 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-6">
         <div
-          className={cn(
-            "rounded-2xl border-2 border-black p-6 flex flex-col md:flex-row md:items-center justify-between gap-4",
-            accentBg
-          )}
+          style={{ backgroundColor: accentHex }}
+          className="rounded-2xl border-2 border-black p-6 flex flex-col md:flex-row md:items-center justify-between gap-4"
         >
           <div>
             <div className="inline-flex items-center gap-1.5 rounded-full bg-black text-white px-3 py-1 text-xs font-bold mb-2">

@@ -10,10 +10,29 @@ import {
   SEVENTEEN_SYLLABLES_PUZZLES,
   type SeventeenSyllablesPuzzle,
 } from "@/data/puzzles/17-syllables";
-import type { PlayableGameSlug } from "@/lib/games-config";
+import type { AllGameSlug, PlayableGameSlug } from "@/lib/games-config";
+import { getPuzzleSource, type PuzzleSummary } from "@/lib/puzzle-sources";
+import {
+  daysBetweenDateKeys,
+  formatLongDate,
+  formatShortArchiveDate,
+  getLocalDateKey,
+  getPastDateKeys,
+  getPuzzleNumberForDate,
+  getRotationIndexForDate,
+  parseDateKeyToLocalNoon,
+} from "@/lib/date-keys";
 
-const LAUNCH_EPOCH = "2026-09-01";
-const ROTATION_ANCHOR = "2026-11-05";
+export {
+  daysBetweenDateKeys,
+  formatLongDate,
+  formatShortArchiveDate,
+  getLocalDateKey,
+  getPastDateKeys,
+  getPuzzleNumberForDate,
+  getRotationIndexForDate,
+  parseDateKeyToLocalNoon,
+};
 
 const AUTHORS_ROTATION = [
   { author: "SOL Theory", editor: "Daily Editorial" },
@@ -22,81 +41,6 @@ const AUTHORS_ROTATION = [
   { author: "SOL Theory", editor: "Words & Logic Desk" },
 ];
 
-/**
- * Formats a Date object as local YYYY-MM-DD (browser timezone).
- */
-export function getLocalDateKey(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-/**
- * Parses a YYYY-MM-DD string into a local Date at noon (avoids DST boundary shifts).
- */
-export function parseDateKeyToLocalNoon(dateKey: string): Date {
-  const [y, m, d] = dateKey.split("-").map((n) => parseInt(n, 10));
-  if (!y || !m || !d) return new Date();
-  return new Date(y, m - 1, d, 12, 0, 0);
-}
-
-/**
- * Computes whole calendar days between two YYYY-MM-DD strings.
- */
-export function daysBetweenDateKeys(startKey: string, endKey: string): number {
-  const a = parseDateKeyToLocalNoon(startKey);
-  const b = parseDateKeyToLocalNoon(endKey);
-  const diffMs = b.getTime() - a.getTime();
-  return Math.round(diffMs / (1000 * 60 * 60 * 24));
-}
-
-/**
- * Monotonically increasing daily puzzle number (#1, #2, ...).
- */
-export function getPuzzleNumberForDate(dateKey: string = getLocalDateKey()): number {
-  const diff = daysBetweenDateKeys(LAUNCH_EPOCH, dateKey);
-  return diff >= 0 ? diff + 1 : Math.abs(diff) + 1;
-}
-
-/**
- * Returns deterministic rotation index into a bank of length `bankLength`.
- */
-export function getRotationIndexForDate(
-  dateKey: string,
-  bankLength: number
-): number {
-  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
-  return ((diff % bankLength) + bankLength) % bankLength;
-}
-
-/**
- * Formats a YYYY-MM-DD date key like "Thursday, November 5" or "Nov. 5, 2026".
- */
-export function formatLongDate(dateKey: string): string {
-  const d = parseDateKeyToLocalNoon(dateKey);
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  }).format(d);
-}
-
-export function formatShortArchiveDate(dateKey: string): {
-  dayName: string;
-  dateFormatted: string;
-} {
-  const d = parseDateKeyToLocalNoon(dateKey);
-  const dayName = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(
-    d
-  );
-  const dateFormatted = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(d);
-  return { dayName, dateFormatted };
-}
 
 export function getCreditsForDate(dateKey: string = getLocalDateKey()): {
   author: string;
@@ -173,28 +117,6 @@ export function get17SyllablesPuzzleForDate(
   };
 }
 
-/**
- * Generates an array of past N date keys (including today at index 0) for Archive views.
- */
-export function getPastDateKeys(
-  daysCount: number = 60,
-  fromDate: Date = new Date()
-): string[] {
-  const keys: string[] = [];
-  for (let i = 0; i < daysCount; i++) {
-    const d = new Date(
-      fromDate.getFullYear(),
-      fromDate.getMonth(),
-      fromDate.getDate() - i,
-      12,
-      0,
-      0
-    );
-    keys.push(getLocalDateKey(d));
-  }
-  return keys;
-}
-
 export interface ArchiveEntrySummary {
   dateKey: string;
   dayName: string;
@@ -206,55 +128,86 @@ export interface ArchiveEntrySummary {
   editor: string;
 }
 
+export type DailyPuzzleOrigin = "override" | "bank" | "seeded-fallback";
+
+export interface DailyPuzzleResolution<T = unknown> {
+  gameSlug: AllGameSlug;
+  dateKey: string;
+  puzzle: T;
+  origin: DailyPuzzleOrigin;
+  summary: PuzzleSummary;
+}
+
+/**
+ * Resolves the daily puzzle payload for ANY registered game + date with zero-breakage guarantees:
+ *   1. `override` (Supabase / admin localStorage) — only when it passes runtime payload validation.
+ *   2. `bank`      deterministic rotation through the static bank (validated).
+ *   3. `seeded-fallback` deterministic `hash(gameSlug + ":" + dateKey)` generator.
+ * Returns `null` only when the game has no registered puzzle source yet.
+ */
+export function getDailyPuzzleForGame<T = unknown>(
+  gameSlug: string,
+  dateKey: string = getLocalDateKey(),
+  overrides?: Record<string, unknown> | null
+): DailyPuzzleResolution<T> | null {
+  const source = getPuzzleSource<T>(gameSlug);
+  if (!source) return null;
+
+  const make = (puzzle: T, origin: DailyPuzzleOrigin): DailyPuzzleResolution<T> => ({
+    gameSlug: source.slug,
+    dateKey,
+    puzzle,
+    origin,
+    summary: source.summarize(puzzle, dateKey),
+  });
+
+  const override = overrides?.[dateKey];
+  if (override !== undefined && override !== null) {
+    try {
+      if (source.validate(override)) return make(override, "override");
+    } catch {
+      // Malformed override — fall through to bank
+    }
+  }
+
+  try {
+    const fromBank = source.fromBank(dateKey);
+    if (source.validate(fromBank)) return make(fromBank, "bank");
+  } catch {
+    // Bank failure — fall through to seeded generator
+  }
+
+  return make(source.generateSeeded(dateKey), "seeded-fallback");
+}
+
+/**
+ * Builds the archive rows for any registered game. `overridesForGame` is the per-date
+ * override map (admin/Supabase cache) for that single game.
+ */
 export function getArchiveEntriesForGame(
   gameSlug: PlayableGameSlug,
   daysCount: number = 60,
   fromDate: Date = new Date(),
-  c5Overrides?: Record<string, Connect5Puzzle>,
-  t21Overrides?: Record<string, TwentyOneThingsBoard>,
-  s17Overrides?: Record<string, SeventeenSyllablesPuzzle>
+  overridesForGame?: Record<string, unknown> | null
 ): ArchiveEntrySummary[] {
   const dateKeys = getPastDateKeys(daysCount, fromDate);
-  return dateKeys.map((dateKey) => {
+  const out: ArchiveEntrySummary[] = [];
+  for (const dateKey of dateKeys) {
+    const resolved = getDailyPuzzleForGame(gameSlug, dateKey, overridesForGame);
+    if (!resolved) continue;
     const { dayName, dateFormatted } = formatShortArchiveDate(dateKey);
-    if (gameSlug === "connect-5") {
-      const p = getConnect5PuzzleForDate(dateKey, c5Overrides);
-      return {
-        dateKey,
-        dayName,
-        dateFormatted,
-        puzzleNumber: p.puzzleNumber,
-        gameSlug,
-        title: `${p.title} (${p.words[0]} → …)`,
-        author: p.author,
-        editor: p.editor,
-      };
-    } else if (gameSlug === "17-syllables") {
-      const p = get17SyllablesPuzzleForDate(dateKey, s17Overrides);
-      return {
-        dateKey,
-        dayName,
-        dateFormatted,
-        puzzleNumber: p.puzzleNumber,
-        gameSlug,
-        title: `${p.theme} — ${p.lines[0]}`,
-        author: p.author,
-        editor: "Daily Editorial",
-      };
-    } else {
-      const b = get21ThingsBoardForDate(dateKey, t21Overrides);
-      return {
-        dateKey,
-        dayName,
-        dateFormatted,
-        puzzleNumber: b.puzzleNumber,
-        gameSlug,
-        title: b.title,
-        author: b.creatorName,
-        editor: "Daily Editorial",
-      };
-    }
-  });
+    out.push({
+      dateKey,
+      dayName,
+      dateFormatted,
+      puzzleNumber: resolved.summary.puzzleNumber,
+      gameSlug,
+      title: resolved.summary.title,
+      author: resolved.summary.author,
+      editor: resolved.summary.editor,
+    });
+  }
+  return out;
 }
 
 /**

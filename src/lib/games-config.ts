@@ -9,7 +9,76 @@ export type GameColor =
   | "customYellow2"
   | "customF4D621";
 
-export type PlayableGameSlug = "21-things" | "connect-5" | "17-syllables";
+/** All 9 games in strict `21 → 1` countdown order. */
+export const ALL_GAME_SLUGS = [
+  "21-things",
+  "17-syllables",
+  "9-rhymes",
+  "eightfold-echo",
+  "6-pics",
+  "connect-5",
+  "four-score",
+  "move-2",
+  "1-win",
+] as const;
+
+export type AllGameSlug = (typeof ALL_GAME_SLUGS)[number];
+
+/**
+ * Slugs of games that can be (or will be) playable. Whether a slug is live right now is
+ * decided at runtime by `isPlayableGameSlug` (driven by `isPlayable` in `ALL_GAMES`).
+ */
+export type PlayableGameSlug = AllGameSlug;
+
+/** Countdown number for each game (`21 → 17 → 9 → 8 → 6 → 5 → 4 → 2 → 1`). */
+export const GAME_COUNTDOWN_NUMBER: Record<AllGameSlug, number> = {
+  "21-things": 21,
+  "17-syllables": 17,
+  "9-rhymes": 9,
+  "eightfold-echo": 8,
+  "6-pics": 6,
+  "connect-5": 5,
+  "four-score": 4,
+  "move-2": 2,
+  "1-win": 1,
+};
+
+/** Solid accent hex per game (archive headers, switcher pills, stats chips). */
+export const GAME_ACCENT_HEX: Record<AllGameSlug, string> = {
+  "21-things": "#daa8d0",
+  "17-syllables": "#b6df52",
+  "9-rhymes": "#f7da21",
+  "eightfold-echo": "#daa8d0",
+  "6-pics": "#f4d621",
+  "connect-5": "#2ECC71",
+  "four-score": "#F9D423",
+  "move-2": "#b6df52",
+  "1-win": "#e0e1d9",
+};
+
+/** localStorage key prefix used for per-date saved progress (self-healing reset). */
+export const GAME_PROGRESS_PREFIX: Record<AllGameSlug, string> = {
+  "21-things": "solgames_v1_21t_progress_",
+  "17-syllables": "solgames_v1_17s_progress_",
+  "9-rhymes": "solgames_v1_9r_progress_",
+  "eightfold-echo": "solgames_v1_8e_progress_",
+  "6-pics": "solgames_v1_6p_progress_",
+  "connect-5": "solgames_v1_c5_progress_",
+  "four-score": "solgames_v1_4s_progress_",
+  "move-2": "solgames_v1_m2_progress_",
+  "1-win": "solgames_v1_1w_progress_",
+};
+
+/** Short-link prefixes for `?b=<prefix>-<8chars>` custom games (showCreate games only). */
+export const CUSTOM_LINK_PREFIX = {
+  "21-things": "21t",
+  "17-syllables": "17s",
+  "9-rhymes": "9r",
+  "6-pics": "6p",
+  "connect-5": "c5",
+} as const;
+
+export type CustomLinkGameSlug = keyof typeof CUSTOM_LINK_PREFIX;
 
 export interface GameConfig {
   id?: string;
@@ -131,6 +200,17 @@ export function getGameBySlug(slug: string): GameConfig | undefined {
   return ALL_GAMES.find((g) => g.slug === slug);
 }
 
+export function isAllGameSlug(slug: string): slug is AllGameSlug {
+  return (ALL_GAME_SLUGS as readonly string[]).includes(slug);
+}
+
 export function isPlayableGameSlug(slug: string): slug is PlayableGameSlug {
-  return slug === "21-things" || slug === "connect-5" || slug === "17-syllables";
+  return ALL_GAMES.some((g) => g.slug === slug && g.isPlayable);
+}
+
+/** Slugs of every game that currently has a live daily puzzle + archive (static params). */
+export function getPlayableGameSlugs(): PlayableGameSlug[] {
+  return ALL_GAMES.filter((g) => g.isPlayable).map(
+    (g) => g.slug as PlayableGameSlug
+  );
 }

@@ -6,11 +6,17 @@ import { useAuth } from "@/components/account/auth-provider";
 import { GameCard } from "@/components/game-card";
 import { GameLogo } from "@/components/game-logo";
 import { Hero } from "@/components/hero";
-import { ALL_GAMES } from "@/lib/games-config";
+import {
+  ALL_GAMES,
+  GAME_ACCENT_HEX,
+  getPlayableGameSlugs,
+  type AllGameSlug,
+} from "@/lib/games-config";
 import {
   formatShortArchiveDate,
   get21ThingsBoardForDate,
   getConnect5PuzzleForDate,
+  getDailyPuzzleForGame,
   getLocalDateKey,
   getPastDateKeys,
   parseDateKeyToLocalNoon,
@@ -18,6 +24,7 @@ import {
 import {
   getAdmin21ThingsOverrides,
   getAdminConnect5Overrides,
+  getAdminOverridesForGame,
 } from "@/lib/game-storage";
 import "@/components/hero.css";
 
@@ -74,45 +81,46 @@ export default function Home() {
     };
   }, [mounted, puzzleSyncVersion]);
 
-  // Compute past 4 days dynamically on client without hydration mismatch
+  const playableSlugs = getPlayableGameSlugs();
+  const liveCount = playableSlugs.length;
+  const comingCount = ALL_GAMES.length - liveCount;
+
+  // Past 4 days, rotating through every playable game that has a daily puzzle source.
   const recentArchiveItems = useMemo(() => {
     void puzzleSyncVersion;
     const activeDate = mounted ? new Date() : SSR_ANCHOR_DATE;
-    const c5Overrides = mounted ? getAdminConnect5Overrides() : undefined;
-    const t21Overrides = mounted ? getAdmin21ThingsOverrides() : undefined;
-    const keys = getPastDateKeys(5, activeDate).slice(1, 5); // Past 4 days before today
-    return keys.map((dateKey, idx) => {
+    const keys = getPastDateKeys(5, activeDate).slice(1, 5);
+    const rotation = playableSlugs.filter(
+      (slug) => getDailyPuzzleForGame(slug, keys[0] ?? "2026-11-05") !== null
+    );
+    return keys.flatMap((dateKey, idx) => {
+      if (rotation.length === 0) return [];
+      const slug: AllGameSlug = rotation[idx % rotation.length]!;
+      const resolved = getDailyPuzzleForGame(
+        slug,
+        dateKey,
+        mounted ? getAdminOverridesForGame(slug) : undefined
+      );
+      if (!resolved) return [];
       const { dayName, dateFormatted } = formatShortArchiveDate(dateKey);
-      const isConnect5 = idx % 2 === 1;
-      if (isConnect5) {
-        const p = getConnect5PuzzleForDate(dateKey, c5Overrides);
-        return {
+      const cfg = ALL_GAMES.find((g) => g.slug === slug)!;
+      return [
+        {
           dateKey,
           day: dayName,
           date: dateFormatted,
-          gameName: "Connect 5",
-          gameSlug: "connect-5" as const,
-          subtitle: `${p.title} (#${p.puzzleNumber})`,
-          author: p.author,
-          editor: p.editor,
-          badgeBg: "bg-[#2ECC71]",
-        };
-      } else {
-        const b = get21ThingsBoardForDate(dateKey, t21Overrides);
-        return {
-          dateKey,
-          day: dayName,
-          date: dateFormatted,
-          gameName: "21 Things",
-          gameSlug: "21-things" as const,
-          subtitle: `${b.title} (#${b.puzzleNumber})`,
-          author: b.creatorName,
-          editor: "Daily Editorial",
-          badgeBg: "bg-[#daa8d0]",
-        };
-      }
+          gameName: cfg.name,
+          gameSlug: slug,
+          logo: cfg.logo,
+          subtitle: `${resolved.summary.title} (#${resolved.summary.puzzleNumber})`,
+          author: resolved.summary.author,
+          editor: resolved.summary.editor,
+          accent: GAME_ACCENT_HEX[slug],
+        },
+      ];
     });
-  }, [mounted, puzzleSyncVersion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, puzzleSyncVersion, liveCount]);
 
   return (
     <div className="bg-background overflow-x-hidden">
@@ -170,15 +178,15 @@ export default function Home() {
                 All 9 SOL Theory Games
               </h2>
               <p className="text-sm text-gray-600 mt-1">
-                2 playable daily games live now · 7 new original formats in development
+                {liveCount} playable daily games live now · {comingCount} new original formats in development
               </p>
             </div>
             <div className="flex items-center gap-2.5 text-xs font-headline font-bold">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-black bg-white px-3 py-1 text-black shadow-2xs">
-                <span className="h-2 w-2 rounded-full bg-[#2ECC71]" /> 2 Daily Live
+                <span className="h-2 w-2 rounded-full bg-[#2ECC71]" /> {liveCount} Daily Live
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-300 bg-gray-50 px-3 py-1 text-gray-600">
-                7 Coming Soon
+                {comingCount} Coming Soon
               </span>
             </div>
           </div>
@@ -213,11 +221,12 @@ export default function Home() {
                 <div>
                   <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-2.5 sm:mb-3">
                     <GameLogo
-                      logo={item.gameSlug === "connect-5" ? "connect" : "things"}
+                      logo={item.logo}
                       variant="mini"
                     />
                     <span
-                      className={`inline-block rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-black text-black border border-black ${item.badgeBg}`}
+                      style={{ backgroundColor: item.accent }}
+                      className="inline-block rounded-full px-2 sm:px-3 py-0.5 text-[10px] sm:text-xs font-black text-black border border-black"
                     >
                       {item.gameName}
                     </span>
@@ -246,18 +255,16 @@ export default function Home() {
           </div>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              href="/games/21-things/archive"
-              className="rounded-full border-2 border-black bg-[#daa8d0] px-5 py-2 text-xs sm:text-sm font-headline font-black text-black hover:opacity-90 transition-opacity"
-            >
-              21 Things Full Archive →
-            </Link>
-            <Link
-              href="/games/connect-5/archive"
-              className="rounded-full border-2 border-black bg-[#2ECC71] px-5 py-2 text-xs sm:text-sm font-headline font-black text-black hover:opacity-90 transition-opacity"
-            >
-              Connect 5 Full Archive →
-            </Link>
+            {playableSlugs.map((slug) => (
+              <Link
+                key={slug}
+                href={`/games/${slug}/archive`}
+                style={{ backgroundColor: GAME_ACCENT_HEX[slug] }}
+                className="rounded-full border-2 border-black px-5 py-2 text-xs sm:text-sm font-headline font-black text-black hover:opacity-90 transition-opacity"
+              >
+                {ALL_GAMES.find((g) => g.slug === slug)?.name} Full Archive →
+              </Link>
+            ))}
           </div>
         </section>
 
@@ -271,18 +278,17 @@ export default function Home() {
           </h3>
           <p className="text-sm text-gray-600 max-w-2xl mx-auto">
             Built by the SOL Theory team. Our
-            daily games combine gratitude-driven social curation (
-            <strong>21 Things</strong>) and crisp word-chain deduction (
-            <strong>Connect 5</strong>)—refreshed automatically every midnight
-            and always free to play.
+            daily games count down from 21 to 1: gratitude-driven curation (
+            <strong>21 Things</strong>), poetry, rhymes, logic, pictures and
+            word chains—refreshed automatically every midnight and always free
+            to play.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm font-bold pt-2">
-            <Link href="/games/21-things" className="hover:underline">
-              Play 21 Things
-            </Link>
-            <Link href="/games/connect-5" className="hover:underline">
-              Play Connect 5
-            </Link>
+            {playableSlugs.map((slug) => (
+              <Link key={slug} href={`/games/${slug}`} className="hover:underline">
+                Play {ALL_GAMES.find((g) => g.slug === slug)?.name}
+              </Link>
+            ))}
             <Link
               href="/games/21-things?mode=create"
               className="hover:underline"

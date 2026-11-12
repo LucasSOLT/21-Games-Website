@@ -1,10 +1,10 @@
 import React from "react";
 import { notFound } from "next/navigation";
 import { GameArchiveView } from "@/components/game-archive";
-import { isPlayableGameSlug } from "@/lib/games-config";
+import { getPlayableGameSlugs, isPlayableGameSlug } from "@/lib/games-config";
 
 export function generateStaticParams() {
-  return [{ slug: "21-things" }, { slug: "connect-5" }];
+  return getPlayableGameSlugs().map((slug) => ({ slug }));
 }
 
 export default async function GameArchivePage({

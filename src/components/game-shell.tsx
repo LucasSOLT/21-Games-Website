@@ -21,7 +21,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { formatLongDate } from "@/lib/daily-engine";
 import { getGameStats } from "@/lib/game-storage";
-import type { PlayableGameSlug } from "@/lib/games-config";
+import {
+  ALL_GAMES,
+  GAME_ACCENT_HEX,
+  getPlayableGameSlugs,
+  type PlayableGameSlug,
+} from "@/lib/games-config";
+import { getGameHelp } from "@/lib/game-help";
 import { AccountNavButton } from "@/components/account/account-nav-button";
 import { useAuth } from "@/components/account/auth-provider";
 import { getAvatarTextClass } from "@/components/account/profile-viewer-modal";
@@ -43,6 +49,39 @@ interface GameShellProps {
   onHelpOpenChange?: (open: boolean) => void;
   statsOpen?: boolean;
   onStatsOpenChange?: (open: boolean) => void;
+}
+
+function gameNameOf(slug: PlayableGameSlug): string {
+  return ALL_GAMES.find((g) => g.slug === slug)?.name ?? slug;
+}
+
+function renderBold(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={i}>{part.slice(2, -2)}</strong>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    )
+  );
+}
+
+function GenericHelpBody({ slug }: { slug: PlayableGameSlug }) {
+  const help = getGameHelp(slug);
+  return (
+    <div className="space-y-3 text-sm text-gray-700">
+      <div
+        className="rounded-xl p-3 border border-black/20"
+        style={{ backgroundColor: `${GAME_ACCENT_HEX[slug]}33` }}
+      >
+        <p className="font-bold text-black mb-1">{help.headline}</p>
+        <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-sm">
+          {help.rules.map((rule) => (
+            <li key={rule}>{renderBold(rule)}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 export function formatTimerSeconds(totalSeconds: number): string {
@@ -77,6 +116,7 @@ export function GameShell({
 
   const { profile, openAccountModal } = useAuth();
 
+  const playableSlugs = getPlayableGameSlugs();
   const stats = getGameStats(gameSlug);
   const winRate =
     stats.played > 0 ? Math.round((stats.won / stats.played) * 100) : 0;
@@ -111,29 +151,26 @@ export function GameShell({
               <span className="hidden sm:inline">All Games</span>
             </Link>
 
-            <div className="hidden md:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200">
-              <Link
-                href="/games/21-things"
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-bold transition-all",
-                  gameSlug === "21-things"
-                    ? "bg-[#daa8d0] text-black border border-black shadow-2xs"
-                    : "text-gray-600 hover:text-black"
-                )}
-              >
-                21 Things
-              </Link>
-              <Link
-                href="/games/connect-5"
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-bold transition-all",
-                  gameSlug === "connect-5"
-                    ? "bg-[#2ECC71] text-black border border-black shadow-2xs"
-                    : "text-gray-600 hover:text-black"
-                )}
-              >
-                Connect 5
-              </Link>
+            <div className="hidden md:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200 max-w-[38vw] lg:max-w-[46vw] overflow-x-auto">
+              {playableSlugs.map((slug) => (
+                <Link
+                  key={slug}
+                  href={`/games/${slug}`}
+                  style={
+                    gameSlug === slug
+                      ? { backgroundColor: GAME_ACCENT_HEX[slug] }
+                      : undefined
+                  }
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-bold transition-all whitespace-nowrap",
+                    gameSlug === slug
+                      ? "text-black border border-black shadow-2xs"
+                      : "text-gray-600 hover:text-black"
+                  )}
+                >
+                  {gameNameOf(slug)}
+                </Link>
+              ))}
             </div>
           </div>
 
@@ -207,29 +244,21 @@ export function GameShell({
         {!unifiedHeader && (
           <div className="sm:hidden px-2 min-[375px]:px-3 py-1.5 bg-gray-50/95 border-t border-black/10 flex items-center justify-between gap-1.5 min-[375px]:gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
-              <div className="inline-flex items-center gap-1">
-                <Link
-                  href="/games/21-things"
-                  className={cn(
-                    "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
-                    gameSlug === "21-things"
-                      ? "bg-black text-white border border-black shadow-2xs"
-                      : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
-                  )}
-                >
-                  21 Things
-                </Link>
-                <Link
-                  href="/games/connect-5"
-                  className={cn(
-                    "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
-                    gameSlug === "connect-5"
-                      ? "bg-black text-white border border-black shadow-2xs"
-                      : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
-                  )}
-                >
-                  Connect 5
-                </Link>
+              <div className="inline-flex items-center gap-1 overflow-x-auto max-w-[60vw]">
+                {playableSlugs.map((slug) => (
+                  <Link
+                    key={slug}
+                    href={`/games/${slug}`}
+                    className={cn(
+                      "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
+                      gameSlug === slug
+                        ? "bg-black text-white border border-black shadow-2xs"
+                        : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
+                    )}
+                  >
+                    {gameNameOf(slug)}
+                  </Link>
+                ))}
               </div>
               <span className="hidden xs:inline text-[11px] text-gray-500 font-medium truncate">
                 By {author}
@@ -263,11 +292,7 @@ export function GameShell({
               How to Play {gameTitle}
             </DialogTitle>
             <DialogDescription>
-              {gameSlug === "21-things"
-                ? "A gratitude-driven social curation game built around a 21 → 6 → 3 → 1 narrowing funnel."
-                : gameSlug === "17-syllables"
-                ? "A daily haiku deduction puzzle where you assemble syllables into a 5-7-5 poem."
-                : "A 5-row compound word-chain puzzle inspired by daily crosswords."}
+              {getGameHelp(gameSlug).summary}
             </DialogDescription>
           </DialogHeader>
 
@@ -343,6 +368,8 @@ export function GameShell({
                 </li>
               </ul>
             </div>
+          ) : gameSlug !== "connect-5" ? (
+            <GenericHelpBody slug={gameSlug} />
           ) : (
             <div className="space-y-3 text-sm text-gray-700">
               <div className="rounded-xl bg-emerald-50/70 p-3 border border-emerald-300">

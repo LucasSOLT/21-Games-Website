@@ -10,6 +10,7 @@ const SUITES = [
   ["scripts/test-check-reveal.ts"],
   ["--test", "src/lib/__tests__/win-screen-share.test.ts"],
   ["scripts/test-cp01-zoom.ts"],
+  ["scripts/test-cp02-multigame.ts"],
 ];
 
 let failed = false;

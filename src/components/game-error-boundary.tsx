@@ -2,9 +2,10 @@
 
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import Link from "next/link";
+import { GAME_PROGRESS_PREFIX, type AllGameSlug } from "@/lib/games-config";
 
 export interface GameErrorBoundaryProps {
-  gameSlug: "21-things" | "connect-5";
+  gameSlug: AllGameSlug;
   gameTitle: string;
   children: ReactNode;
   storageKeysToReset?: string[];
@@ -62,12 +63,7 @@ export class GameErrorBoundary extends Component<
 
     if (typeof window !== "undefined" && window.localStorage) {
       try {
-        const prefix =
-          gameSlug === "21-things"
-            ? "solgames_v1_21t_progress_"
-            : gameSlug === "connect-5"
-            ? "solgames_v1_c5_progress_"
-            : null;
+        const prefix: string | null = GAME_PROGRESS_PREFIX[gameSlug] ?? null;
 
         if (prefix) {
           const keysToRemove: string[] = [];

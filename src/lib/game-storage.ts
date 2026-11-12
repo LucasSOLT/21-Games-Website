@@ -5,7 +5,8 @@ import type {
 } from "@/data/puzzles/21-things";
 import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
-import type { PlayableGameSlug } from "@/lib/games-config";
+import type { AllGameSlug, PlayableGameSlug } from "@/lib/games-config";
+import { getPuzzleSource } from "@/lib/puzzle-sources";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
@@ -987,6 +988,15 @@ function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
     const current = getAdmin17SyllablesOverrides();
     current[detail.dateKey] = puzzle;
     safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+  } else if (
+    isGenericOverrideSlug(detail.gameSlug) &&
+    typeof detail.dateKey === "string" &&
+    payload
+  ) {
+    // Countdown games #9 .. #1 share one generic, validated override cache.
+    if (cacheGenericOverride(detail.gameSlug, detail.dateKey, payload)) {
+      detail.puzzle = payload;
+    }
   }
 
   try {
@@ -1170,6 +1180,17 @@ export function initRealtimePuzzleSync(): () => void {
                       source: "realtime",
                     });
                   }
+                } else if (
+                  isGenericOverrideSlug(newRow.game_slug) &&
+                  cacheGenericOverride(newRow.game_slug, dateKey, newRow.payload)
+                ) {
+                  broadcastPuzzleUpdate({
+                    gameSlug: newRow.game_slug,
+                    dateKey,
+                    hash: computePuzzleContentHash(newRow.payload),
+                    puzzle: newRow.payload,
+                    source: "realtime",
+                  });
                 }
               } else {
                 // If row payload missing or event was DELETE, trigger full resync
@@ -1237,6 +1258,7 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
     let c5Changed = false;
     let t21Changed = false;
     let s17Changed = false;
+    let genericChanged = false;
 
     const puzzleHashes: Record<string, string> = {};
 
@@ -1265,6 +1287,13 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
           s17Changed = true;
           puzzleHashes[`17-syllables:${dateKey}`] = computePuzzleContentHash(puzzle);
         }
+      } else if (isGenericOverrideSlug(row.game_slug) && row.payload) {
+        if (cacheGenericOverride(row.game_slug, dateKey, row.payload)) {
+          genericChanged = true;
+          puzzleHashes[`${row.game_slug}:${dateKey}`] = computePuzzleContentHash(
+            row.payload
+          );
+        }
       }
     }
 
@@ -1278,7 +1307,7 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
       safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, s17Overrides);
     }
 
-    if (c5Changed || t21Changed || s17Changed) {
+    if (c5Changed || t21Changed || s17Changed || genericChanged) {
       broadcastPuzzleUpdate({
         source: "syncAllRemoteDailyPuzzles",
         c5Overrides,
@@ -1704,6 +1733,209 @@ export async function saveAdmin17SyllablesOverride(
       hash,
       payload: puzzle,
     });
+  }
+
+  return {
+    ok: true,
+    remotePersisted,
+    error: remoteError,
+    rawError,
+    diagnosticReport,
+  };
+}
+
+// ============================================================================
+// Generic (all 9 games) override cache, remote fetch & admin save
+// ============================================================================
+
+const LEGACY_OVERRIDE_SLUGS: ReadonlySet<string> = new Set([
+  "connect-5",
+  "21-things",
+  "17-syllables",
+]);
+
+/** True for any registered game slug that is NOT one of the 3 legacy typed override stores. */
+export function isGenericOverrideSlug(slug: unknown): slug is AllGameSlug {
+  return (
+    typeof slug === "string" &&
+    !LEGACY_OVERRIDE_SLUGS.has(slug) &&
+    getPuzzleSource(slug) !== null
+  );
+}
+
+function genericOverrideKey(slug: string): string {
+  return `${STORAGE_PREFIX}_admin_${slug}_overrides`;
+}
+
+/** Per-date override map for ANY game (legacy typed stores or the generic cache). */
+export function getAdminOverridesForGame(
+  gameSlug: string
+): Record<string, unknown> {
+  if (gameSlug === "connect-5") return getAdminConnect5Overrides();
+  if (gameSlug === "21-things") return getAdmin21ThingsOverrides();
+  if (gameSlug === "17-syllables") return getAdmin17SyllablesOverrides();
+  return safeReadJson<Record<string, unknown>>(genericOverrideKey(gameSlug), {});
+}
+
+/**
+ * Validates `payload` against the game's registered schema and stores it in the generic
+ * override cache. Returns false (and stores nothing) when the payload is malformed.
+ */
+export function cacheGenericOverride(
+  gameSlug: string,
+  dateKey: string,
+  payload: unknown
+): boolean {
+  const source = getPuzzleSource(gameSlug);
+  if (!source || !source.validate(payload)) return false;
+  const current = getAdminOverridesForGame(gameSlug);
+  current[dateKey] = payload;
+  safeWriteJson(genericOverrideKey(gameSlug), current);
+  return true;
+}
+
+export function clearGenericOverride(gameSlug: string, dateKey: string): void {
+  const current = getAdminOverridesForGame(gameSlug);
+  if (!(dateKey in current)) return;
+  delete current[dateKey];
+  safeWriteJson(genericOverrideKey(gameSlug), current);
+}
+
+/** Fetches a single day's override row from Supabase and caches it when valid. */
+export async function fetchRemoteOverrideForGame(
+  gameSlug: string,
+  dateKey: string
+): Promise<unknown | null> {
+  if (!isSupabaseConfigured) return null;
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("daily_puzzles")
+      .select("payload")
+      .eq("game_slug", gameSlug)
+      .eq("puzzle_date", dateKey)
+      .maybeSingle();
+    if (!error && data && data.payload) {
+      if (isGenericOverrideSlug(gameSlug)) {
+        return cacheGenericOverride(gameSlug, dateKey, data.payload)
+          ? data.payload
+          : null;
+      }
+      const source = getPuzzleSource(gameSlug);
+      return source && source.validate(data.payload) ? data.payload : null;
+    }
+  } catch {
+    // Fall back to local overrides / bank
+  }
+  return null;
+}
+
+export interface GenericOverrideMeta {
+  puzzleNumber: number;
+  title: string;
+  author?: string;
+  editor?: string;
+}
+
+/**
+ * Saves an admin puzzle for any game: validate → local cache → Supabase upsert →
+ * BroadcastChannel + Realtime broadcast (same flow as the legacy typed savers).
+ */
+export async function saveAdminOverrideForGame(
+  gameSlug: AllGameSlug,
+  dateKey: string,
+  payload: unknown,
+  meta: GenericOverrideMeta,
+  authContext?: AdminSaveAuthContext
+): Promise<SaveAdminOverrideResult> {
+  const source = getPuzzleSource(gameSlug);
+  if (!source || !source.validate(payload)) {
+    return {
+      ok: false,
+      remotePersisted: false,
+      error: `Invalid ${gameSlug} puzzle payload — failed schema validation.`,
+    };
+  }
+  const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
+  cacheGenericOverride(gameSlug, dateKey, payload);
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(
+        `${STORAGE_PREFIX}_${gameSlug}_progress_${dateKey}`
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  const hash = computePuzzleContentHash(payload);
+  let remotePersisted = false;
+  let remoteError: string | undefined;
+  let rawError: unknown;
+  let diagnosticReport: DiagnosticReport | undefined;
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const row = {
+          game_slug: gameSlug,
+          puzzle_date: dateKey,
+          puzzle_number: meta.puzzleNumber,
+          title: meta.title,
+          author: meta.author || "SOL Theory",
+          editor: meta.editor || "Daily Editorial",
+          content_hash: hash,
+          payload,
+          updated_at: new Date().toISOString(),
+        };
+        let { error } = await supabase
+          .from("daily_puzzles")
+          .upsert(row, { onConflict: "game_slug,puzzle_date" });
+        if (error && error.message && error.message.toLowerCase().includes("content_hash")) {
+          const { content_hash: _omit, ...rest } = row;
+          void _omit;
+          const fallback = await supabase
+            .from("daily_puzzles")
+            .upsert(rest, { onConflict: "game_slug,puzzle_date" });
+          error = fallback.error;
+        }
+        if (error) {
+          rawError = error;
+          remoteError = error.message;
+          diagnosticReport = classifyDiagnosticError(error, {
+            gameSlug,
+            targetDate: dateKey,
+            action: "save",
+            puzzlePayload: payload,
+            userEmail: resolvedAuth.userEmail,
+            userRole: resolvedAuth.userRole,
+          });
+        } else {
+          remotePersisted = true;
+        }
+      } catch (err: unknown) {
+        rawError = err;
+        remoteError =
+          err instanceof Error
+            ? err.message
+            : `Failed to persist ${gameSlug} puzzle to Supabase.`;
+        diagnosticReport = classifyDiagnosticError(err, {
+          gameSlug,
+          targetDate: dateKey,
+          action: "save",
+          puzzlePayload: payload,
+          userEmail: resolvedAuth.userEmail,
+          userRole: resolvedAuth.userRole,
+        });
+      }
+    }
+  }
+
+  broadcastPuzzleUpdate({ gameSlug, dateKey, hash, puzzle: payload });
+  if (remotePersisted) {
+    broadcastRemotePuzzleUpdate({ gameSlug, dateKey, hash, payload });
   }
 
   return {

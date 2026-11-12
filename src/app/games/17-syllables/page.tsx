@@ -11,7 +11,7 @@ export const metadata = {
 export default function SeventeenSyllablesPage() {
   return (
     <GameErrorBoundary
-      gameSlug={"17-syllables" as unknown as "21-things"}
+      gameSlug="17-syllables"
       gameTitle="17 Syllables"
       storageKeysToReset={["solgames_v1_17s_progress"]}
     >

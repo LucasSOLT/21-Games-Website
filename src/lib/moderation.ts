@@ -704,3 +704,31 @@ export function checkAdmin17SyllablesModeration(puzzle: {
   return check17SyllablesPuzzleModeration(puzzle, { mode: "public" });
 }
 
+
+/**
+ * Surface selector for `moderateText`:
+ *   - `"public"`         daily puzzles, profiles, `1 Win`, `21 Things` reflections (Tier 1 + Tier 2)
+ *   - `"private"` / `"private_custom"`  friend games opened via `?b=<id>` (Tier 1 only;
+ *                         casual swearing allowed)
+ */
+export type ModerationSurface = "public" | "private" | "private_custom";
+
+/** Convenience wrapper around `checkContentModeration` taking a named surface. */
+export function moderateText(
+  text: string,
+  surface: ModerationSurface,
+  field?: string
+): ModerationResult {
+  return checkContentModeration(text, {
+    mode: surface === "public" ? "public" : "private",
+    field,
+  });
+}
+
+/** Multi-field variant of `moderateText`. */
+export function moderateFields(
+  fields: Record<string, string>,
+  surface: ModerationSurface
+): ModerationResult {
+  return checkMultipleFields(fields, { mode: surface === "public" ? "public" : "private" });
+}
