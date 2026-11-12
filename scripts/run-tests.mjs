@@ -15,6 +15,7 @@ const SUITES = [
   ["scripts/test-cp04-eightfold-echo.ts"],
   ["scripts/test-cp05-6pics.ts"],
   ["scripts/test-cp06-four-score.ts"],
+  ["scripts/test-cp07-parity.ts"],
 ];
 
 let failed = false;

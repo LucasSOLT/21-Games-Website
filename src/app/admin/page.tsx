@@ -40,6 +40,7 @@ import {
   type TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
 import {
+  buildStructuredHaikuLines,
   countLineSyllables,
   sliceHaikuIntoChunks,
   validateHaikuStructure,
@@ -71,6 +72,7 @@ import { NineRhymesStudioTab } from "@/components/admin/nine-rhymes-studio-tab";
 import { EightfoldEchoStudioTab } from "@/components/admin/eightfold-echo-studio-tab";
 import { SixPicsStudioTab } from "@/components/admin/six-pics-studio-tab";
 import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
+import { HaikuSliceCutter } from "@/components/admin/haiku-slice-cutter";
 import {
   classifyDiagnosticError,
   type DiagnosticReport,
@@ -236,6 +238,7 @@ export default function AdminPage() {
   const [s17Line1, setS17Line1] = useState<string>("Gold leaves drift along");
   const [s17Line2, setS17Line2] = useState<string>("Cool winds whisper in the dusk");
   const [s17Line3, setS17Line3] = useState<string>("Soft earth waits for dawn");
+  const [s17CustomWordChunks, setS17CustomWordChunks] = useState<Record<string, string[]>>({});
 
   // ==========================================================================
   // User Management State (Game Masters Only)
@@ -285,6 +288,7 @@ export default function AdminPage() {
         setS17Line1(remote17.lines[0] || "");
         setS17Line2(remote17.lines[1] || "");
         setS17Line3(remote17.lines[2] || "");
+        setS17CustomWordChunks(remote17.customWordChunks ?? {});
       }
       toast({
         title: "Cloud Sync Complete",
@@ -334,6 +338,7 @@ export default function AdminPage() {
       setS17Line1(scheduled17.lines[0] || "");
       setS17Line2(scheduled17.lines[1] || "");
       setS17Line3(scheduled17.lines[2] || "");
+      setS17CustomWordChunks(scheduled17.customWordChunks ?? {});
 
       // 2. Unconditionally fetch remote overrides in parallel to prevent stale local cache
       try {
@@ -363,6 +368,7 @@ export default function AdminPage() {
           setS17Line1(remote17.lines[0] || "");
           setS17Line2(remote17.lines[1] || "");
           setS17Line3(remote17.lines[2] || "");
+          setS17CustomWordChunks(remote17.customWordChunks ?? {});
         }
       } catch {
         // Fallback silently to local cache
@@ -781,7 +787,12 @@ export default function AdminPage() {
       return;
     }
 
-    const chunks = sliceHaikuIntoChunks(lines, 16);
+    const hasCustomCuts = Object.keys(s17CustomWordChunks).length > 0;
+    const chunks = hasCustomCuts
+      ? buildStructuredHaikuLines(lines, s17CustomWordChunks).flatMap((l) =>
+          l.words.flatMap((w) => w.chunks)
+        )
+      : sliceHaikuIntoChunks(lines, 16);
     const puzzleNumber = getPuzzleNumberForDate(targetDate);
     const puzzleObj: SeventeenSyllablesPuzzle = {
       id: `17s-custom-${targetDate}-${Date.now()}`,
@@ -791,6 +802,7 @@ export default function AdminPage() {
       author: s17Author.trim() || "SOL Theory",
       lines,
       chunks,
+      ...(hasCustomCuts ? { customWordChunks: s17CustomWordChunks } : {}),
     };
 
     const modCheck = check17SyllablesPuzzleModeration(
@@ -1760,7 +1772,14 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={s17Line1}
-                      onChange={(e) => setS17Line1(e.target.value)}
+                      onChange={(e) => {
+                        setS17Line1(e.target.value);
+                        setS17CustomWordChunks((prev) =>
+                          Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => !k.startsWith("0-"))
+                          )
+                        );
+                      }}
                       placeholder="Gold leaves drift along"
                       className="font-serif text-sm"
                     />
@@ -1782,7 +1801,14 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={s17Line2}
-                      onChange={(e) => setS17Line2(e.target.value)}
+                      onChange={(e) => {
+                        setS17Line2(e.target.value);
+                        setS17CustomWordChunks((prev) =>
+                          Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => !k.startsWith("1-"))
+                          )
+                        );
+                      }}
                       placeholder="Cool winds whisper in the dusk"
                       className="font-serif text-sm"
                     />
@@ -1804,7 +1830,14 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={s17Line3}
-                      onChange={(e) => setS17Line3(e.target.value)}
+                      onChange={(e) => {
+                        setS17Line3(e.target.value);
+                        setS17CustomWordChunks((prev) =>
+                          Object.fromEntries(
+                            Object.entries(prev).filter(([k]) => !k.startsWith("2-"))
+                          )
+                        );
+                      }}
                       placeholder="Soft earth waits for dawn"
                       className="font-serif text-sm"
                     />
@@ -1839,26 +1872,20 @@ export default function AdminPage() {
                       Interactive Live Preview
                     </Badge>
                     <h3 className="font-headline font-black text-xl">
-                      2. Sliced Chunk Tiles Preview
+                      2. Interactive Slice Cutter &amp; Tray Preview
                     </h3>
                     <p className="text-xs text-gray-600">
-                      Here are the uppercase chunks players will arrange on the board:
+                      Click between letters to customize chunk boundaries or preview shuffled tile orders:
                     </p>
                   </div>
 
-                  {/* Sliced Chunk Tiles Preview */}
-                  <div className="rounded-xl border-2 border-black bg-[#FAF9F6] p-4 min-h-[160px]">
-                    <div className="flex flex-wrap gap-2">
-                      {sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16).map((chunk, i) => (
-                        <div
-                          key={i}
-                          className="px-3 py-1.5 rounded-lg border-2 border-black bg-white font-mono font-black text-sm uppercase shadow-[2px_2px_0px_#000]"
-                        >
-                          {chunk}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  {/* Interactive Click-Between-Letters Haiku Slice Cutter */}
+                  <HaikuSliceCutter
+                    lines={[s17Line1, s17Line2, s17Line3]}
+                    customWordChunks={s17CustomWordChunks}
+                    onChangeCustomWordChunks={setS17CustomWordChunks}
+                    disabled={!editPerm.canEdit}
+                  />
 
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs space-y-1">
                     <span className="font-bold uppercase text-gray-600 text-[10px]">Haiku Preview</span>
@@ -1880,12 +1907,18 @@ export default function AdminPage() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        const chunks = sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16);
+                        const hasCustom = Object.keys(s17CustomWordChunks).length > 0;
+                        const chunks = hasCustom
+                          ? buildStructuredHaikuLines([s17Line1, s17Line2, s17Line3], s17CustomWordChunks).flatMap((l) =>
+                              l.words.flatMap((w) => w.chunks)
+                            )
+                          : sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16);
                         const copyPayload = {
                           theme: s17Theme,
                           author: s17Author,
                           lines: [s17Line1, s17Line2, s17Line3],
                           chunks,
+                          ...(hasCustom ? { customWordChunks: s17CustomWordChunks } : {}),
                         };
                         void navigator.clipboard.writeText(JSON.stringify(copyPayload, null, 2));
                         toast({

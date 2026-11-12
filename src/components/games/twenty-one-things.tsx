@@ -55,6 +55,7 @@ import {
   get21ThingsProgress,
   getAdmin21ThingsOverrides,
   getSavedUser21Boards,
+  isDateCompleted,
   recordGameWin,
   save21ThingsProgress,
   saveUserCreated21Board,
@@ -64,6 +65,7 @@ import {
 } from "@/lib/game-storage";
 import { computePuzzleContentHash } from "@/lib/seeded-random";
 import { GameShell } from "@/components/game-shell";
+import { GameSplashScreen } from "@/components/game-splash-screen";
 import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +75,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   check21ThingsBoardModeration,
   checkMultipleFields,
+  moderateText,
   type ModerationMode,
 } from "@/lib/moderation";
 import { cn } from "@/lib/utils";
@@ -259,6 +262,9 @@ function TwentyOneThingsBoardView({
   );
 
   const [mode, setMode] = useState<"play" | "create">(initialMode);
+  const [splashDismissed, setSplashDismissed] = useState<boolean>(
+    () => hasCustomParam || initialMode === "create"
+  );
   const [pendingCreateAfterAuth, setPendingCreateAfterAuth] = useState(false);
   const effectiveMode: "play" | "create" =
     mode === "create" || (pendingCreateAfterAuth && isAuthenticated)
@@ -796,14 +802,18 @@ function TwentyOneThingsBoardView({
       (board.id && (board.id.startsWith("21t-") || board.id.startsWith("custom-") || board.puzzleNumber === 0))
     );
     const mode: ModerationMode = isCustom ? "private" : "public";
+    const surface = isCustom ? "private_custom" : "public";
 
-    const modCheck = checkMultipleFields(
-      [
-        { text: finalName, field: "Player Name" },
-        { text: finalNote, field: "Reflection Note" },
-      ],
-      { mode }
-    );
+    const directMod = moderateText(`${finalName} ${finalNote}`, surface, "Reflection");
+    const modCheck = !directMod.allowed
+      ? directMod
+      : checkMultipleFields(
+          [
+            { text: finalName, field: "Player Name" },
+            { text: finalNote, field: "Reflection Note" },
+          ],
+          { mode }
+        );
 
     if (!modCheck.allowed) {
       toast({
@@ -1180,6 +1190,63 @@ function TwentyOneThingsBoardView({
             </div>
           )}
         </div>
+      </GameShell>
+    );
+  }
+
+  if (!hasCustomParam && effectiveMode === "play" && !splashDismissed) {
+    return (
+      <GameShell
+        gameSlug="21-things"
+        gameTitle="21 Things"
+        puzzleNumber={board.puzzleNumber}
+        dateKey={activeDateKey}
+        author={board.creatorName}
+      >
+        <GameSplashScreen
+          gameSlug="21-things"
+          gameTitle="21 Things"
+          tagline="Curate 21 things and narrow down 21 → 6 → 3 → 1 to what resonates most."
+          theme={board.title}
+          author={board.creatorName}
+          puzzleNumber={board.puzzleNumber}
+          dateKey={activeDateKey}
+          showCreate={true}
+          isCompletedToday={
+            phase === "complete" || isDateCompleted("21-things", activeDateKey)
+          }
+          hasSavedProgress={
+            (pick6.length > 0 || phase !== "pick6") && phase !== "complete"
+          }
+          onPlay={() => setSplashDismissed(true)}
+          onCreate={() => {
+            if (profile?.isBanned) {
+              toast({
+                title: "Account Suspended",
+                description:
+                  "Your account has been suspended from building custom 21 Things boards.",
+                variant: "destructive",
+              });
+              return;
+            }
+            if (!isAuthenticated) {
+              setPendingCreateAfterAuth(true);
+              setSplashDismissed(true);
+              toast({
+                title: "Sign In Required",
+                description:
+                  "Please sign in or create a free account to build and share custom 21 Things boards.",
+              });
+              openAccountModal("signin");
+              return;
+            }
+            if (!creatorName && profile?.displayName) {
+              setCreatorName(profile.displayName);
+            }
+            setSplashDismissed(true);
+            setMode("create");
+          }}
+        />
       </GameShell>
     );
   }

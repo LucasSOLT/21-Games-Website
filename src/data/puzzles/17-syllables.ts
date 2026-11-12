@@ -23,6 +23,8 @@ export interface SeventeenSyllablesPuzzle {
   author: string;
   lines: [string, string, string]; // [5-syllable, 7-syllable, 5-syllable]
   chunks: string[]; // Shuffled or ordered uppercase chunks for tray
+  /** Optional editor-configured slices keyed by `${lineIdx}-${wordIdx}`. */
+  customWordChunks?: Record<string, string[]>;
 }
 
 // ============================================================================
@@ -274,10 +276,32 @@ export function sliceHaikuIntoChunks(
 }
 
 /**
- * Builds structured line info with words and constituent chunks.
+ * Slices a single uppercase word at sorted 1-based cut positions (`1 .. word.length - 1`).
+ */
+export function sliceWordByCuts(word: string, cuts: readonly number[]): string[] {
+  const clean = word.toUpperCase().replace(/[^A-Z]/g, "");
+  if (!clean) return [];
+  const validCuts = [...new Set(cuts)]
+    .filter((c) => Number.isInteger(c) && c >= 1 && c < clean.length)
+    .sort((a, b) => a - b);
+  if (validCuts.length === 0) return [clean];
+  const out: string[] = [];
+  let start = 0;
+  for (const cut of validCuts) {
+    out.push(clean.slice(start, cut));
+    start = cut;
+  }
+  out.push(clean.slice(start));
+  return out;
+}
+
+/**
+ * Builds structured line info with words and constituent chunks, honoring optional
+ * editor-defined `customWordChunks` (`key = "${lineIdx}-${wordIdx}"`) when valid.
  */
 export function buildStructuredHaikuLines(
-  lines: [string, string, string]
+  lines: [string, string, string],
+  customWordChunks?: Record<string, string[]>
 ): HaikuLineInfo[] {
   const allWordsFlat = lines.flatMap((l) =>
     l
@@ -308,9 +332,17 @@ export function buildStructuredHaikuLines(
       .map((w) => w.replace(/[^A-Z]/g, ""))
       .filter(Boolean);
 
-    const words: HaikuWord[] = rawWords.map((word) => {
+    const words: HaikuWord[] = rawWords.map((word, wordIdx) => {
+      const customKey = `${lineIdx}-${wordIdx}`;
+      const override = customWordChunks?.[customKey];
+      const overrideClean = override
+        ?.map((c) => c.toUpperCase().replace(/[^A-Z]/g, ""))
+        .filter(Boolean);
       const shouldSplit = splitSet.has(wordPointer);
-      const chunks = sliceSingleWord(word, shouldSplit);
+      const chunks =
+        overrideClean && overrideClean.length > 0 && overrideClean.join("") === word
+          ? overrideClean
+          : sliceSingleWord(word, shouldSplit);
       wordPointer++;
       return { text: word, chunks };
     });

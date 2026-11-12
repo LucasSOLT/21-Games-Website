@@ -2,8 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
+  AlertCircle,
   BarChart3,
   Calendar,
   Check,
@@ -14,6 +15,8 @@ import {
   LifeBuoy,
   Lightbulb,
   Link2,
+  Loader2,
+  PlusCircle,
   RotateCcw,
   Settings,
   Share2,
@@ -23,20 +26,28 @@ import {
 import type { Connect5Puzzle } from "@/data/puzzles/connect-5";
 import { getConnect5PuzzleForDate, getLocalDateKey } from "@/lib/daily-engine";
 import {
+  buildCustomGameShareUrl,
   copyResultsOnly,
   nativeShareResultsOnly,
   type ShareResultsOptions,
 } from "@/lib/custom-game-share";
+import { fetchCustomPuzzle } from "@/lib/custom-puzzles";
 import {
   clearConnect5Progress,
   fetchRemoteConnect5Override,
   getAdminConnect5Overrides,
   getConnect5Progress,
+  isDateCompleted,
   recordGameWin,
   saveConnect5Progress,
 } from "@/lib/game-storage";
-import { computePuzzleContentHash } from "@/lib/seeded-random";
+import {
+  computePuzzleContentHash,
+  validateConnect5Payload,
+} from "@/lib/seeded-random";
 import { formatTimerSeconds, GameShell } from "@/components/game-shell";
+import { GameSplashScreen } from "@/components/game-splash-screen";
+import { ConnectFiveCreator } from "./connect-five-creator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -137,7 +148,31 @@ function isSavedGridCompatible(
   return true;
 }
 
-function loadInitialBoardState(activeDateKey: string): InitialBoardState {
+function loadInitialBoardState(
+  activeDateKey: string,
+  customPuzzle?: Connect5Puzzle
+): InitialBoardState {
+  if (customPuzzle) {
+    const base = createInitialGrid(customPuzzle);
+    const firstOpen = findFirstOpenCell(
+      base.grid,
+      base.locked,
+      base.slashed,
+      1
+    );
+    return {
+      puzzle: customPuzzle,
+      grid: base.grid,
+      locked: base.locked,
+      slashed: base.slashed,
+      elapsedSeconds: 0,
+      hintsUsed: 0,
+      status: "playing",
+      activeRow: firstOpen.row,
+      activeCol: firstOpen.col,
+    };
+  }
+
   const overrides = getAdminConnect5Overrides();
   const resolved = getConnect5PuzzleForDate(activeDateKey, overrides);
   const base = createInitialGrid(resolved);
@@ -201,13 +236,15 @@ function loadInitialBoardState(activeDateKey: string): InitialBoardState {
 export function ConnectFiveGame() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
+  const modeParam = searchParams.get("mode");
+  const customId = searchParams.get("b");
   const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
     getLocalDateKey()
   );
 
   // Automatically detect midnight rollover when playing Today's daily puzzle
   useEffect(() => {
-    if (dateParam) return;
+    if (dateParam || customId || modeParam === "create") return;
     const checkDate = () => {
       const current = getLocalDateKey();
       setLiveTodayKey((prev) => (prev !== current ? current : prev));
@@ -218,16 +255,152 @@ export function ConnectFiveGame() {
       clearInterval(interval);
       window.removeEventListener("focus", checkDate);
     };
-  }, [dateParam]);
+  }, [dateParam, customId, modeParam]);
 
   const activeDateKey = dateParam || liveTodayKey;
+
+  if (modeParam === "create") {
+    return <ConnectFiveCreator />;
+  }
+
+  if (customId) {
+    return (
+      <ConnectFiveCustomLoader
+        key={`custom:${customId}`}
+        customId={customId}
+        activeDateKey={activeDateKey}
+      />
+    );
+  }
 
   return <ConnectFiveBoard key={activeDateKey} activeDateKey={activeDateKey} />;
 }
 
-function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
+function ConnectFiveCustomLoader({
+  customId,
+  activeDateKey,
+}: {
+  customId: string;
+  activeDateKey: string;
+}) {
+  const [state, setState] = useState<{
+    loading: boolean;
+    puzzle: Connect5Puzzle | null;
+  }>({ loading: true, puzzle: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const record = await fetchCustomPuzzle<Connect5Puzzle>(customId);
+      if (cancelled) return;
+      if (!record) {
+        setState({ loading: false, puzzle: null });
+        return;
+      }
+      const checked = validateConnect5Payload(record.payload);
+      if (!checked.valid || !checked.puzzle) {
+        setState({ loading: false, puzzle: null });
+        return;
+      }
+      setState({
+        loading: false,
+        puzzle: {
+          ...checked.puzzle,
+          id: record.id,
+          puzzleNumber: 0,
+          author: record.creatorName || checked.puzzle.author || "Friend",
+          editor: record.creatorHandle
+            ? `@${record.creatorHandle.replace(/^@+/, "")}`
+            : checked.puzzle.editor || "SOL GaMES",
+        },
+      });
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [customId]);
+
+  if (state.loading) {
+    return (
+      <GameShell
+        gameSlug="connect-5"
+        gameTitle="Connect 5"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="Friend"
+      >
+        <div className="mx-auto max-w-md my-12 p-8 text-center bg-white border-2 border-black rounded-2xl shadow-2xs space-y-3">
+          <Loader2 className="h-7 w-7 animate-spin mx-auto text-black" />
+          <p className="font-headline font-bold text-sm text-neutral-700">
+            Loading custom Connect 5 chain…
+          </p>
+        </div>
+      </GameShell>
+    );
+  }
+
+  if (!state.puzzle) {
+    return (
+      <GameShell
+        gameSlug="connect-5"
+        gameTitle="Connect 5"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="SOL GaMES"
+      >
+        <div className="mx-auto max-w-md my-12 p-6 sm:p-8 text-center bg-white border-2 border-black rounded-2xl shadow-2xs space-y-4">
+          <AlertCircle className="h-8 w-8 text-red-600 mx-auto" />
+          <h2 className="font-headline font-black text-xl">
+            Custom Chain Not Found
+          </h2>
+          <p className="text-xs sm:text-sm text-neutral-600">
+            We couldn&apos;t find a Connect 5 chain matching{" "}
+            <span className="font-mono font-bold text-black">{customId}</span>.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Link
+              href="/games/connect-5"
+              className="inline-flex items-center justify-center h-10 rounded-xl bg-black text-white font-bold text-xs border-2 border-black"
+            >
+              Play Today&apos;s Connect 5
+            </Link>
+            <Link
+              href="/games/connect-5?mode=create"
+              className="inline-flex items-center justify-center h-10 rounded-xl bg-white text-black font-bold text-xs border-2 border-black"
+            >
+              Create Your Own
+            </Link>
+          </div>
+        </div>
+      </GameShell>
+    );
+  }
+
+  return (
+    <ConnectFiveBoard
+      activeDateKey={activeDateKey}
+      customPuzzle={state.puzzle}
+      customId={customId}
+    />
+  );
+}
+
+function ConnectFiveBoard({
+  activeDateKey,
+  customPuzzle,
+  customId,
+}: {
+  activeDateKey: string;
+  customPuzzle?: Connect5Puzzle;
+  customId?: string;
+}) {
+  const router = useRouter();
+  const isCustom = Boolean(customPuzzle);
+  const [splashDismissed, setSplashDismissed] = useState<boolean>(isCustom);
+
   const [initial] = useState<InitialBoardState>(() =>
-    loadInitialBoardState(activeDateKey)
+    loadInitialBoardState(activeDateKey, customPuzzle)
   );
 
   const [puzzle, setPuzzle] = useState<Connect5Puzzle>(initial.puzzle);
@@ -322,6 +495,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
   // Fetch remote Supabase daily_puzzles override if configured and listen to live updates
   useEffect(() => {
+    if (isCustom) return;
     let active = true;
     fetchRemoteConnect5Override(activeDateKey).then((remotePuzzle) => {
       if (!active || !remotePuzzle) return;
@@ -354,11 +528,11 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       active = false;
       window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
     };
-  }, [activeDateKey, applyRemotePuzzleIfChanged]);
+  }, [activeDateKey, applyRemotePuzzleIfChanged, isCustom]);
 
-  // Live count-up timer while playing
+  // Live count-up timer while playing (starts strictly after splash screen is dismissed)
   useEffect(() => {
-    if (status !== "playing" || isBufferingWin) return;
+    if (!splashDismissed || status !== "playing" || isBufferingWin) return;
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => {
         const next = prev + 1;
@@ -367,7 +541,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [status, isBufferingWin]);
+  }, [splashDismissed, status, isBufferingWin]);
 
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -390,6 +564,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       nextHints: number = hintsUsed,
       nextElapsed: number = elapsedSecondsRef.current
     ) => {
+      if (isCustom) return;
       saveConnect5Progress({
         dateKey: activeDateKey,
         puzzleId: puzzle.id,
@@ -403,7 +578,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
         puzzleHash: computePuzzleContentHash(puzzle),
       });
     },
-    [activeDateKey, puzzle, status, hintsUsed]
+    [activeDateKey, puzzle, status, hintsUsed, isCustom]
   );
 
   // Trigger board validation when all boxes are filled (and no unaddressed slashes remain)
@@ -456,7 +631,9 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
           hintsUsed,
           currentElapsed
         );
-        recordGameWin("connect-5", activeDateKey, currentElapsed);
+        if (!isCustom) {
+          recordGameWin("connect-5", activeDateKey, currentElapsed);
+        }
 
         if (winTimeoutRef.current) clearTimeout(winTimeoutRef.current);
         winTimeoutRef.current = setTimeout(() => {
@@ -489,7 +666,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
         }, 3800);
       }
     },
-    [puzzle.words, persistProgress, hintsUsed, activeDateKey]
+    [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom]
   );
 
   // Handle typing a letter A-Z
@@ -804,6 +981,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
   );
 
   useEffect(() => {
+    if (!splashDismissed) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (document.querySelector('[role="dialog"]')) return;
@@ -840,7 +1018,7 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleLetterInput, handleBackspace, handleNavigationKey]);
+  }, [splashDismissed, handleLetterInput, handleBackspace, handleNavigationKey]);
 
   const handleRevealHint = () => {
     if (status !== "playing" || isBufferingWin || isBufferingWinRef.current) {
@@ -925,7 +1103,9 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       copyTimeoutRef.current = null;
     }
     isBufferingWinRef.current = false;
-    clearConnect5Progress(activeDateKey);
+    if (!isCustom) {
+      clearConnect5Progress(activeDateKey);
+    }
     const base = createInitialGrid(puzzle);
     setGrid(base.grid);
     setLocked(base.locked);
@@ -946,8 +1126,11 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
 
   const buildConnect5ShareOptions = (): ShareResultsOptions => {
     const rowEmojis = puzzle.words.map((w) => "🟩".repeat(w.length));
+    const header = isCustom
+      ? `🔗 Connect 5 — "${puzzle.title}" (by ${puzzle.author})`
+      : `🔗 Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`;
     const text = [
-      `🔗 Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`,
+      header,
       `⏱️ Time: ${formatTimerSeconds(elapsedSeconds)}${
         hintsUsed > 0 ? ` (${hintsUsed} hint${hintsUsed > 1 ? "s" : ""})` : ""
       }`,
@@ -955,12 +1138,14 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
     ].join("\n");
 
     const url =
-      typeof window !== "undefined" && window.location?.href
+      isCustom && customId
+        ? buildCustomGameShareUrl("connect-5", customId)
+        : typeof window !== "undefined" && window.location?.href
         ? window.location.href
         : "https://21games.ai/games/connect-5";
 
     return {
-      title: `Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`,
+      title: header,
       text,
       url,
     };
@@ -1222,8 +1407,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       hintsUsed,
       currentElapsed
     );
-    recordGameWin("connect-5", activeDateKey, currentElapsed);
-  }, [puzzle.words, persistProgress, hintsUsed, activeDateKey]);
+    if (!isCustom) {
+      recordGameWin("connect-5", activeDateKey, currentElapsed);
+    }
+  }, [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom]);
 
   const handleClearPuzzle = useCallback(() => {
     const nextGrid = grid.map((r, rIdx) =>
@@ -1256,6 +1443,35 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       description: "All entered letters have been cleared.",
     });
   }, [grid, locked, slashed, status, hintsUsed, persistProgress]);
+
+  if (!splashDismissed) {
+    return (
+      <GameShell
+        gameSlug="connect-5"
+        gameTitle="Connect 5"
+        puzzleNumber={puzzle.puzzleNumber}
+        dateKey={activeDateKey}
+        author={puzzle.author}
+      >
+        <GameSplashScreen
+          gameSlug="connect-5"
+          gameTitle="Connect 5"
+          tagline="Complete the 5-row compound word chain where each row connects to the word above it."
+          theme={puzzle.title}
+          author={puzzle.author}
+          puzzleNumber={puzzle.puzzleNumber}
+          dateKey={activeDateKey}
+          showCreate={true}
+          isCompletedToday={
+            status === "won" || isDateCompleted("connect-5", activeDateKey)
+          }
+          hasSavedProgress={elapsedSeconds > 0 && status !== "won"}
+          onPlay={() => setSplashDismissed(true)}
+          onCreate={() => router.push("/games/connect-5?mode=create")}
+        />
+      </GameShell>
+    );
+  }
 
   return (
     <GameShell
@@ -1735,6 +1951,18 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
                 <span>Playable Archive</span>
               </div>
               <span className="text-xs text-gray-400">Past Games &rarr;</span>
+            </Link>
+
+            <Link
+              href="/games/connect-5?mode=create"
+              onClick={() => setSettingsOpen(false)}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-emerald-50/70 font-bold text-sm text-black transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <PlusCircle className="h-4 w-4 text-emerald-700" />
+                <span>Create Your Own</span>
+              </div>
+              <span className="text-xs text-emerald-700">Share Link &rarr;</span>
             </Link>
 
             <button

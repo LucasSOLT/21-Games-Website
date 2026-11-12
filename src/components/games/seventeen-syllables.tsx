@@ -248,6 +248,30 @@ export function SeventeenSyllablesGame() {
   const searchParams = useSearchParams();
   const customParam = searchParams.get("b");
   const modeParam = searchParams.get("mode");
+  const dateParam = searchParams.get("date");
+  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const activeDateKey =
+    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayKey;
+
+  return (
+    <SeventeenSyllablesGameInner
+      key={`${activeDateKey}::${customParam ?? ""}::${modeParam ?? ""}`}
+      customParam={customParam}
+      modeParam={modeParam}
+      activeDateKey={activeDateKey}
+    />
+  );
+}
+
+function SeventeenSyllablesGameInner({
+  customParam,
+  modeParam,
+  activeDateKey,
+}: {
+  customParam: string | null;
+  modeParam: string | null;
+  activeDateKey: string;
+}) {
   const {
     profile,
     isAuthenticated,
@@ -255,11 +279,9 @@ export function SeventeenSyllablesGame() {
     openAccountModal,
   } = useAuth();
 
-  const todayKey = useMemo(() => getLocalDateKey(), []);
-
   const resolvedInitial = useMemo(
-    () => resolvePuzzle(customParam, todayKey),
-    [customParam, todayKey]
+    () => resolvePuzzle(customParam, activeDateKey),
+    [customParam, activeDateKey]
   );
 
   const [puzzle, setPuzzle] = useState<SeventeenSyllablesPuzzle>(
@@ -278,8 +300,8 @@ export function SeventeenSyllablesGame() {
 
   // Structured lines definition
   const structuredLines = useMemo<HaikuLineInfo[]>(() => {
-    return buildStructuredHaikuLines(puzzle.lines);
-  }, [puzzle.lines]);
+    return buildStructuredHaikuLines(puzzle.lines, puzzle.customWordChunks);
+  }, [puzzle.lines, puzzle.customWordChunks]);
 
   // Initial game state (computed once per puzzle without setState in effect)
   const initialData = useMemo(
@@ -439,11 +461,14 @@ export function SeventeenSyllablesGame() {
 
       if (remoteHash !== currentHash || linesChanged || themeChanged) {
         puzzleRef.current = remotePuzzle;
-        clear17SyllablesProgress(todayKey);
-        const nextStructured = buildStructuredHaikuLines(remotePuzzle.lines);
+        clear17SyllablesProgress(activeDateKey);
+        const nextStructured = buildStructuredHaikuLines(
+          remotePuzzle.lines,
+          remotePuzzle.customWordChunks
+        );
         const base = createInitialGameState(
           nextStructured,
-          todayKey,
+          activeDateKey,
           remotePuzzle.id,
           false,
           remoteHash
@@ -465,7 +490,7 @@ export function SeventeenSyllablesGame() {
         setResultsCopied(false);
 
         save17SyllablesProgress({
-          dateKey: todayKey,
+          dateKey: activeDateKey,
           puzzleId: remotePuzzle.id,
           placedChunks: {},
           lockedChunks: {},
@@ -479,7 +504,7 @@ export function SeventeenSyllablesGame() {
         });
       }
     },
-    [isCustomMode, todayKey]
+    [isCustomMode, activeDateKey]
   );
 
   // Fetch remote Supabase daily_puzzles override on mount and listen to live updates
@@ -487,7 +512,7 @@ export function SeventeenSyllablesGame() {
     if (isCustomMode) return;
     let active = true;
 
-    void fetchRemote17SyllablesOverride(todayKey).then((remotePuzzle) => {
+    void fetchRemote17SyllablesOverride(activeDateKey).then((remotePuzzle) => {
       if (!active || !remotePuzzle) return;
       applyRemotePuzzleIfChanged(remotePuzzle);
     });
@@ -496,16 +521,16 @@ export function SeventeenSyllablesGame() {
       if (!active) return;
       const detail = (e as CustomEvent)?.detail;
       if (detail?.gameSlug && detail.gameSlug !== "17-syllables") return;
-      if (!detail || !detail.dateKey || detail.dateKey === todayKey) {
-        if (detail?.puzzle && detail.dateKey === todayKey) {
+      if (!detail || !detail.dateKey || detail.dateKey === activeDateKey) {
+        if (detail?.puzzle && detail.dateKey === activeDateKey) {
           applyRemotePuzzleIfChanged(detail.puzzle as SeventeenSyllablesPuzzle);
           return;
         }
-        const local = getAdmin17SyllablesOverrides()[todayKey];
+        const local = getAdmin17SyllablesOverrides()[activeDateKey];
         if (local) {
           applyRemotePuzzleIfChanged(local);
         } else {
-          void fetchRemote17SyllablesOverride(todayKey).then((remotePuzzle) => {
+          void fetchRemote17SyllablesOverride(activeDateKey).then((remotePuzzle) => {
             if (!active || !remotePuzzle) return;
             applyRemotePuzzleIfChanged(remotePuzzle);
           });
@@ -518,7 +543,7 @@ export function SeventeenSyllablesGame() {
       active = false;
       window.removeEventListener("solgames:puzzles-updated", handlePuzzlesUpdated);
     };
-  }, [isCustomMode, todayKey, applyRemotePuzzleIfChanged]);
+  }, [isCustomMode, activeDateKey, applyRemotePuzzleIfChanged]);
 
   // Timer effect
   useEffect(() => {
