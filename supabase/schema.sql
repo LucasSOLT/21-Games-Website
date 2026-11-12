@@ -1043,3 +1043,66 @@ begin
   end if;
 end;
 $$;
+
+-- =============================================================================
+-- Auto-Confirm Auth Signups & Enforce Root Game Master Role Invariant
+-- =============================================================================
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'auth'
+      and table_name = 'users'
+      and column_name = 'email_confirmed_at'
+  ) then
+    alter table auth.users add column email_confirmed_at timestamptz;
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'auth'
+      and table_name = 'users'
+      and column_name = 'updated_at'
+  ) then
+    alter table auth.users add column updated_at timestamptz default now();
+  end if;
+end;
+$$;
+
+create or replace function public.auto_confirm_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  if new.email_confirmed_at is null then
+    new.email_confirmed_at := now();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_autoconfirm on auth.users;
+create trigger on_auth_user_autoconfirm
+  before insert on auth.users
+  for each row execute function public.auto_confirm_auth_user();
+
+update auth.users
+  set email_confirmed_at = coalesce(email_confirmed_at, now()),
+      updated_at = now()
+  where email_confirmed_at is null;
+
+update public.user_profiles
+  set role = 'user'
+  where lower(btrim(email)) not in ('lucas@soltheory.com', 'steve@soltheory.com')
+    and role <> 'user';
+
+update public.user_profiles
+  set role = 'game_master',
+      is_banned = false,
+      banned_at = null,
+      banned_reason = null
+  where lower(btrim(email)) in ('lucas@soltheory.com', 'steve@soltheory.com');

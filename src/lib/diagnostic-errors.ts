@@ -10,7 +10,7 @@
  */
 
 import { isInitialGameMaster } from "@/lib/user-auth";
-import { isSupabaseConfigured } from "@/lib/supabase";
+import { isSupabaseConfigured, supabaseUrl } from "@/lib/supabase";
 import { getLocalDateKey } from "@/lib/daily-engine";
 import type { PlayableGameSlug } from "@/lib/games-config";
 
@@ -638,9 +638,7 @@ export function classifyDiagnosticError(
     gameSlug,
     userEmail: context?.userEmail ?? null,
     userRole: context?.userRole ?? null,
-    supabaseUrl:
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      "https://trwyrfhicbnfhlbiztau.supabase.co",
+    supabaseUrl,
     isOnline,
     action: context?.action || "unknown",
     rawError: raw,

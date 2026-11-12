@@ -1610,8 +1610,32 @@ export async function signUpWithEmail(
       };
     }
 
+    let activeSession = data.session;
+    let activeUser = data.user;
+
+    if (!activeSession || !activeSession.access_token) {
+      try {
+        const signInRetry = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (
+          !signInRetry.error &&
+          signInRetry.data?.session?.access_token &&
+          signInRetry.data?.user &&
+          signInRetry.data.user.id === data.user.id &&
+          normalizeEmail(signInRetry.data.user.email) === email
+        ) {
+          activeSession = signInRetry.data.session;
+          activeUser = signInRetry.data.user;
+        }
+      } catch {
+        // Fall through to confirmationRequired if immediate sign-in is not available
+      }
+    }
+
     // Email confirmation required (no verified JWT session issued yet)
-    if (!data.session || !data.session.access_token) {
+    if (!activeSession || !activeSession.access_token) {
       return {
         ok: true,
         profile: null,
@@ -1622,15 +1646,15 @@ export async function signUpWithEmail(
     }
 
     const verifiedEmail = normalizeEmail(
-      data.session.user?.email || data.user.email || email
+      activeSession.user?.email || activeUser.email || email
     );
     activeVerifiedJwtEmail = verifiedEmail;
-    activeVerifiedJwtToken = data.session.access_token;
+    activeVerifiedJwtToken = activeSession.access_token;
 
     let remoteRow: Partial<UserProfile> | null;
     try {
       remoteRow = await fetchSupabaseUserProfileRow(
-        data.user.id,
+        activeUser.id,
         verifiedEmail
       );
     } catch {
@@ -1654,7 +1678,7 @@ export async function signUpWithEmail(
     }
 
     const baseProfile = normalizeUserProfile({
-      id: data.user.id,
+      id: activeUser.id,
       email: verifiedEmail,
       displayName: remoteRow?.displayName || displayName,
       handle: remoteRow?.handle || handle,
@@ -1663,7 +1687,7 @@ export async function signUpWithEmail(
       isBanned: remoteRow?.isBanned ?? false,
       bannedAt: remoteRow?.bannedAt ?? null,
       bannedReason: remoteRow?.bannedReason ?? null,
-      memberSince: data.user.created_at || new Date().toISOString(),
+      memberSince: activeUser.created_at || new Date().toISOString(),
       connect5Stats: remoteRow?.connect5Stats,
       twentyOneStats: remoteRow?.twentyOneStats,
       allGameStats: remoteRow?.allGameStats,

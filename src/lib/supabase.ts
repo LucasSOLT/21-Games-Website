@@ -4,12 +4,53 @@ const DEFAULT_SUPABASE_URL = "https://trwyrfhicbnfhlbiztau.supabase.co";
 const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_a9xQwMZoEA3-5nTpIFm8cw_XFmZehG0";
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+export function sanitizeSupabaseEnvValue(raw?: string | null): string {
+  if (!raw || typeof raw !== "string") return "";
+  let cleaned = raw.trim().replace(/^["']+|["']+$/g, "").trim();
+  // Strip accidental "NEXT_PUBLIC_SUPABASE_...=" prefix if pasted into Vercel env value field
+  cleaned = cleaned
+    .replace(/^[A-Z0-9_]+\s*=\s*/i, "")
+    .replace(/^["']+|["']+$/g, "")
+    .trim();
+  return cleaned;
+}
+
+export function resolveSupabaseUrl(raw?: string | null): string {
+  const cleaned = sanitizeSupabaseEnvValue(raw);
+  if (
+    cleaned &&
+    cleaned.startsWith("http") &&
+    !cleaned.toLowerCase().includes("placeholder")
+  ) {
+    return cleaned.replace(/\/+$/, "");
+  }
+  return DEFAULT_SUPABASE_URL;
+}
+
+export function resolveSupabaseAnonKey(
+  ...candidates: Array<string | null | undefined>
+): string {
+  for (const candidate of candidates) {
+    const cleaned = sanitizeSupabaseEnvValue(candidate);
+    if (
+      cleaned &&
+      cleaned.length >= 16 &&
+      !cleaned.toLowerCase().includes("placeholder") &&
+      !cleaned.startsWith("http")
+    ) {
+      return cleaned;
+    }
+  }
+  return DEFAULT_SUPABASE_PUBLISHABLE_KEY;
+}
+
+export const supabaseUrl = resolveSupabaseUrl(
+  process.env.NEXT_PUBLIC_SUPABASE_URL
+);
+export const supabaseAnonKey = resolveSupabaseAnonKey(
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&

@@ -250,9 +250,13 @@ export function GuestAuthPanel({
       });
 
       if (!res.ok || !res.profile) {
+        const lowerErr = (res.error || "").toLowerCase();
         if (
           res.confirmationRequired ||
-          (res.error && res.error.toLowerCase().includes("suspended"))
+          lowerErr.includes("suspended") ||
+          lowerErr.includes("unavailable") ||
+          lowerErr.includes("initialize") ||
+          lowerErr.includes("verify your account status")
         ) {
           setErrorMessage(
             res.error ||
