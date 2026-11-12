@@ -176,7 +176,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "move-2",
     slug: "move-2",
     showCreate: false,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "3×3 cube domino puzzle",
     description:
       "Roll the 3D domino across 6 cube faces to land on the red target.",

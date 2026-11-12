@@ -49,6 +49,12 @@ import {
   type FourScorePuzzle,
 } from "@/data/puzzles/four-score";
 import {
+  MOVE_TWO_PUZZLES,
+  generateSeededMoveTwoPuzzle,
+  isMoveTwoPuzzle,
+  type MoveTwoPuzzle,
+} from "@/data/puzzles/move-2";
+import {
   getPuzzleNumberForDate,
   getRotationIndexForDate,
 } from "@/lib/date-keys";
@@ -278,6 +284,30 @@ const fourScoreSource: PuzzleSource<FourScorePuzzle> = {
   }),
 };
 
+const moveTwoSource: PuzzleSource<MoveTwoPuzzle> = {
+  slug: "move-2",
+  validate: isMoveTwoPuzzle,
+  fromBank(dateKey) {
+    const base =
+      MOVE_TWO_PUZZLES[
+        getRotationIndexForDate(dateKey, MOVE_TWO_PUZZLES.length)
+      ]!;
+    return {
+      ...base,
+      puzzleNumber: getPuzzleNumberForDate(dateKey),
+      customDate: dateKey,
+    };
+  },
+  generateSeeded: (dateKey) =>
+    generateSeededMoveTwoPuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
+  summarize: (p) => ({
+    title: `${p.title} (Par ${p.par})`,
+    author: p.author,
+    editor: p.editor,
+    puzzleNumber: p.puzzleNumber,
+  }),
+};
+
 // ---------------------------------------------------------------------------
 // Registry (new countdown games register below as they ship)
 // ---------------------------------------------------------------------------
@@ -290,6 +320,7 @@ export const PUZZLE_SOURCES: Partial<Record<AllGameSlug, PuzzleSource<never>>> =
   "6-pics": sixPicsSource as unknown as PuzzleSource<never>,
   "connect-5": connect5Source as unknown as PuzzleSource<never>,
   "four-score": fourScoreSource as unknown as PuzzleSource<never>,
+  "move-2": moveTwoSource as unknown as PuzzleSource<never>,
 };
 
 export function getPuzzleSource<T = unknown>(
