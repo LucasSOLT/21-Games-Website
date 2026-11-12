@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   buildStructuredHaikuLines,
@@ -37,6 +38,8 @@ import { check17SyllablesPuzzleModeration } from "@/lib/moderation";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { GameShell, formatTimerSeconds } from "@/components/game-shell";
 import { useAuth } from "@/components/account/auth-provider";
+import { AccountNavButton } from "@/components/account/account-nav-button";
+import { PuzzleCheckRevealModal } from "./puzzle-check-reveal-modal";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -61,6 +64,12 @@ import {
   KeyRound,
   AlertCircle,
   Star,
+  LifeBuoy,
+  HelpCircle,
+  Settings,
+  BarChart3,
+  Calendar,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +89,13 @@ interface SlotState {
 interface TrayChunk {
   id: string;
   text: string;
+}
+
+interface FocusedCell {
+  lineIdx: number;
+  wordIdx: number;
+  slotIdx: number;
+  charIdx: number;
 }
 
 function createInitialGameState(
@@ -299,6 +315,15 @@ export function SeventeenSyllablesGame() {
   const [victoryModalOpen, setVictoryModalOpen] = useState(false);
   const [resultsCopied, setResultsCopied] = useState(false);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Square Focus, Slashed Visuals, & Header Modals
+  const [focusedCell, setFocusedCell] = useState<FocusedCell | null>(null);
+  const [slashedCells, setSlashedCells] = useState<Set<string>>(new Set());
+  const [checkRevealModalOpen, setCheckRevealModalOpen] = useState(false);
+  const [hintsModalOpen, setHintsModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -622,6 +647,15 @@ export function SeventeenSyllablesGame() {
       setTrayChunks((prev) => prev.filter((c) => c.id !== chunk.id));
       setSelectedTrayChunkId(null);
 
+      // Clear any previous error slashes for this slot
+      setSlashedCells((prev) => {
+        const next = new Set(prev);
+        for (let c = 0; c < 10; c++) {
+          next.delete(`${targetSlotKey}-${c}`);
+        }
+        return next;
+      });
+
       // Check board if filled
       checkFullBoard(nextSlots);
     },
@@ -656,6 +690,15 @@ export function SeventeenSyllablesGame() {
           isMisplaced: false,
         },
       }));
+
+      // Clear any error slashes for this slot
+      setSlashedCells((prev) => {
+        const next = new Set(prev);
+        for (let c = 0; c < 10; c++) {
+          next.delete(`${slotKey}-${c}`);
+        }
+        return next;
+      });
 
       setTrayChunks((prev) => [...prev, returnedChunk]);
     },
@@ -939,6 +982,188 @@ export function SeventeenSyllablesGame() {
     }
   }, [buildResultsShareOptions]);
 
+  const isPartiallyFilled = useMemo(() => {
+    const slotList = Object.values(slots);
+    const filledCount = slotList.filter((s) => s.placedChunk !== null).length;
+    return filledCount < slotList.length;
+  }, [slots]);
+
+  const handleCheckSquare = useCallback(() => {
+    if (!focusedCell || isGameWon) return;
+    const { lineIdx, wordIdx, slotIdx, charIdx } = focusedCell;
+    const slotKey = `${lineIdx}-${wordIdx}-${slotIdx}`;
+    const slot = slots[slotKey];
+    if (!slot || !slot.placedChunk) {
+      toast({
+        title: "Square is empty",
+        description: "Select a square with an entered letter to check.",
+      });
+      return;
+    }
+    const cellId = `${slotKey}-${charIdx}`;
+    const isCorrect = slot.placedChunk[charIdx] === slot.expectedChunk[charIdx];
+    setSlashedCells((prev) => {
+      const next = new Set(prev);
+      if (!isCorrect) next.add(cellId);
+      else next.delete(cellId);
+      return next;
+    });
+    if (!isCorrect) {
+      toast({
+        title: "Letter is incorrect",
+        description:
+          "Marked with a red slash. Tap again to return chunk to tray.",
+      });
+    } else {
+      toast({
+        title: "Square is correct!",
+        description: "Nice! Keep going.",
+      });
+    }
+  }, [focusedCell, isGameWon, slots]);
+
+  const handleCheckWord = useCallback(() => {
+    if (!focusedCell || isGameWon) return;
+    const { lineIdx, wordIdx } = focusedCell;
+    const targetWord = structuredLines[lineIdx]?.words[wordIdx];
+    if (!targetWord) return;
+
+    let errorsFound = 0;
+    let filledCount = 0;
+    const nextSlashed = new Set(slashedCells);
+
+    targetWord.chunks.forEach((_, sIdx) => {
+      const slotKey = `${lineIdx}-${wordIdx}-${sIdx}`;
+      const slot = slots[slotKey];
+      if (slot?.placedChunk) {
+        filledCount++;
+        for (let c = 0; c < slot.expectedLength; c++) {
+          const cellId = `${slotKey}-${c}`;
+          if (slot.placedChunk[c] !== slot.expectedChunk[c]) {
+            nextSlashed.add(cellId);
+            errorsFound++;
+          } else {
+            nextSlashed.delete(cellId);
+          }
+        }
+      }
+    });
+
+    setSlashedCells(nextSlashed);
+    if (filledCount === 0) {
+      toast({
+        title: "Word is empty",
+        description: "Place syllable chunks in this word first to check them.",
+      });
+    } else if (errorsFound > 0) {
+      toast({
+        title: `Word checked: ${errorsFound} error(s) found`,
+        description: "Incorrect letters have been marked with a red slash.",
+      });
+    } else {
+      toast({
+        title: "Word checked: All entered letters correct!",
+        description:
+          filledCount === targetWord.chunks.length
+            ? "Complete word is correct!"
+            : "Entered letters are correct so far!",
+      });
+    }
+  }, [focusedCell, isGameWon, structuredLines, slots, slashedCells]);
+
+  const handleCheckPuzzle = useCallback(() => {
+    if (isGameWon) return;
+    let errorsFound = 0;
+    let totalPlaced = 0;
+    const nextSlashed = new Set<string>();
+    const slotList = Object.values(slots);
+
+    slotList.forEach((slot) => {
+      if (slot.placedChunk) {
+        totalPlaced++;
+        for (let c = 0; c < slot.expectedLength; c++) {
+          const cellId = `${slot.key}-${c}`;
+          if (slot.placedChunk[c] !== slot.expectedChunk[c]) {
+            nextSlashed.add(cellId);
+            errorsFound++;
+          }
+        }
+      }
+    });
+
+    setSlashedCells(nextSlashed);
+
+    if (totalPlaced === slotList.length && errorsFound === 0) {
+      checkFullBoard(slots);
+      return;
+    }
+
+    if (errorsFound > 0) {
+      toast({
+        title: `Puzzle checked: ${errorsFound} error(s) found`,
+        description: "Incorrect letters marked with red slashes.",
+      });
+    } else {
+      toast({
+        title: "Puzzle checked: All placed letters correct!",
+        description: "Looking great! Keep going to complete the haiku.",
+      });
+    }
+  }, [isGameWon, slots, checkFullBoard]);
+
+  const handleRevealPuzzle = useCallback(() => {
+    const nextSlots: Record<string, SlotState> = { ...slots };
+    Object.keys(nextSlots).forEach((k) => {
+      nextSlots[k] = {
+        ...nextSlots[k],
+        placedChunk: nextSlots[k].expectedChunk,
+        placedChunkId: `revealed-${k}`,
+        isLocked: true,
+        isMisplaced: false,
+      };
+    });
+    setSlots(nextSlots);
+    setTrayChunks([]);
+    setSlashedCells(new Set());
+    setIsTimerRunning(false);
+    setIsGameWon(true);
+    if (!isCustomMode) {
+      record17SyllablesWin(puzzle.dateKey, 0, elapsedSeconds);
+    }
+    setTimeout(() => {
+      setVictoryModalOpen(true);
+    }, 400);
+  }, [slots, isCustomMode, puzzle.dateKey, elapsedSeconds]);
+
+  const handleClearPuzzle = useCallback(() => {
+    const nextSlots: Record<string, SlotState> = { ...slots };
+    const returned: TrayChunk[] = [...trayChunks];
+
+    Object.values(nextSlots).forEach((s) => {
+      if (!s.isLocked && s.placedChunk) {
+        returned.push({
+          id: s.placedChunkId || `chunk-${Date.now()}-${Math.random()}`,
+          text: s.placedChunk,
+        });
+        nextSlots[s.key] = {
+          ...s,
+          placedChunk: null,
+          placedChunkId: null,
+          isMisplaced: false,
+        };
+      }
+    });
+
+    setSlots(nextSlots);
+    setTrayChunks(returned);
+    setSlashedCells(new Set());
+    setSelectedTrayChunkId(null);
+    toast({
+      title: "Puzzle Cleared",
+      description: "All entered letters have been returned to tray.",
+    });
+  }, [slots, trayChunks]);
+
   const creatorDialogElement = isAuthenticated && !profile?.isBanned ? (
     <Dialog
       open={isCreatorDialogOpen}
@@ -1206,26 +1431,71 @@ export function SeventeenSyllablesGame() {
       dateKey={puzzle.dateKey}
       author={puzzle.author}
       subtitle={puzzle.theme}
+      unifiedHeader={true}
+      helpOpen={helpOpen}
+      onHelpOpenChange={setHelpOpen}
+      statsOpen={statsOpen}
+      onStatsOpenChange={setStatsOpen}
       headerRightSlot={
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1 min-[375px]:gap-1.5">
+          {/* Combined Timer & Rating Pill */}
+          <div className="inline-flex h-7 min-[375px]:h-8 sm:h-9 items-center gap-1 sm:gap-1.5 rounded-lg sm:rounded-xl border-2 border-black bg-white px-2 min-[375px]:px-2.5 font-mono text-[11px] min-[375px]:text-xs sm:text-sm font-black text-black">
+            <Star className="w-3 h-3 min-[375px]:w-3.5 min-[375px]:h-3.5 fill-[#F9D423] text-black shrink-0" />
+            <span>{currentStars.toFixed(1)}</span>
+            <span className="text-neutral-300">|</span>
+            <span>{formatTimerSeconds(elapsedSeconds)}</span>
+          </div>
+
+          {/* Lifesaver (Check & Reveal) */}
           <button
             type="button"
-            onClick={requestOpenCreatorModal}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white hover:bg-neutral-50 border-2 border-black text-[11px] sm:text-xs font-bold cursor-pointer transition-colors"
+            onClick={() => setCheckRevealModalOpen(true)}
+            disabled={isGameWon}
+            className={cn(
+              "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40",
+              checkRevealModalOpen
+                ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                : "border-black/20 hover:border-black bg-white text-black"
+            )}
+            title="Check or Reveal Puzzle"
+            aria-label="Check or Reveal Puzzle"
           >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Create Haiku</span>
-            <span className="sm:hidden">Create</span>
+            <LifeBuoy className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
           </button>
-          {/* Stars rating badge */}
-          <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 border border-neutral-300 text-xs font-bold">
-            <Star className="w-3.5 h-3.5 fill-[#F9D423] text-black" />
-            <span>{currentStars.toFixed(1)}</span>
-          </div>
-          {/* Timer */}
-          <div className="font-mono text-xs font-bold px-2.5 py-1 rounded-full bg-neutral-50 border border-neutral-200">
-            {formatTimerSeconds(elapsedSeconds)}
-          </div>
+
+          {/* Hints */}
+          <button
+            type="button"
+            onClick={() => setHintsModalOpen(true)}
+            disabled={isGameWon || (wordHintsUsed >= 3 && tileHintsUsed >= 2)}
+            className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+            title="Hints"
+            aria-label="Hints"
+          >
+            <Lightbulb className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4 text-[#F9D423] fill-[#F9D423]" />
+          </button>
+
+          {/* How to Play */}
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
+            title="How to Play"
+            aria-label="How to Play"
+          >
+            <HelpCircle className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+          </button>
+
+          {/* Settings */}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
+            title="Settings & Tools"
+            aria-label="Settings"
+          >
+            <Settings className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+          </button>
         </div>
       }
     >
@@ -1314,10 +1584,23 @@ export function SeventeenSyllablesGame() {
                             key={slotIdx}
                             onClick={() => {
                               if (isGameWon) return;
+                              const isSlotFocused =
+                                focusedCell?.lineIdx === lineIdx &&
+                                focusedCell?.wordIdx === wordIdx &&
+                                focusedCell?.slotIdx === slotIdx;
+
                               if (isFilled) {
-                                handleRemoveChunk(slotKey);
+                                if (isSlotFocused && !slot.isLocked) {
+                                  // Two-tap return: tapping already-focused slot returns to tray
+                                  handleRemoveChunk(slotKey);
+                                } else {
+                                  setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
+                                }
                               } else if (selectedTrayChunkId) {
                                 handlePlaceChunk(slotKey);
+                                setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
+                              } else {
+                                setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
                               }
                             }}
                             onDragOver={(e) => {
@@ -1329,6 +1612,7 @@ export function SeventeenSyllablesGame() {
                               e.preventDefault();
                               const chunkId = e.dataTransfer.getData("text/plain");
                               handlePlaceChunk(slotKey, chunkId);
+                              setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
                             }}
                             className={cn(
                               "relative inline-flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 rounded-lg border-2 transition-all select-none cursor-pointer",
@@ -1351,22 +1635,71 @@ export function SeventeenSyllablesGame() {
                             {/* Individual character boxes inside slot */}
                             {Array.from({ length: slot.expectedLength }).map((_, charIdx) => {
                               const char = slot.placedChunk ? slot.placedChunk[charIdx] : "";
+                              const cellId = `${slotKey}-${charIdx}`;
+                              const isSlashed = slashedCells.has(cellId);
+                              const isCellFocused =
+                                focusedCell?.lineIdx === lineIdx &&
+                                focusedCell?.wordIdx === wordIdx &&
+                                focusedCell?.slotIdx === slotIdx &&
+                                focusedCell?.charIdx === charIdx;
+                              const isSlotFocused =
+                                focusedCell?.lineIdx === lineIdx &&
+                                focusedCell?.wordIdx === wordIdx &&
+                                focusedCell?.slotIdx === slotIdx;
 
                               return (
                                 <div
                                   key={charIdx}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (isGameWon) return;
+                                    if (isFilled) {
+                                      if (isSlotFocused && !slot.isLocked) {
+                                        // Two-tap return: tapping already-focused slot returns to tray
+                                        handleRemoveChunk(slotKey);
+                                      } else {
+                                        setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx });
+                                      }
+                                    } else if (selectedTrayChunkId) {
+                                      handlePlaceChunk(slotKey);
+                                      setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
+                                    } else {
+                                      setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx });
+                                    }
+                                  }}
                                   className={cn(
-                                    "w-7 h-8 sm:w-9 sm:h-11 rounded flex items-center justify-center font-mono font-black text-sm sm:text-lg uppercase transition-colors",
+                                    "relative w-7 h-8 sm:w-9 sm:h-11 rounded flex items-center justify-center font-mono font-black text-sm sm:text-lg uppercase transition-all select-none cursor-pointer",
                                     !isFilled && "bg-neutral-100/70 text-transparent",
                                     isFilled &&
                                       !slot.isMisplaced &&
                                       !slot.isLocked &&
+                                      !isSlashed &&
                                       "bg-white text-black border border-neutral-200",
                                     slot.isLocked && "bg-emerald-100 text-emerald-950",
-                                    slot.isMisplaced && "bg-red-100 text-red-800"
+                                    (slot.isMisplaced || isSlashed) &&
+                                      "bg-red-50 text-red-700 border-2 border-red-500",
+                                    isCellFocused && "ring-2 ring-black scale-105 z-10 shadow-xs"
                                   )}
                                 >
                                   {char}
+
+                                  {/* NYT Red Diagonal Slash */}
+                                  {isSlashed && (
+                                    <svg
+                                      viewBox="0 0 48 48"
+                                      className="pointer-events-none absolute inset-0 h-full w-full text-red-600/85"
+                                    >
+                                      <line
+                                        x1="8"
+                                        y1="40"
+                                        x2="40"
+                                        y2="8"
+                                        stroke="currentColor"
+                                        strokeWidth="3.5"
+                                        strokeLinecap="round"
+                                      />
+                                    </svg>
+                                  )}
                                 </div>
                               );
                             })}
@@ -1690,6 +2023,154 @@ export function SeventeenSyllablesGame() {
       </Dialog>
 
       {creatorDialogElement}
+
+      {/* Settings & Tools Modal */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
+              <Settings className="h-5 w-5 text-gray-700" />
+              Settings &amp; Tools
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Manage your haiku game session, view stats, and access archives.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Link
+              href="/games/17-syllables/archive"
+              onClick={() => setSettingsOpen(false)}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-gray-50 font-bold text-sm text-black transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-gray-600" />
+                <span>Playable Archive</span>
+              </div>
+              <span className="text-xs text-gray-400">Past Haikus &rarr;</span>
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                setStatsOpen(true);
+              }}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-gray-50 font-bold text-sm text-black transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-gray-600" />
+                <span>Stats &amp; Streaks</span>
+              </div>
+              <span className="text-xs text-gray-400">View &rarr;</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                requestOpenCreatorModal();
+              }}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-gray-50 font-bold text-sm text-black transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <PlusCircle className="h-4 w-4 text-gray-600" />
+                <span>Create Haiku</span>
+              </div>
+              <span className="text-xs text-gray-400">Compose &rarr;</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                setCheckRevealModalOpen(true);
+              }}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-red-200 hover:border-red-400 bg-red-50/50 font-bold text-sm text-red-600 transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <RotateCcw className="h-4 w-4 text-red-600" />
+                <span>Clear / Reveal</span>
+              </div>
+              <span className="text-xs text-red-400">Assistance &rarr;</span>
+            </button>
+
+            <div className="pt-2 border-t border-black/10 flex items-center justify-between">
+              <span className="text-xs text-gray-500 font-medium">Account:</span>
+              <AccountNavButton variant="compact" />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hints Modal */}
+      <Dialog open={hintsModalOpen} onOpenChange={setHintsModalOpen}>
+        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
+              <Lightbulb className="h-5 w-5 text-amber-500 fill-amber-500/20" />
+              Puzzle Hints
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Need assistance? Use a hint to reveal words or lock tiles.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setHintsModalOpen(false);
+                setWordHintConfirmOpen(true);
+              }}
+              disabled={wordHintsUsed >= 3 || isGameWon}
+              className="flex items-center justify-between w-full p-3.5 rounded-xl border-2 border-black/10 hover:border-black bg-purple-50/60 font-bold text-sm text-black transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <div className="flex items-center gap-2.5">
+                <Lightbulb className="h-4 w-4 text-purple-600" />
+                <div className="text-left">
+                  <div className="text-xs font-black">Word Hint ({3 - wordHintsUsed} left)</div>
+                  <div className="text-[11px] text-gray-500 font-normal">Highlights next target word (-1/3 ★)</div>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-purple-700">Use &rarr;</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setHintsModalOpen(false);
+                setTileHintConfirmOpen(true);
+              }}
+              disabled={tileHintsUsed >= 2 || isGameWon}
+              className="flex items-center justify-between w-full p-3.5 rounded-xl border-2 border-black/10 hover:border-black bg-emerald-50/60 font-bold text-sm text-black transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <div className="flex items-center gap-2.5">
+                <KeyRound className="h-4 w-4 text-emerald-600" />
+                <div className="text-left">
+                  <div className="text-xs font-black">Tile Lock Hint ({2 - tileHintsUsed} left)</div>
+                  <div className="text-[11px] text-gray-500 font-normal">Locks 1 chunk in place (-1/2 ★)</div>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-700">Use &rarr;</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check & Reveal Action Modal */}
+      <PuzzleCheckRevealModal
+        open={checkRevealModalOpen}
+        onOpenChange={setCheckRevealModalOpen}
+        isPartiallyFilled={isPartiallyFilled}
+        squareLabel="Check Square"
+        wordLabel="Check Word"
+        onCheckSquare={handleCheckSquare}
+        onCheckWord={handleCheckWord}
+        onCheckPuzzle={handleCheckPuzzle}
+        onRevealPuzzle={handleRevealPuzzle}
+        onClearPuzzle={handleClearPuzzle}
+      />
     </GameShell>
   );
 }

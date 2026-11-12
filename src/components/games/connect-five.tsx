@@ -1,15 +1,21 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  BarChart3,
+  Calendar,
   Check,
   CheckCircle2,
   Clock,
   Copy,
+  HelpCircle,
+  LifeBuoy,
   Lightbulb,
   Link2,
   RotateCcw,
+  Settings,
   Share2,
   Sparkles,
   Trophy,
@@ -40,6 +46,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AccountNavButton } from "@/components/account/account-nav-button";
+import { PuzzleCheckRevealModal } from "./puzzle-check-reveal-modal";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
 const KEYBOARD_ROWS = [
@@ -243,6 +252,10 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
   );
   const [notQuiteBanner, setNotQuiteBanner] = useState<boolean>(false);
   const [resultsCopied, setResultsCopied] = useState<boolean>(false);
+  const [checkRevealOpen, setCheckRevealOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [helpOpen, setHelpOpen] = useState<boolean>(false);
+  const [statsOpen, setStatsOpen] = useState<boolean>(false);
 
   const isMountedRef = useRef<boolean>(true);
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -973,6 +986,277 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
     }
   };
 
+  const isPartiallyFilled = useMemo(() => {
+    let filledRows = 0;
+    let totalEditableFilled = 0;
+    let totalEditable = 0;
+    for (let r = 1; r < 5; r++) {
+      let rowFull = true;
+      for (let c = 0; c < grid[r].length; c++) {
+        if (!locked[r][c]) {
+          totalEditable++;
+          if (grid[r][c] !== "") {
+            totalEditableFilled++;
+          } else {
+            rowFull = false;
+          }
+        }
+      }
+      if (rowFull) filledRows++;
+    }
+    return filledRows <= 1 || totalEditableFilled < totalEditable;
+  }, [grid, locked]);
+
+  const handleCheckSquare = useCallback(() => {
+    if (status !== "playing") return;
+    const targetRow = activeRow;
+    const targetCol = activeCol;
+    if (targetRow < 1 || targetRow > 4) {
+      toast({
+        title: "Starter row cannot be checked",
+        description: "Row 1 is already solved.",
+      });
+      return;
+    }
+    if (locked[targetRow][targetCol]) {
+      toast({
+        title: "Square is locked",
+        description: "This letter is already revealed.",
+      });
+      return;
+    }
+    const currentLetter = grid[targetRow][targetCol];
+    if (!currentLetter) {
+      toast({
+        title: "Square is empty",
+        description: "Type a letter first to check it.",
+      });
+      return;
+    }
+    const isCorrect =
+      currentLetter.toUpperCase() === puzzle.words[targetRow][targetCol];
+    const nextSlashed = slashed.map((r) => [...r]);
+    nextSlashed[targetRow][targetCol] = !isCorrect;
+    setSlashed(nextSlashed);
+    persistProgress(
+      grid,
+      locked,
+      nextSlashed,
+      status,
+      hintsUsed,
+      elapsedSecondsRef.current
+    );
+    if (!isCorrect) {
+      toast({
+        title: "Letter is incorrect",
+        description:
+          "Marked with a red slash. Type a new letter to replace it.",
+      });
+    } else {
+      toast({
+        title: "Square is correct!",
+        description: "Nice! Keep going.",
+      });
+    }
+  }, [
+    status,
+    activeRow,
+    activeCol,
+    locked,
+    grid,
+    puzzle.words,
+    slashed,
+    persistProgress,
+    hintsUsed,
+  ]);
+
+  const handleCheckWord = useCallback(() => {
+    if (status !== "playing") return;
+    const targetRow = activeRow;
+    if (targetRow < 1 || targetRow > 4) return;
+    const targetWord = puzzle.words[targetRow];
+    const nextSlashed = slashed.map((r) => [...r]);
+    let errorsFound = 0;
+    let enteredCount = 0;
+    for (let c = 0; c < targetWord.length; c++) {
+      if (locked[targetRow][c]) continue;
+      const current = grid[targetRow][c];
+      if (!current) continue;
+      enteredCount++;
+      if (current.toUpperCase() !== targetWord[c]) {
+        nextSlashed[targetRow][c] = true;
+        errorsFound++;
+      } else {
+        nextSlashed[targetRow][c] = false;
+      }
+    }
+    setSlashed(nextSlashed);
+    persistProgress(
+      grid,
+      locked,
+      nextSlashed,
+      status,
+      hintsUsed,
+      elapsedSecondsRef.current
+    );
+    if (enteredCount === 0) {
+      toast({
+        title: "Word is empty",
+        description: "Enter letters in this row to check them.",
+      });
+    } else if (errorsFound > 0) {
+      toast({
+        title: `Word checked: ${errorsFound} error(s) found`,
+        description: "Incorrect letters have been marked with a red slash.",
+      });
+    } else {
+      toast({
+        title: "Word checked: All entered letters correct!",
+        description:
+          enteredCount === targetWord.length
+            ? "Complete row is correct!"
+            : "Looking good so far!",
+      });
+    }
+  }, [
+    status,
+    activeRow,
+    puzzle.words,
+    locked,
+    grid,
+    slashed,
+    persistProgress,
+    hintsUsed,
+  ]);
+
+  const handleCheckPuzzle = useCallback(() => {
+    if (status !== "playing") return;
+    const nextSlashed = slashed.map((r) => [...r]);
+    let errorsFound = 0;
+    let totalEntered = 0;
+    let totalRequired = 0;
+    let allCorrect = true;
+
+    for (let r = 1; r < 5; r++) {
+      const targetWord = puzzle.words[r];
+      for (let c = 0; c < targetWord.length; c++) {
+        totalRequired++;
+        if (locked[r][c]) {
+          totalEntered++;
+          continue;
+        }
+        const current = grid[r][c];
+        if (current) {
+          totalEntered++;
+          if (current.toUpperCase() !== targetWord[c]) {
+            nextSlashed[r][c] = true;
+            errorsFound++;
+            allCorrect = false;
+          } else {
+            nextSlashed[r][c] = false;
+          }
+        } else {
+          allCorrect = false;
+        }
+      }
+    }
+
+    setSlashed(nextSlashed);
+    persistProgress(
+      grid,
+      locked,
+      nextSlashed,
+      status,
+      hintsUsed,
+      elapsedSecondsRef.current
+    );
+
+    if (allCorrect && totalEntered === totalRequired) {
+      evaluateBoardIfFull(grid, locked, nextSlashed);
+      return;
+    }
+
+    if (errorsFound > 0) {
+      toast({
+        title: `Puzzle checked: ${errorsFound} error(s) found`,
+        description: "Incorrect letters marked with red slashes.",
+      });
+    } else {
+      toast({
+        title: "Puzzle checked: All entered letters correct!",
+        description: "Every letter you've entered so far is correct.",
+      });
+    }
+  }, [
+    status,
+    slashed,
+    puzzle.words,
+    locked,
+    grid,
+    persistProgress,
+    hintsUsed,
+    evaluateBoardIfFull,
+  ]);
+
+  const handleRevealPuzzle = useCallback(() => {
+    const nextGrid = puzzle.words.map((w) => w.split(""));
+    const nextLocked = puzzle.words.map((w) =>
+      Array.from({ length: w.length }, () => true)
+    );
+    const nextSlashed = puzzle.words.map((w) =>
+      Array.from({ length: w.length }, () => false)
+    );
+
+    setGrid(nextGrid);
+    setLocked(nextLocked);
+    setSlashed(nextSlashed);
+    setStatus("won");
+    setWinModalOpen(true);
+
+    const currentElapsed = elapsedSecondsRef.current;
+    persistProgress(
+      nextGrid,
+      nextLocked,
+      nextSlashed,
+      "won",
+      hintsUsed,
+      currentElapsed
+    );
+    recordGameWin("connect-5", activeDateKey, currentElapsed);
+  }, [puzzle.words, persistProgress, hintsUsed, activeDateKey]);
+
+  const handleClearPuzzle = useCallback(() => {
+    const nextGrid = grid.map((r, rIdx) =>
+      rIdx === 0
+        ? [...r]
+        : r.map((char, cIdx) => (locked[rIdx][cIdx] ? char : ""))
+    );
+    const nextSlashed = slashed.map((r, rIdx) =>
+      rIdx === 0
+        ? [...r]
+        : r.map((s, cIdx) => (locked[rIdx][cIdx] ? s : false))
+    );
+
+    setGrid(nextGrid);
+    setSlashed(nextSlashed);
+    const firstOpen = findFirstOpenCell(nextGrid, locked, nextSlashed, 1);
+    setActiveRow(firstOpen.row);
+    setActiveCol(firstOpen.col);
+    setSpecificCellFocus(false);
+    persistProgress(
+      nextGrid,
+      locked,
+      nextSlashed,
+      status,
+      hintsUsed,
+      elapsedSecondsRef.current
+    );
+    toast({
+      title: "Puzzle Cleared",
+      description: "All entered letters have been cleared.",
+    });
+  }, [grid, locked, slashed, status, hintsUsed, persistProgress]);
+
   return (
     <GameShell
       gameSlug="connect-5"
@@ -981,11 +1265,16 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
       dateKey={activeDateKey}
       author={puzzle.author}
       subtitle="Complete the 5-word compound chain. Each row connects with the word above it."
+      unifiedHeader={true}
+      helpOpen={helpOpen}
+      onHelpOpenChange={setHelpOpen}
+      statsOpen={statsOpen}
+      onStatsOpenChange={setStatsOpen}
       headerRightSlot={
         <div className="flex items-center gap-1 min-[375px]:gap-1.5">
           <div
             className={cn(
-              "inline-flex h-7 sm:h-9 items-center gap-1 sm:gap-1.5 rounded-lg border-2 px-2 min-[375px]:px-2.5 font-mono text-[11px] min-[375px]:text-xs sm:text-sm font-black",
+              "inline-flex h-7 min-[375px]:h-8 sm:h-9 items-center gap-1 sm:gap-1.5 rounded-lg sm:rounded-xl border-2 px-2 min-[375px]:px-2.5 font-mono text-[11px] min-[375px]:text-xs sm:text-sm font-black",
               status === "won" || isBufferingWin
                 ? "border-[#2ECC71] bg-emerald-50 text-emerald-900"
                 : "border-black bg-white text-black"
@@ -996,18 +1285,53 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
             <span>{formatTimerSeconds(elapsedSeconds)}</span>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setCheckRevealOpen(true)}
+            disabled={status !== "playing"}
+            className={cn(
+              "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40",
+              checkRevealOpen
+                ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                : "border-black/20 hover:border-black bg-white text-black"
+            )}
+            title="Check or Reveal Puzzle"
+            aria-label="Check or Reveal Puzzle"
+          >
+            <LifeBuoy className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+          </button>
+
           {status === "playing" && (
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
               onClick={handleRevealHint}
-              className="border-2 border-black font-bold text-[11px] sm:text-xs h-7 sm:h-9 px-2 min-[375px]:px-2.5"
+              className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
               title="Reveal one letter hint"
+              aria-label="Hint"
             >
-              <Lightbulb className="h-3.5 w-3.5 sm:mr-1 text-[#F9D423] fill-[#F9D423]" />
-              <span className="hidden sm:inline">Hint</span>
-            </Button>
+              <Lightbulb className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4 text-[#F9D423] fill-[#F9D423]" />
+            </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
+            title="How to Play"
+            aria-label="How to Play"
+          >
+            <HelpCircle className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
+            title="Settings & Tools"
+            aria-label="Settings"
+          >
+            <Settings className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+          </button>
         </div>
       }
     >
@@ -1386,6 +1710,84 @@ function ConnectFiveBoard({ activeDateKey }: { activeDateKey: string }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Settings Modal */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
+              <Settings className="h-5 w-5 text-gray-700" />
+              Settings &amp; Tools
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              Manage your game session, view stats, and access archives.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <Link
+              href="/games/connect-5/archive"
+              onClick={() => setSettingsOpen(false)}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-gray-50 font-bold text-sm text-black transition-all"
+            >
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-gray-600" />
+                <span>Playable Archive</span>
+              </div>
+              <span className="text-xs text-gray-400">Past Games &rarr;</span>
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                setStatsOpen(true);
+              }}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-black/10 hover:border-black bg-gray-50 font-bold text-sm text-black transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <BarChart3 className="h-4 w-4 text-gray-600" />
+                <span>Stats &amp; Streaks</span>
+              </div>
+              <span className="text-xs text-gray-400">View &rarr;</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                handleResetPuzzle();
+              }}
+              className="flex items-center justify-between w-full p-3 rounded-xl border-2 border-red-200 hover:border-red-400 bg-red-50/50 font-bold text-sm text-red-600 transition-all cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <RotateCcw className="h-4 w-4 text-red-600" />
+                <span>Reset Board</span>
+              </div>
+              <span className="text-xs text-red-400">Restart &rarr;</span>
+            </button>
+
+            <div className="pt-2 border-t border-black/10 flex items-center justify-between">
+              <span className="text-xs text-gray-500 font-medium">Account:</span>
+              <AccountNavButton variant="compact" />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Check & Reveal Action Modal */}
+      <PuzzleCheckRevealModal
+        open={checkRevealOpen}
+        onOpenChange={setCheckRevealOpen}
+        isPartiallyFilled={isPartiallyFilled}
+        squareLabel="Check Square"
+        wordLabel="Check Word"
+        onCheckSquare={handleCheckSquare}
+        onCheckWord={handleCheckWord}
+        onCheckPuzzle={handleCheckPuzzle}
+        onRevealPuzzle={handleRevealPuzzle}
+        onClearPuzzle={handleClearPuzzle}
+      />
     </GameShell>
   );
 }

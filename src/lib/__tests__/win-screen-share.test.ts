@@ -287,9 +287,9 @@ describe("Win & Completion Screen Decoupled Share / Copy Actions (R3)", () => {
     assert.equal(spies.shareCalls.length, 1);
     assert.deepEqual(spies.shareCalls[0], {
       title: "SOL GaMES · Connect 5 #18",
-      text: "Connect 5 #18 Solved in 0:42",
-      url: "https://21games.ai/games/connect-5",
+      text: "Connect 5 #18 Solved in 0:42\nhttps://21games.ai/games/connect-5",
     });
+    assert.equal("url" in spies.shareCalls[0], false);
     assert.equal(spies.clipboardCalls.length, 0);
     assert.equal(spies.execCommandCalls.length, 0);
 
@@ -356,9 +356,9 @@ describe("Win & Completion Screen Decoupled Share / Copy Actions (R3)", () => {
     assert.equal(getCapturedToasts().length, 0);
   });
 
-  it("nativeShareResultsOnly falls back to { title, text: fullText } if canShare rejects url payload, and returns unsupported if canShare rejects all", async () => {
+  it("nativeShareResultsOnly falls back through payload tiers (text-only, then separate url) if canShare rejects primary, and returns unsupported if canShare rejects all", async () => {
     const fallbackSpies = installBrowserMocks({
-      canShare: (data) => Boolean(data && !("url" in data)),
+      canShare: (data) => Boolean(data && !("title" in data) && "text" in data),
       share: async () => {},
       writeText: async () => {},
     });
@@ -374,10 +374,8 @@ describe("Win & Completion Screen Decoupled Share / Copy Actions (R3)", () => {
       unsupported: false,
       aborted: false,
     });
-    assert.equal(fallbackSpies.canShareCalls.length, 2);
     assert.equal(fallbackSpies.shareCalls.length, 1);
     assert.deepEqual(fallbackSpies.shareCalls[0], {
-      title: "21 Things #9",
       text: "My 6 -> 3 -> 1 summary\nhttps://21games.ai/games/21-things",
     });
     assert.equal(fallbackSpies.clipboardCalls.length, 0);
@@ -406,6 +404,50 @@ describe("Win & Completion Screen Decoupled Share / Copy Actions (R3)", () => {
     assert.equal(rejectedSpies.clipboardCalls.length, 0);
     assert.equal(rejectedSpies.execCommandCalls.length, 0);
     assert.equal(getCapturedToasts()[0]?.title, "Native Share Unavailable");
+  });
+
+  it("nativeShareResultsOnly preserves emojis, time, and URL in text field and omits separate url key (iOS Messages fix)", async () => {
+    const spies = installBrowserMocks({
+      share: async () => {},
+      writeText: async () => {},
+    });
+
+    const richText = [
+      '🔗 Connect 5 #18 — "Ocean Waves"',
+      "⏱️ Time: 0:42",
+      "🟩🟩🟩🟩🟩",
+      "🟩🟩🟩🟩🟩",
+    ].join("\n");
+
+    await shareModule.nativeShareResultsOnly({
+      title: "Connect 5 #18",
+      text: richText,
+      url: "https://21games.ai/games/connect-5",
+    });
+
+    assert.equal(spies.shareCalls.length, 1);
+    const call = spies.shareCalls[0];
+    assert.ok(Boolean(call.text?.includes("🟩🟩🟩🟩🟩")), "Emojis must be preserved in text");
+    assert.ok(Boolean(call.text?.includes("⏱️ Time: 0:42")), "Time must be preserved in text");
+    assert.ok(Boolean(call.text?.includes("https://21games.ai/games/connect-5")), "URL must be in text");
+    assert.equal("url" in call, false, "Separate url key must be omitted so iOS Messages doesn't drop text");
+    assert.equal(spies.clipboardCalls.length, 0, "Share must never write to clipboard");
+  });
+
+  it("nativeShareResultsOnly avoids duplicate URL when text already contains it", async () => {
+    const spies = installBrowserMocks({
+      share: async () => {},
+    });
+
+    const textWithUrl = "17 Syllables #12 ⭐⭐⭐\nhttps://21games.ai/games/17-syllables";
+    await shareModule.nativeShareResultsOnly({
+      title: "17 Syllables",
+      text: textWithUrl,
+      url: "https://21games.ai/games/17-syllables",
+    });
+
+    assert.equal(spies.shareCalls.length, 1);
+    assert.equal(spies.shareCalls[0].text, textWithUrl);
   });
 
   it("copyResultsOnly writes formatted summary + URL to clipboard and never calls navigator.share", async () => {

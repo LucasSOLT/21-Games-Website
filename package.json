@@ -6,6 +6,7 @@
     "dev": "NEXT_PUBLIC_BASE_PATH= next dev -p 9002",
     "build": "next build",
     "start": "next start",
+    "test": "node --experimental-strip-types scripts/test-check-reveal.ts && node --experimental-strip-types --test src/lib/__tests__/win-screen-share.test.ts",
     "lint": "eslint",
     "build:solworld": "NEXT_PUBLIC_BASE_PATH=/solgames next build",
     "deploy:solworld": "npm run build:solworld && rsync -a --delete out/ ../SOL-World/solgames/ && rsync -a --delete out/ ../SOL-World/dist/solgames/ && rsync -a --delete out/ ../SOL-World/public/solgames/"

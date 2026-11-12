@@ -38,6 +38,11 @@ interface GameShellProps {
   subtitle?: string;
   headerRightSlot?: React.ReactNode;
   children: React.ReactNode;
+  unifiedHeader?: boolean;
+  helpOpen?: boolean;
+  onHelpOpenChange?: (open: boolean) => void;
+  statsOpen?: boolean;
+  onStatsOpenChange?: (open: boolean) => void;
 }
 
 export function formatTimerSeconds(totalSeconds: number): string {
@@ -55,9 +60,21 @@ export function GameShell({
   subtitle,
   headerRightSlot,
   children,
+  unifiedHeader = false,
+  helpOpen: controlledHelpOpen,
+  onHelpOpenChange,
+  statsOpen: controlledStatsOpen,
+  onStatsOpenChange,
 }: GameShellProps) {
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);
+  const [internalHelpOpen, setInternalHelpOpen] = useState(false);
+  const [internalStatsOpen, setInternalStatsOpen] = useState(false);
+
+  const helpOpen = controlledHelpOpen !== undefined ? controlledHelpOpen : internalHelpOpen;
+  const setHelpOpen = onHelpOpenChange ?? setInternalHelpOpen;
+
+  const statsOpen = controlledStatsOpen !== undefined ? controlledStatsOpen : internalStatsOpen;
+  const setStatsOpen = onStatsOpenChange ?? setInternalStatsOpen;
+
   const { profile, openAccountModal } = useAuth();
 
   const stats = getGameStats(gameSlug);
@@ -143,81 +160,87 @@ export function GameShell({
           {/* Right: Timer / Action Slot + Archive / Stats / Help */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             {headerRightSlot && (
-              <div className="hidden sm:flex items-center">
+              <div className={cn("items-center", unifiedHeader ? "flex" : "hidden sm:flex")}>
                 {headerRightSlot}
               </div>
             )}
 
-            <Link
-              href={`/games/${gameSlug}/archive`}
-              className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-auto sm:px-3 items-center justify-center gap-1.5 rounded-lg border-2 border-gray-300 bg-white text-xs font-bold text-black hover:border-black transition-colors shrink-0"
-              title="Playable Archive"
-              aria-label="Playable Archive"
-            >
-              <Calendar className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
-              <span className="hidden lg:inline">Archive</span>
-            </Link>
+            {!unifiedHeader && (
+              <>
+                <Link
+                  href={`/games/${gameSlug}/archive`}
+                  className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-auto sm:px-3 items-center justify-center gap-1.5 rounded-lg border-2 border-gray-300 bg-white text-xs font-bold text-black hover:border-black transition-colors shrink-0"
+                  title="Playable Archive"
+                  aria-label="Playable Archive"
+                >
+                  <Calendar className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+                  <span className="hidden lg:inline">Archive</span>
+                </Link>
 
-            <button
-              type="button"
-              onClick={() => setStatsOpen(true)}
-              className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border-2 border-gray-300 bg-white text-black hover:border-black transition-colors shrink-0"
-              title="Your Stats & Streak"
-              aria-label="Stats"
-            >
-              <BarChart3 className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setStatsOpen(true)}
+                  className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border-2 border-gray-300 bg-white text-black hover:border-black transition-colors shrink-0"
+                  title="Your Stats & Streak"
+                  aria-label="Stats"
+                >
+                  <BarChart3 className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setHelpOpen(true)}
-              className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border-2 border-gray-300 bg-white text-black hover:border-black transition-colors shrink-0"
-              title="How to Play"
-              aria-label="How to Play"
-            >
-              <HelpCircle className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(true)}
+                  className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg border-2 border-gray-300 bg-white text-black hover:border-black transition-colors shrink-0"
+                  title="How to Play"
+                  aria-label="How to Play"
+                >
+                  <HelpCircle className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+                </button>
 
-            <AccountNavButton variant="compact" />
+                <AccountNavButton variant="compact" />
+              </>
+            )}
           </div>
         </div>
 
-        {/* Tier 2 Mobile Bar: 1-Tap Game Switcher + Action Slot (< 640px only) */}
-        <div className="sm:hidden px-2 min-[375px]:px-3 py-1.5 bg-gray-50/95 border-t border-black/10 flex items-center justify-between gap-1.5 min-[375px]:gap-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <div className="inline-flex items-center gap-1">
-              <Link
-                href="/games/21-things"
-                className={cn(
-                  "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
-                  gameSlug === "21-things"
-                    ? "bg-black text-white border border-black shadow-2xs"
-                    : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
-                )}
-              >
-                21 Things
-              </Link>
-              <Link
-                href="/games/connect-5"
-                className={cn(
-                  "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
-                  gameSlug === "connect-5"
-                    ? "bg-black text-white border border-black shadow-2xs"
-                    : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
-                )}
-              >
-                Connect 5
-              </Link>
+        {/* Tier 2 Mobile Bar: 1-Tap Game Switcher + Action Slot (< 640px only, omitted when unifiedHeader is true) */}
+        {!unifiedHeader && (
+          <div className="sm:hidden px-2 min-[375px]:px-3 py-1.5 bg-gray-50/95 border-t border-black/10 flex items-center justify-between gap-1.5 min-[375px]:gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="inline-flex items-center gap-1">
+                <Link
+                  href="/games/21-things"
+                  className={cn(
+                    "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
+                    gameSlug === "21-things"
+                      ? "bg-black text-white border border-black shadow-2xs"
+                      : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
+                  )}
+                >
+                  21 Things
+                </Link>
+                <Link
+                  href="/games/connect-5"
+                  className={cn(
+                    "rounded-full px-2 min-[375px]:px-2.5 py-1 text-[10px] min-[375px]:text-[11px] font-bold transition-all whitespace-nowrap",
+                    gameSlug === "connect-5"
+                      ? "bg-black text-white border border-black shadow-2xs"
+                      : "bg-white text-gray-700 border border-black/20 hover:border-black hover:text-black"
+                  )}
+                >
+                  Connect 5
+                </Link>
+              </div>
+              <span className="hidden xs:inline text-[11px] text-gray-500 font-medium truncate">
+                By {author}
+              </span>
             </div>
-            <span className="hidden xs:inline text-[11px] text-gray-500 font-medium truncate">
-              By {author}
-            </span>
-          </div>
 
-          {headerRightSlot && (
-            <div className="flex items-center shrink-0">{headerRightSlot}</div>
-          )}
-        </div>
+            {headerRightSlot && (
+              <div className="flex items-center shrink-0">{headerRightSlot}</div>
+            )}
+          </div>
+        )}
 
         {subtitle && (
           <div className="hidden sm:block bg-gray-50 border-t border-gray-200/80 py-1.5 px-4 text-center text-xs text-gray-600 font-medium">
@@ -242,6 +265,8 @@ export function GameShell({
             <DialogDescription>
               {gameSlug === "21-things"
                 ? "A gratitude-driven social curation game built around a 21 → 6 → 3 → 1 narrowing funnel."
+                : gameSlug === "17-syllables"
+                ? "A daily haiku deduction puzzle where you assemble syllables into a 5-7-5 poem."
                 : "A 5-row compound word-chain puzzle inspired by daily crosswords."}
             </DialogDescription>
           </DialogHeader>
@@ -291,6 +316,32 @@ export function GameShell({
                   ~30 chars each) with a shareable link for friends.
                 </p>
               </div>
+            </div>
+          ) : gameSlug === "17-syllables" ? (
+            <div className="space-y-3 text-sm text-gray-700">
+              <div className="rounded-xl bg-purple-50/70 p-3 border border-purple-200">
+                <p className="font-bold text-black mb-1">
+                  Solve the Daily 5-7-5 Haiku
+                </p>
+                <p className="text-xs sm:text-sm">
+                  Assemble the syllable chunks from your tray into the 3 lines of the haiku:
+                  Line 1 (5 syllables), Line 2 (7 syllables), and Line 3 (5 syllables).
+                </p>
+              </div>
+              <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-sm">
+                <li>
+                  <strong>Placing Chunks:</strong> Tap a syllable chunk in the tray, then tap an open slot in the poem. Or tap an open slot directly to place the active chunk.
+                </li>
+                <li>
+                  <strong>Focus &amp; Return:</strong> Tap a character square to focus it. Tapping the same filled slot a second time returns the chunk to the tray.
+                </li>
+                <li>
+                  <strong>Check &amp; Reveal (Lifesaver):</strong> Tap the Lifesaver icon to Check Square, Check Word, or Check Puzzle. Incorrect letters are marked with a diagonal red slash.
+                </li>
+                <li>
+                  <strong>Hints:</strong> Tap the Lightbulb icon to get a Word Hint or lock a chunk in place.
+                </li>
+              </ul>
             </div>
           ) : (
             <div className="space-y-3 text-sm text-gray-700">

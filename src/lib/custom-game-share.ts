@@ -278,8 +278,7 @@ export async function shareCustomGame(
   if (canNativeShare) {
     const shareData: ShareData = {
       title: `${options.title} — ${options.gameName || "21 Things"}`,
-      text: blurbText,
-      url: options.shareUrl,
+      text: blurbWithUrl,
     };
 
     const isShareSupported =
@@ -392,7 +391,7 @@ function formatResultsTextWithUrl(text: string, url?: string): string {
   if (text.includes(trimmedUrl)) {
     return text;
   }
-  return `${text}\n${trimmedUrl}`;
+  return text.endsWith("\n") ? `${text}${trimmedUrl}` : `${text}\n${trimmedUrl}`;
 }
 
 function isAbortError(err: unknown): boolean {
@@ -444,23 +443,33 @@ export async function nativeShareResultsOnly(
   }
 
   const trimmedUrl = options.url?.trim();
-  const primaryShareData: ShareData = trimmedUrl
+  const fullText = formatResultsTextWithUrl(options.text, trimmedUrl);
+
+  // When both text and url are passed as distinct keys in Web Share API, native
+  // messengers (especially iOS Messages / iMessage) prioritize the url and discard
+  // the text completely. To ensure emojis, scores, and links are all delivered,
+  // we embed the URL inside text and pass { title: options.title, text: fullText } as primary payload.
+  const primaryShareData: ShareData = {
+    title: options.title,
+    text: fullText,
+  };
+
+  const textOnlyShareData: ShareData = {
+    text: fullText,
+  };
+
+  const separateUrlShareData: ShareData | null = trimmedUrl
     ? { title: options.title, text: options.text, url: trimmedUrl }
-    : { title: options.title, text: options.text };
+    : null;
 
   let payloadToShare: ShareData | null = null;
   if (typeof navigator.canShare === "function") {
     if (safeCanShare(primaryShareData)) {
       payloadToShare = primaryShareData;
-    } else if (trimmedUrl) {
-      const fullText = formatResultsTextWithUrl(options.text, trimmedUrl);
-      const fallbackShareData: ShareData = {
-        title: options.title,
-        text: fullText,
-      };
-      if (safeCanShare(fallbackShareData)) {
-        payloadToShare = fallbackShareData;
-      }
+    } else if (safeCanShare(textOnlyShareData)) {
+      payloadToShare = textOnlyShareData;
+    } else if (separateUrlShareData && safeCanShare(separateUrlShareData)) {
+      payloadToShare = separateUrlShareData;
     }
   } else {
     payloadToShare = primaryShareData;
