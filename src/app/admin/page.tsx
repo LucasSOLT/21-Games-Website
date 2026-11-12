@@ -68,6 +68,7 @@ import type { AllGameSlug } from "@/lib/games-config";
 import { collectPayloadStrings } from "@/lib/custom-puzzles";
 import type { GenericPublishRequest } from "@/components/admin/generic-publish";
 import { NineRhymesStudioTab } from "@/components/admin/nine-rhymes-studio-tab";
+import { EightfoldEchoStudioTab } from "@/components/admin/eightfold-echo-studio-tab";
 import {
   classifyDiagnosticError,
   type DiagnosticReport,
@@ -1247,6 +1248,9 @@ export default function AdminPage() {
             <TabsTrigger value="9-rhymes">
               💬 9 Rhymes Creator
             </TabsTrigger>
+            <TabsTrigger value="eightfold-echo">
+              🔷 Eightfold Echo
+            </TabsTrigger>
             <TabsTrigger value="bank">
               📚 66-Day Bank ({CONNECT_5_PUZZLES.length})
             </TabsTrigger>
@@ -1928,6 +1932,15 @@ export default function AdminPage() {
            * ================================================================ */}
           <TabsContent value="9-rhymes">
             <NineRhymesStudioTab
+              targetDate={targetDate}
+              canEdit={editPerm.canEdit}
+              editReason={editPerm.reason}
+              onPublish={requestGenericPublish}
+            />
+          </TabsContent>
+
+          <TabsContent value="eightfold-echo">
+            <EightfoldEchoStudioTab
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}

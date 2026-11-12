@@ -12,6 +12,7 @@ const SUITES = [
   ["scripts/test-cp01-zoom.ts"],
   ["scripts/test-cp02-multigame.ts"],
   ["scripts/test-cp03-9rhymes.ts"],
+  ["scripts/test-cp04-eightfold-echo.ts"],
 ];
 
 let failed = false;

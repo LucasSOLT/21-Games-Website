@@ -131,7 +131,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "echo",
     slug: "eightfold-echo",
     showCreate: false,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "3×3 shape logic sequence",
     description:
       "Follow visual logic rules to deduce the 8-step sequence across a 3×3 grid.",
