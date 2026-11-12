@@ -142,7 +142,7 @@ export const ALL_GAMES: GameConfig[] = [
     logo: "6-pics",
     slug: "6-pics",
     showCreate: true,
-    isPlayable: false,
+    isPlayable: true,
     tagline: "Progressive 6-image deduction",
     description:
       "Deduce the overarching secret theme connecting six progressive visual clues.",
