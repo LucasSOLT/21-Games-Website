@@ -12,6 +12,12 @@ import {
   type RhymeEntry,
   type RhymeFamily,
 } from "@/data/rhyme-families";
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
 import { fnv1a32, mulberry32 } from "@/lib/seeded-random";
 
 export interface NineRhymesClue {
@@ -182,6 +188,92 @@ function buildBank(): NineRhymesPuzzle[] {
 
 /** 66-day perfect-rhyme puzzle bank. */
 export const NINE_RHYMES_PUZZLES: NineRhymesPuzzle[] = buildBank();
+
+const BANK_FAMILY_ORDER: readonly RhymeFamily[] = shuffled(
+  USABLE_RHYME_FAMILIES,
+  "9-rhymes:bank-order"
+);
+
+const NINE_RHYMES_DATE_CACHE = new Map<string, NineRhymesPuzzle>();
+const SEEN_NINE_RHYMES_SIGNATURES = new Set<string>(
+  NINE_RHYMES_PUZZLES.map(
+    (p) => `${p.starterWord}|${p.clues.map((c) => c.answer).join(",")}`
+  )
+);
+
+/**
+ * Deterministic, cached, non-repeating 2026–2027 bank resolution for 9 Rhymes.
+ * - For `0 <= diff < 66`, returns `NINE_RHYMES_PUZZLES[diff]`.
+ * - For all other dates, deterministically synthesizes and caches a unique
+ *   `(starterWord, targetWords)` sequence from `USABLE_RHYME_FAMILIES`.
+ */
+export function getNineRhymesPuzzleForDate(
+  dateKey: string = getLocalDateKey()
+): NineRhymesPuzzle {
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < NINE_RHYMES_PUZZLES.length) {
+    const base = NINE_RHYMES_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = NINE_RHYMES_DATE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const seqIdx = diff >= 0 ? diff : 50000 - diff;
+  const family = BANK_FAMILY_ORDER[seqIdx % BANK_FAMILY_ORDER.length]!;
+  const round = Math.floor(seqIdx / BANK_FAMILY_ORDER.length);
+
+  let chosen: NineRhymesPuzzle | null = null;
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const seed =
+      attempt === 0
+        ? `9-rhymes:date:${dateKey}:r${round}`
+        : `9-rhymes:date:${dateKey}:r${round}:a${attempt}`;
+    // Rotate starter candidate across rounds so successive visits to the same family
+    // feature different starter words as well as different target permutations.
+    const entriesShuffled = shuffled(family.entries, `${seed}:${family.id}`);
+    const starterIdx = (round + attempt) % entriesShuffled.length;
+    const starter = entriesShuffled[starterIdx]!;
+    const remaining = entriesShuffled.filter((_, idx) => idx !== starterIdx);
+    const targets = remaining.slice(0, NINE_RHYMES_CLUE_COUNT);
+
+    const candidate: NineRhymesPuzzle = {
+      id: `9r-bank-${dateKey}`,
+      puzzleNumber,
+      title: `Rhymes with “${starter.word}”`,
+      starterWord: starter.word,
+      clues: targets.map((t) => buildClueFromEntry(t, starter.word)),
+      author: "SOL Theory",
+      editor: "Daily Editorial",
+      customDate: dateKey,
+    };
+
+    const sig = `${candidate.starterWord}|${candidate.clues.map((c) => c.answer).join(",")}`;
+    if (!SEEN_NINE_RHYMES_SIGNATURES.has(sig)) {
+      SEEN_NINE_RHYMES_SIGNATURES.add(sig);
+      chosen = candidate;
+      break;
+    }
+    if (!chosen) {
+      chosen = candidate;
+    }
+  }
+
+  const finalPuzzle = chosen!;
+  NINE_RHYMES_DATE_CACHE.set(dateKey, finalPuzzle);
+  return finalPuzzle;
+}
 
 /**
  * Deterministic date-seeded fallback: `hash("9-rhymes:" + dateKey)` picks a family and the

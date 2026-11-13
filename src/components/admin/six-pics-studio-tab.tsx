@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { RotateCcw, Shuffle } from "lucide-react";
+import { RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +52,13 @@ export function SixPicsStudioTab({
       : emptySixPicsEditorState();
   }, [targetDate, syncVersion]);
 
+  const defaultState = useMemo<SixPicsEditorState>(() => {
+    const resolved = getDailyPuzzleForGame<SixPicsPuzzle>("6-pics", targetDate, {});
+    return resolved
+      ? puzzleToSixPicsEditorState(resolved.puzzle)
+      : initial;
+  }, [targetDate, initial]);
+
   const [editor, setEditor] = useState<SixPicsEditorState>(initial);
   const [rerollCount, setRerollCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -70,6 +77,28 @@ export function SixPicsStudioTab({
     const pick =
       SIX_PICS_PUZZLES[(next * 11 + targetDate.length) % SIX_PICS_PUZZLES.length]!;
     setEditor(puzzleToSixPicsEditorState(pick));
+    setErrors([]);
+  };
+
+  const handleClearAll = () => {
+    const base = emptySixPicsEditorState();
+    setEditor({
+      ...base,
+      title: "",
+      themeAnswer: "",
+      aliasesCsv: "",
+      rows: base.rows.map((r) => ({
+        ...r,
+        caption: "",
+        aliasesCsv: "",
+        imageUrl: "",
+      })),
+    });
+    setErrors([]);
+  };
+
+  const handleRevertDefault = () => {
+    setEditor(defaultState);
     setErrors([]);
   };
 
@@ -134,7 +163,7 @@ export function SixPicsStudioTab({
             Schedule {targetDate} — players see the overarching theme at top and uncover 1/6 jigsaw pieces to name each picture (36 pts max).
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
@@ -147,13 +176,20 @@ export function SixPicsStudioTab({
           <Button
             type="button"
             variant="outline"
-            onClick={() => {
-              setEditor(initial);
-              setErrors([]);
-            }}
+            onClick={handleClearAll}
+            data-testid="admin-6-pics-clear-all"
             className="border-2 border-black font-bold text-xs"
           >
-            <RotateCcw className="h-4 w-4 mr-1" /> Reset
+            <Trash2 className="h-4 w-4 mr-1" /> Clear All
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleRevertDefault}
+            data-testid="admin-6-pics-revert-default"
+            className="border-2 border-black font-bold text-xs"
+          >
+            <RotateCcw className="h-4 w-4 mr-1" /> Revert to Default
           </Button>
         </div>
       </div>

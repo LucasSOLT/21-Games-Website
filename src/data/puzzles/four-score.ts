@@ -52,6 +52,13 @@ export {
   type FourScoreValidation,
 };
 
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
+
 export const FOUR_SCORE_BANK_SIZE = 66;
 
 function buildFourScoreBank(): FourScorePuzzle[] {
@@ -69,6 +76,67 @@ function buildFourScoreBank(): FourScorePuzzle[] {
 
 /** 66-day solver-verified Four Score puzzle bank. */
 export const FOUR_SCORE_PUZZLES: FourScorePuzzle[] = buildFourScoreBank();
+
+const FOUR_SCORE_DATE_CACHE = new Map<string, FourScorePuzzle>();
+const SEEN_FOUR_SCORE_SIGNATURES = new Set<string>(
+  FOUR_SCORE_PUZZLES.map(
+    (p) => `${p.digits.join(",")}|${p.operators.join(",")}|${p.canonicalEquation}`
+  )
+);
+
+/**
+ * Deterministic, cached, non-repeating 2026–2027 bank resolution for Four Score.
+ * - For `0 <= diff < 66`, returns `FOUR_SCORE_PUZZLES[diff]`.
+ * - For all other dates, generates and caches a solver-verified (`= 80`) puzzle
+ *   keyed by `"bank:date:" + dateKey`.
+ */
+export function getFourScorePuzzleForDate(
+  dateKey: string = getLocalDateKey()
+): FourScorePuzzle {
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < FOUR_SCORE_PUZZLES.length) {
+    const base = FOUR_SCORE_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = FOUR_SCORE_DATE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  let chosen: FourScorePuzzle | null = null;
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const seed =
+      attempt === 0 ? `bank:date:${dateKey}` : `bank:date:${dateKey}:a${attempt}`;
+    const candidate = generateFourScorePuzzle(seed, {
+      id: `fs-bank-${dateKey}`,
+      puzzleNumber,
+      customDate: dateKey,
+    });
+    const sig = `${candidate.digits.join(",")}|${candidate.operators.join(",")}|${candidate.canonicalEquation}`;
+    if (!SEEN_FOUR_SCORE_SIGNATURES.has(sig)) {
+      SEEN_FOUR_SCORE_SIGNATURES.add(sig);
+      chosen = candidate;
+      break;
+    }
+    if (!chosen) {
+      chosen = candidate;
+    }
+  }
+
+  const finalPuzzle = chosen!;
+  FOUR_SCORE_DATE_CACHE.set(dateKey, finalPuzzle);
+  return finalPuzzle;
+}
 
 /** Deterministic date-seeded fallback keyed by `four-score:${dateKey}`. */
 export function generateSeededFourScorePuzzle(

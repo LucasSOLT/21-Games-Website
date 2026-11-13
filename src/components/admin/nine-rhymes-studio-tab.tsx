@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Shuffle, RotateCcw } from "lucide-react";
+import { Shuffle, RotateCcw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +50,11 @@ export function NineRhymesStudioTab({
     return resolved ? puzzleToEditorState(resolved.puzzle) : emptyNineRhymesEditorState();
   }, [targetDate, syncVersion]);
 
+  const defaultState = useMemo(() => {
+    const resolved = getDailyPuzzleForGame<NineRhymesPuzzle>("9-rhymes", targetDate, {});
+    return resolved ? puzzleToEditorState(resolved.puzzle) : initial;
+  }, [targetDate, initial]);
+
   const [editor, setEditor] = useState<NineRhymesEditorState>(initial);
   const [rerollCount, setRerollCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -72,6 +77,16 @@ export function NineRhymesStudioTab({
       puzzleNumber: getPuzzleNumberForDate(targetDate),
     });
     setEditor(puzzleToEditorState(puzzle));
+    setErrors([]);
+  };
+
+  const handleClearAll = () => {
+    setEditor(emptyNineRhymesEditorState());
+    setErrors([]);
+  };
+
+  const handleRevertDefault = () => {
+    setEditor(defaultState);
     setErrors([]);
   };
 
@@ -122,12 +137,27 @@ export function NineRhymesStudioTab({
             One Starter Word + 9 perfect rhymes for {targetDate}. Use “Suggest chain” for an AI (or local dictionary) draft.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" disabled={!canEdit} onClick={handleReroll} className="border-2 border-black font-bold text-xs">
             <Shuffle className="h-4 w-4 mr-1" /> Reroll seed
           </Button>
-          <Button type="button" variant="outline" onClick={() => { setEditor(initial); setErrors([]); }} className="border-2 border-black font-bold text-xs">
-            <RotateCcw className="h-4 w-4 mr-1" /> Reset
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleClearAll}
+            data-testid="admin-9-rhymes-clear-all"
+            className="border-2 border-black font-bold text-xs"
+          >
+            <Trash2 className="h-4 w-4 mr-1" /> Clear All
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleRevertDefault}
+            data-testid="admin-9-rhymes-revert-default"
+            className="border-2 border-black font-bold text-xs"
+          >
+            <RotateCcw className="h-4 w-4 mr-1" /> Revert to Default
           </Button>
         </div>
       </div>

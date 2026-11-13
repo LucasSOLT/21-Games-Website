@@ -1,3 +1,11 @@
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
+import { fnv1a32, mulberry32 } from "@/lib/seeded-random";
+
 export interface TwentyOneJourney {
   id: string;
   boardId: string;
@@ -628,3 +636,219 @@ export function enforceTileConstraints(input: string): {
     charCount: candidate.length,
   };
 }
+
+// ============================================================================
+// Deterministic 2026–2027 Non-Repeating Daily Board Synthesis & Cache
+// ============================================================================
+
+const EXTRA_CURATED_21_ITEMS: readonly string[] = [
+  "Rainy afternoon in bookshop",
+  "Smell of old library pages",
+  "Fountain pen gliding on paper",
+  "Reading on a porch swing",
+  "Tea kettle gentle whistle",
+  "Lantern lit garden path",
+  "Wildflowers in mason jar",
+  "Fresh peaches in summer",
+  "Warm scones with berry jam",
+  "Morning dew on clover",
+  "Hummingbird by the window",
+  "Crickets singing at twilight",
+  "Canoe gliding on still lake",
+  "Campfire sparks rising high",
+  "Shooting star at midnight",
+  "Full moon over ocean water",
+  "Biking down a quiet lane",
+  "Farmers market honey jar",
+  "Handwoven wool throw blanket",
+  "Sunbeam where the cat sleeps",
+  "Sound of distant train horn",
+  "Watercolor paint in clear jar",
+  "Fresh rosemary between fingers",
+  "Crackling vinyl jazz record",
+  "Warm focaccia with sea salt",
+  "First cherry blossoms in April",
+  "Laughter around dinner table",
+  "Postcard from a faraway friend",
+  "Skipping stones at golden hour",
+  "Snowflakes catching on mittens",
+  "Hot chocolate after sledding",
+  "Pine needles on forest trail",
+  "Sunlight dancing on creek bed",
+  "Hammock nap in late afternoon",
+  "Freshly squeezed orange juice",
+  "Cool breeze through linen",
+  "Bells chiming across the square",
+  "Rowboat tied to wooden dock",
+  "Evening walk after summer rain",
+  "Candlelight on wooden table",
+  "Solving the Sunday crossword",
+  "Finishing the final chapter",
+];
+
+const ALL_CURATED_21_ITEMS: readonly string[] = Array.from(
+  new Set([
+    ...BASE_BOARDS.flatMap((b) => b.items),
+    ...EXTRA_CURATED_21_ITEMS,
+  ])
+);
+
+const EXTENDED_21_THEMES: ReadonlyArray<{
+  title: string;
+  creatorName: string;
+  creatorHandle: string;
+  creatorBio: string;
+}> = [
+  ...BASE_BOARDS.map((b) => ({
+    title: b.title,
+    creatorName: b.creatorName,
+    creatorHandle: b.creatorHandle,
+    creatorBio: b.creatorBio,
+  })),
+  ...EXTRA_THEMES.map((t) => ({
+    title: t.title,
+    creatorName: t.creatorName,
+    creatorHandle: t.creatorHandle,
+    creatorBio: t.creatorBio,
+  })),
+  {
+    title: "Bookshop & Rainy Afternoons",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
+    creatorBio: "Quiet corners, warm mugs, and stories worth savoring.",
+  },
+  {
+    title: "Stargazing & Night Walks",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
+    creatorBio: "Peaceful evening skies and late-night reflections.",
+  },
+  {
+    title: "Artisan Craft & Market Days",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
+    creatorBio: "Handmade textures, fresh harvests, and neighborhood warmth.",
+  },
+  {
+    title: "Mountain Trail & Pine Air",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
+    creatorBio: "High ridges, clear streams, and campfire camaraderie.",
+  },
+  {
+    title: "Harbor Breeze & Island Time",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
+    creatorBio: "Salt spray, wooden docks, and golden coastal horizons.",
+  },
+  {
+    title: "Slow Living & Simple Rituals",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
+    creatorBio: "Everyday pauses that bring gratitude into focus.",
+  },
+  {
+    title: "Golden Hour & Open Skies",
+    creatorName: "SOL Theory",
+    creatorHandle: "@SOLTheory",
+    creatorBio: "Long shadows, warm light, and unhurried conversations.",
+  },
+  {
+    title: "Home Hearth & Kitchen Table",
+    creatorName: "Daily Curator",
+    creatorHandle: "@curator",
+    creatorBio: "Shared meals, familiar songs, and the comfort of home.",
+  },
+];
+
+const SYNTHESIZED_21_BOARDS_CACHE = new Map<string, TwentyOneThingsBoard>();
+
+/**
+ * Returns a deterministic, solver/validator-clean, non-repeating 21 Things board for any dateKey.
+ * - For `0 <= diff < 66` (`diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey)`), returns `TWENTY_ONE_THINGS_BOARDS[diff]`.
+ * - For all other dates in 2026–2027 and beyond, deterministically synthesizes and caches a unique
+ *   21-item board with a unique title and 21 distinct items (`<= 30` chars each).
+ */
+export function get21ThingsBoardForDate(
+  dateKey: string = getLocalDateKey(),
+  customOverrides?: Record<string, TwentyOneThingsBoard>
+): TwentyOneThingsBoard {
+  if (customOverrides && customOverrides[dateKey]) {
+    return customOverrides[dateKey];
+  }
+
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < TWENTY_ONE_THINGS_BOARDS.length) {
+    const base = TWENTY_ONE_THINGS_BOARDS[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = SYNTHESIZED_21_BOARDS_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const seqIdx = diff >= TWENTY_ONE_THINGS_BOARDS.length
+    ? diff - TWENTY_ONE_THINGS_BOARDS.length
+    : 10000 - diff;
+  const theme = EXTENDED_21_THEMES[seqIdx % EXTENDED_21_THEMES.length]!;
+  const edition = Math.floor(seqIdx / EXTENDED_21_THEMES.length) + 1;
+
+  const rand = mulberry32(fnv1a32(`21-things:bank:v2:${dateKey}:${diff}`));
+  const pool = [...ALL_CURATED_21_ITEMS];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  const items = pool.slice(0, 21);
+
+  const editionLabels = [
+    "Morning",
+    "Evening",
+    "Golden",
+    "Quiet",
+    "Bright",
+    "Coastal",
+    "Meadow",
+    "Harbor",
+    "Summit",
+    "Lantern",
+    "Solstice",
+    "Horizon",
+    "Breeze",
+    "Timber",
+    "Crystal",
+    "Garden",
+    "Canopy",
+    "Starlight",
+    "Daybreak",
+    "Fireside",
+  ] as const;
+  const label = editionLabels[edition % editionLabels.length]!;
+  const vol = Math.floor(edition / editionLabels.length) + 2;
+
+  const synthesized: TwentyOneThingsBoard = {
+    id: `21t-bank-${dateKey}`,
+    puzzleNumber,
+    title: `${theme.title} · ${label} Vol. ${vol}`,
+    creatorName: theme.creatorName,
+    creatorHandle: theme.creatorHandle,
+    creatorBio: theme.creatorBio,
+    items,
+    sampleJourneys: [],
+    customDate: dateKey,
+  };
+
+  SYNTHESIZED_21_BOARDS_CACHE.set(dateKey, synthesized);
+  return synthesized;
+}
+

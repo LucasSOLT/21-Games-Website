@@ -19,6 +19,7 @@ const SUITES = [
   ["scripts/test-cp08-move-two.ts"],
   ["scripts/test-cp09-one-win.ts"],
   ["scripts/test-cp10-final.ts"],
+  ["scripts/test-e2e-2026-2027-overhaul.ts"],
 ];
 
 let failed = false;

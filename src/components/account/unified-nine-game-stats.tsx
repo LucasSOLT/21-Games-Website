@@ -71,20 +71,35 @@ export interface UnifiedNineGameStatsProps {
   remoteStats?: Partial<AllGameStatsMap> | null;
   /** Optional count of created 21 Things boards to display inside the #21 card. */
   boardsCreatedCount?: number;
+  /** Optional count of recent #1 picks to display inside the #21 spotlight summary. */
+  recentPicksCount?: number;
   /** Extra slot rendered at the bottom of the #21: 21 Things card (Recent #1 Picks + Created Boards). */
   twentyOneExtraSlot?: React.ReactNode;
   /** Compact layout for the /account Guest On-Device preview column. */
   compact?: boolean;
   /** Callback when clicking Play / Archive inside a modal. */
   onNavigateAway?: () => void;
+  /** Controlled selected game slug for spotlight view (defaults to "21-things"). */
+  selectedGameId?: AllGameSlug;
+  /** Callback when selecting a game in the 9-game selector grid. */
+  onSelectGameId?: (slug: AllGameSlug) => void;
+  /** Render 1 selected game spotlight card at a time (default true). */
+  spotlightMode?: boolean;
+  /** Callback to switch to the My Boards & #1 Picks tab from the #21 card. */
+  onOpenBoardsTab?: () => void;
 }
 
 export function UnifiedNineGameStats({
   remoteStats,
   boardsCreatedCount,
+  recentPicksCount,
   twentyOneExtraSlot,
   compact = false,
   onNavigateAway,
+  selectedGameId,
+  onSelectGameId,
+  spotlightMode = true,
+  onOpenBoardsTab,
 }: UnifiedNineGameStatsProps) {
   const [localStats, setLocalStats] = useState<AllGameStatsMap>(() =>
     getAllLocalGameStats()
@@ -92,9 +107,15 @@ export function UnifiedNineGameStats({
   const [oneWinHistory, setOneWinHistory] = useState<OneWinHistoryItem[]>(() =>
     getOneWinPersonalHistory()
   );
-  const [selectedFilter, setSelectedFilter] = useState<"all" | AllGameSlug>(
-    "all"
-  );
+  const [internalSelectedGameId, setInternalSelectedGameId] =
+    useState<AllGameSlug>(selectedGameId ?? "21-things");
+
+  const activeGameId: AllGameSlug = selectedGameId ?? internalSelectedGameId;
+
+  const handleSelectGame = (slug: AllGameSlug) => {
+    setInternalSelectedGameId(slug);
+    onSelectGameId?.(slug);
+  };
 
   useEffect(() => {
     const refresh = () => {
@@ -137,106 +158,76 @@ export function UnifiedNineGameStats({
 
   const visibleGames = useMemo(
     () =>
-      selectedFilter === "all"
-        ? ALL_GAMES
-        : ALL_GAMES.filter((g) => g.slug === selectedFilter),
-    [selectedFilter]
+      spotlightMode
+        ? ALL_GAMES.filter((g) => g.slug === activeGameId)
+        : ALL_GAMES,
+    [spotlightMode, activeGameId]
   );
 
   return (
-    <div className="space-y-4">
-      {/* 9-Game Countdown Rollup Summary Bar */}
-      <div className="rounded-2xl border-2 border-black bg-[#FFFBE6] p-3.5 sm:p-4 shadow-[3px_3px_0px_#000]">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+    <div className="space-y-2.5 overflow-hidden">
+      {/* 9-Game Countdown Rollup & Compact 9-Game Selector Grid */}
+      <div className="rounded-2xl border-2 border-black bg-[#FFFBE6] p-2.5 sm:p-3 shadow-[2px_2px_0px_#000] overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
           <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-black">
-            <Trophy className="h-3.5 w-3.5 text-amber-600" />
+            <Trophy className="h-3.5 w-3.5 text-amber-600 shrink-0" />
             Countdown 21 → 1 · All 9 Games Rollup
           </span>
-          <span className="text-[11px] font-black text-gray-700">
-            Today: {rollup.completedToday} / 9 completed
+          <span className="text-[11px] font-black text-gray-800">
+            Played: {rollup.totalPlayed} · Active: {rollup.activeStreaks}/9 🔥 ·
+            Best: {rollup.bestStreak} · Today: {rollup.completedToday}/9
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-xl border border-black/20 bg-white px-2 py-2">
-            <div className="font-headline text-lg sm:text-xl font-black text-black">
-              {rollup.totalPlayed}
-            </div>
-            <div className="text-[10px] font-bold uppercase text-gray-500">
-              Total Played
-            </div>
-          </div>
-          <div className="rounded-xl border border-black/20 bg-white px-2 py-2">
-            <div className="font-headline text-lg sm:text-xl font-black text-black">
-              {rollup.activeStreaks} / 9 🔥
-            </div>
-            <div className="text-[10px] font-bold uppercase text-gray-500">
-              Active Streaks
-            </div>
-          </div>
-          <div className="rounded-xl border border-black/20 bg-white px-2 py-2">
-            <div className="font-headline text-lg sm:text-xl font-black text-black">
-              {rollup.bestStreak}
-            </div>
-            <div className="text-[10px] font-bold uppercase text-gray-500">
-              Best Streak
-            </div>
-          </div>
-        </div>
-
-        {/* Countdown Filter Pills: All 9 | #21 | #17 | #9 | #8 | #6 | #5 | #4 | #2 | #1 */}
+        {/* Compact 9-Game Selector Grid: 21 -> 17 -> 9 -> 8 -> 6 -> 5 -> 4 -> 2 -> 1 */}
         <div
-          className="mt-3 flex items-center gap-1.5 overflow-x-auto pb-1"
+          className="mt-2 grid grid-cols-3 sm:grid-cols-9 gap-1 sm:gap-1.5"
           role="tablist"
           aria-label="Filter game stats by countdown number"
+          data-testid="profile-nine-game-selector"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={selectedFilter === "all"}
-            onClick={() => setSelectedFilter("all")}
-            className={cn(
-              "shrink-0 rounded-full border-2 border-black px-2.5 py-1 text-[11px] font-black transition-all cursor-pointer",
-              selectedFilter === "all"
-                ? "bg-black text-white"
-                : "bg-white text-black hover:bg-gray-100"
-            )}
-          >
-            All 9
-          </button>
           {ALL_GAMES.map((g) => {
             const slug = g.slug as AllGameSlug;
             const num = GAME_COUNTDOWN_NUMBER[slug];
-            const active = selectedFilter === slug;
+            const active = activeGameId === slug;
+            const hasStreak = mergedStats[slug].currentStreak > 0;
+            const shortTitle = g.name.replace(/^\d+\s+/, "");
             return (
               <button
                 key={slug}
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setSelectedFilter(slug)}
+                data-testid={`profile-game-select-${slug}`}
+                onClick={() => handleSelectGame(slug)}
                 style={
                   active
                     ? { backgroundColor: GAME_ACCENT_HEX[slug] }
                     : undefined
                 }
                 className={cn(
-                  "shrink-0 rounded-full border-2 border-black px-2.5 py-1 text-[11px] font-black transition-all cursor-pointer",
+                  "min-w-0 rounded-lg border-2 border-black px-1.5 py-1 text-center transition-all cursor-pointer flex flex-col items-center justify-center leading-tight",
                   active
-                    ? "text-black shadow-[1px_1px_0px_#000]"
-                    : "bg-white text-gray-700 hover:bg-gray-100"
+                    ? "text-black font-black shadow-[1px_1px_0px_#000]"
+                    : "bg-white text-gray-800 hover:bg-gray-100 font-bold"
                 )}
-                title={g.name}
+                title={`#${num} ${g.name}`}
               >
-                #{num} {compact ? "" : g.name}
+                <span className="font-headline text-[11px] sm:text-xs font-black leading-none">
+                  #{num}
+                  {hasStreak ? " 🔥" : ""}
+                </span>
+                <span className="text-[9px] font-bold truncate max-w-full mt-0.5">
+                  {compact ? g.name : shortTitle}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Strict 21 -> 17 -> 9 -> 8 -> 6 -> 5 -> 4 -> 2 -> 1 Per-Game Cards */}
-      <div className="grid grid-cols-1 gap-4">
+      {/* Selected Game Spotlight Card (1 card at a time in spotlightMode) */}
+      <div className="grid grid-cols-1 gap-2.5">
         {visibleGames.map((game) => {
           const slug = game.slug as AllGameSlug;
           const countdownNum = GAME_COUNTDOWN_NUMBER[slug];
@@ -269,13 +260,13 @@ export function UnifiedNineGameStats({
               key={slug}
               data-testid={`profile-stat-card-${slug}`}
               className={cn(
-                "rounded-2xl border-2 border-black bg-white shadow-[3px_3px_0px_#000] space-y-3.5",
-                compact ? "p-3.5" : "p-4 sm:p-5"
+                "rounded-2xl border-2 border-black bg-white shadow-[2px_2px_0px_#000] space-y-2.5 overflow-hidden",
+                compact ? "p-3" : "p-3 sm:p-3.5"
               )}
             >
               {/* Card Header */}
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
                   <div className="relative shrink-0 flex items-center justify-center">
                     <GameLogo game={game} variant="mini" />
                   </div>
@@ -301,6 +292,13 @@ export function UnifiedNineGameStats({
                     {summary.stats.currentStreak}
                   </Badge>
                   <Link
+                    href={`/games/${slug}/archive`}
+                    onClick={onNavigateAway}
+                    className="rounded-lg border border-black/30 bg-gray-50 px-2 py-1 text-[11px] font-black text-black hover:bg-gray-100 transition-colors"
+                  >
+                    Archive →
+                  </Link>
+                  <Link
                     href={`/games/${slug}`}
                     onClick={onNavigateAway}
                     style={{ backgroundColor: accent }}
@@ -315,11 +313,11 @@ export function UnifiedNineGameStats({
               {/* Signature Q4 Metrics Grid */}
               <div
                 className={cn(
-                  "grid gap-2 text-center",
+                  "grid gap-1.5 text-center",
                   metrics.length >= 6
                     ? "grid-cols-3 sm:grid-cols-6"
                     : metrics.length === 5
-                    ? "grid-cols-2 sm:grid-cols-5"
+                    ? "grid-cols-3 sm:grid-cols-5"
                     : metrics.length === 4
                     ? "grid-cols-2 sm:grid-cols-4"
                     : "grid-cols-3"
@@ -329,54 +327,54 @@ export function UnifiedNineGameStats({
                   <div
                     key={m.label}
                     className={cn(
-                      "rounded-xl border border-black/15 p-2",
+                      "rounded-xl border border-black/15 p-1.5 sm:p-2 min-w-0",
                       m.highlight ? "bg-[#FFFBE6]" : "bg-gray-50"
                     )}
                   >
-                    <div className="font-headline text-sm sm:text-base font-black text-black truncate">
+                    <div className="font-headline text-xs sm:text-sm font-black text-black truncate">
                       {m.value}
                     </div>
-                    <div className="text-[10px] font-bold uppercase text-gray-500 truncate">
+                    <div className="text-[9px] sm:text-[10px] font-bold uppercase text-gray-500 truncate">
                       {m.label}
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* #6: 6 Pics Piece Efficiency Breakdown (1/6 -> 6/6) */}
+              {/* #6: 6 Pics Compact 2-Column Piece Efficiency Breakdown (1/6 -> 6/6) */}
               {slug === "6-pics" && summary.guessDistribution && (
-                <div className="rounded-xl border border-black/15 bg-gray-50/90 p-3 space-y-1.5">
+                <div className="rounded-xl border border-black/15 bg-gray-50/90 p-2.5 space-y-1.5 overflow-hidden">
                   <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-gray-600">
                     <span>Piece Efficiency (1/6 → 6/6)</span>
                     <span>Points</span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                     {summary.guessDistribution.map((row) => {
                       const pct = Math.max(
-                        row.count > 0 ? 12 : 4,
+                        row.count > 0 ? 14 : 6,
                         Math.round((row.count / maxDistCount) * 100)
                       );
                       return (
                         <div
                           key={row.guessNumber}
-                          className="flex items-center gap-2 text-[11px]"
+                          className="flex items-center gap-1.5 text-[10px] min-w-0"
                         >
-                          <span className="w-7 font-mono font-black text-black text-right">
+                          <span className="w-6 font-mono font-black text-black text-right shrink-0">
                             {row.guessNumber}/6
                           </span>
-                          <div className="flex-1 h-5 rounded-md bg-white border border-black/15 overflow-hidden flex items-center">
+                          <div className="flex-1 h-4 rounded-md bg-white border border-black/15 overflow-hidden flex items-center min-w-0">
                             <div
                               style={{
                                 width: `${pct}%`,
                                 backgroundColor:
                                   row.count > 0 ? accent : "#e5e7eb",
                               }}
-                              className="h-full flex items-center justify-end px-1.5 text-[10px] font-black text-black transition-all"
+                              className="h-full flex items-center justify-end px-1 text-[9px] font-black text-black transition-all"
                             >
                               {row.count}
                             </div>
                           </div>
-                          <span className="w-11 text-right font-mono text-[10px] font-bold text-gray-500">
+                          <span className="w-9 text-right font-mono text-[9px] font-bold text-gray-500 shrink-0">
                             {row.pointsLabel}
                           </span>
                         </div>
@@ -386,9 +384,9 @@ export function UnifiedNineGameStats({
                 </div>
               )}
 
-              {/* #1: 1 Win Personal Daily Win History Log */}
+              {/* #1: 1 Win Compact Personal Daily Win History Log (Zero Scrollbars) */}
               {slug === "1-win" && (
-                <div className="rounded-xl border border-black/15 bg-gray-50/90 p-3 space-y-2">
+                <div className="rounded-xl border border-black/15 bg-gray-50/90 p-2.5 space-y-1.5 overflow-hidden">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-wider text-gray-600">
                       Personal Daily Win History ({oneWinHistory.length})
@@ -398,18 +396,18 @@ export function UnifiedNineGameStats({
                     </span>
                   </div>
                   {oneWinHistory.length === 0 ? (
-                    <p className="text-xs text-gray-500">
+                    <p className="text-[11px] text-gray-500">
                       Log today&apos;s tiny win in 1 Win to start your personal
                       daily win journal.
                     </p>
                   ) : (
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                      {oneWinHistory.slice(0, compact ? 3 : 7).map((entry) => (
+                    <div className="space-y-1 overflow-hidden">
+                      {oneWinHistory.slice(0, 2).map((entry) => (
                         <div
                           key={`${entry.dateKey}-${entry.normalizedKey}`}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs"
+                          className="flex items-center justify-between gap-2 rounded-lg border border-black/10 bg-white px-2 py-1 text-[11px] overflow-hidden"
                         >
-                          <span className="font-mono text-[11px] font-bold text-gray-500 shrink-0">
+                          <span className="font-mono text-[10px] font-bold text-gray-500 shrink-0">
                             {entry.dateKey}
                           </span>
                           <span className="font-black text-black truncate flex-1">
@@ -425,10 +423,35 @@ export function UnifiedNineGameStats({
                 </div>
               )}
 
-              {/* Last 7 Days Completion Strip + Archive Link */}
-              <div className="rounded-xl border border-black/15 bg-gray-50/80 p-2.5 sm:p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-gray-600">
+              {/* #21: 21 Things Compact Spotlight Summary Row */}
+              {slug === "21-things" && onOpenBoardsTab && (
+                <div className="rounded-xl border border-black/15 bg-[#f7eef5]/60 px-2.5 py-2 flex flex-wrap items-center justify-between gap-2 overflow-hidden">
+                  <span className="text-[11px] font-bold text-gray-800 truncate">
+                    ✨ {recentPicksCount ?? 0} Recent #1 Picks ·{" "}
+                    {boardsCreatedCount ?? 0} Created Boards
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="profile-open-boards-tab"
+                    onClick={onOpenBoardsTab}
+                    className="shrink-0 rounded-lg border border-black bg-white px-2.5 py-1 text-[11px] font-black text-black hover:bg-gray-100 cursor-pointer transition-colors"
+                  >
+                    View My Boards &amp; #1 Picks →
+                  </button>
+                </div>
+              )}
+
+              {/* Extra Slot for #21: 21 Things when rendered outside tabbed modal */}
+              {slug === "21-things" && !onOpenBoardsTab && twentyOneExtraSlot && (
+                <div className="pt-1 space-y-2.5 border-t border-black/10 overflow-hidden">
+                  {twentyOneExtraSlot}
+                </div>
+              )}
+
+              {/* Compact Last 7 Days Completion Strip + Archive Link */}
+              <div className="rounded-xl border border-black/15 bg-gray-50/80 p-2 sm:p-2.5 overflow-hidden">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-gray-600">
                     Last 7 Days
                   </span>
                   <Link
@@ -448,8 +471,7 @@ export function UnifiedNineGameStats({
                     >
                       <div
                         className={cn(
-                          "flex items-center justify-center rounded-full border font-black transition-all",
-                          compact ? "h-6 w-6 text-[10px]" : "h-7 w-7 text-xs",
+                          "flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-black transition-all",
                           item.completed
                             ? "border-black bg-[#2ECC71] text-black shadow-[1px_1px_0px_#000]"
                             : item.isToday
@@ -461,7 +483,7 @@ export function UnifiedNineGameStats({
                       </div>
                       <span
                         className={cn(
-                          "text-[9px] sm:text-[10px] font-bold",
+                          "text-[9px] sm:text-[10px] font-bold leading-none",
                           item.isToday
                             ? "text-black underline"
                             : "text-gray-500"
@@ -473,13 +495,6 @@ export function UnifiedNineGameStats({
                   ))}
                 </div>
               </div>
-
-              {/* Extra Slot for #21: 21 Things (Recent #1 Picks + Created Boards) */}
-              {slug === "21-things" && twentyOneExtraSlot && (
-                <div className="pt-1 space-y-3 border-t border-black/10">
-                  {twentyOneExtraSlot}
-                </div>
-              )}
             </div>
           );
         })}

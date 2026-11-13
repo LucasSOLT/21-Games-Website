@@ -87,12 +87,13 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "move-2": {
     summary:
-      "Roll a 1×1×2 block across the six faces of a cube to the red target.",
-    headline: "Roll to the Red Target",
+      "Roll the 3D 1×1×2 die across six tilted 5×5 cube faces and drop into each face's recessed hole.",
+    headline: "Drop Into All 6 Recessed Cube Holes",
     rules: [
-      "Move with arrows / WASD / swipe / the D-pad.",
-      "⬛ walls bump you back; ✕ hazards reset the face.",
-      "Beat **Par** for ⭐⭐⭐.",
+      "Roll with **Arrow keys / WASD**, swipe, or the on-screen **D-Pad**.",
+      "Match each face's **Recessed Hole** posture (**1×1 Upright** or **1×2 / 2×1 Flat**) to drop in and rotate to the next cube face.",
+      "The **Raised Outer Rim** gently blocks edge rolls; interior **✕ Void Hazards** reset the current face.",
+      "Conquer all 6 faces and beat **Par** for ⭐⭐⭐.",
     ],
   },
   "1-win": {

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, Lock, Play, RefreshCw, Trash2, Trophy } from "lucide-react";
+import { Check, Lock, Play, RefreshCw, RotateCcw, Trash2, Trophy } from "lucide-react";
 import {
   ONE_WIN_DEFAULT_PROMPT,
   generateOneWinPuzzle,
@@ -31,8 +31,8 @@ interface OneWinStudioTabProps {
   onPublish: (req: GenericPublishRequest) => void;
 }
 
-function loadPuzzleForDate(targetDate: string): OneWinPromptPuzzle {
-  const overrides = getAdminOverridesForGame("1-win");
+function loadPuzzleForDate(targetDate: string, useOverrides = true): OneWinPromptPuzzle {
+  const overrides = useOverrides ? getAdminOverridesForGame("1-win") : {};
   const resolved = getDailyPuzzleForGame<OneWinPromptPuzzle>(
     "1-win",
     targetDate,
@@ -54,7 +54,8 @@ export function OneWinStudioTab({
   editReason,
   onPublish,
 }: OneWinStudioTabProps) {
-  const initial = useMemo(() => loadPuzzleForDate(targetDate), [targetDate]);
+  const initial = useMemo(() => loadPuzzleForDate(targetDate, true), [targetDate]);
+  const defaultPuzzle = useMemo(() => loadPuzzleForDate(targetDate, false), [targetDate]);
   const [prevDate, setPrevDate] = useState<string>(targetDate);
   const [title, setTitle] = useState<string>(initial.title);
   const [prompt, setPrompt] = useState<string>(initial.prompt);
@@ -70,6 +71,18 @@ export function OneWinStudioTab({
     setPrompt(initial.prompt);
     setSubtitle(initial.subtitle);
   }
+
+  const handleClearAll = () => {
+    setTitle("");
+    setPrompt("");
+    setSubtitle("");
+  };
+
+  const handleRevertDefault = () => {
+    setTitle(defaultPuzzle.title);
+    setPrompt(defaultPuzzle.prompt);
+    setSubtitle(defaultPuzzle.subtitle);
+  };
 
   const candidatePuzzle: OneWinPromptPuzzle = useMemo(
     () => ({
@@ -157,19 +170,43 @@ export function OneWinStudioTab({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" data-testid="admin-one-win">
       {/* Left: Daily Prompt Editor */}
       <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 space-y-4 shadow-[4px_4px_0px_#000]">
-        <div>
-          <Badge className="mb-1 border border-black bg-[#e0e1d9] text-black font-black">
-            Game #1 · 1 Win Studio
-          </Badge>
-          <h3 className="font-headline font-black text-xl">
-            1. Curate Daily Gratitude Prompt ({targetDate})
-          </h3>
-          <p className="text-xs text-gray-600">
-            Customize the blind check-in prompt and subtitle for {targetDate}. Players submit 1–4 words (≤ 35 chars) to unlock the Live Top 100 leaderboard.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <Badge className="mb-1 border border-black bg-[#e0e1d9] text-black font-black">
+              Game #1 · 1 Win Studio
+            </Badge>
+            <h3 className="font-headline font-black text-xl">
+              1. Curate Daily Gratitude Prompt ({targetDate})
+            </h3>
+            <p className="text-xs text-gray-600">
+              Customize the blind check-in prompt and subtitle for {targetDate}. Players submit 1–4 words (≤ 35 chars) to unlock the Live Top 100 leaderboard.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearAll}
+              data-testid="admin-1-win-clear-all"
+              className="border-2 border-black font-bold text-xs"
+            >
+              <Trash2 className="h-3.5 w-3.5 mr-1" />
+              Clear All
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleRevertDefault}
+              data-testid="admin-1-win-revert-default"
+              className="border-2 border-black font-bold text-xs"
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
+              Revert to Default
+            </Button>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -216,19 +253,6 @@ export function OneWinStudioTab({
         )}
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
-          <Button
-            type="button"
-            disabled={!canEdit}
-            variant="outline"
-            onClick={() => {
-              setPrompt(ONE_WIN_DEFAULT_PROMPT);
-              setTitle("Daily Gratitude Check-In");
-            }}
-            className="border-2 border-black font-bold text-xs"
-          >
-            Reset Default Prompt
-          </Button>
-
           <Button
             type="button"
             disabled={!canEdit || !validation.valid}

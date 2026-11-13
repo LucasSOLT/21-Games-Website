@@ -52,8 +52,9 @@ export function TabsList({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
+      role="tablist"
       className={cn(
-        "inline-flex h-11 items-center justify-center rounded-xl bg-gray-100 p-1 text-gray-600 border border-gray-200",
+        "inline-flex min-h-11 h-auto flex-wrap items-center justify-center gap-1.5 rounded-2xl bg-gray-100 p-2 text-gray-700 border-2 border-black/15",
         className
       )}
       {...props}
@@ -73,13 +74,14 @@ export function TabsTrigger({
       type="button"
       role="tab"
       aria-selected={isActive}
+      data-state={isActive ? "active" : "inactive"}
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        "inline-flex items-center justify-center whitespace-nowrap rounded-lg px-4 py-1.5 text-sm font-bold transition-all focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex items-center justify-center whitespace-nowrap rounded-xl px-3.5 py-2 text-xs sm:text-sm font-headline font-black transition-all cursor-pointer focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 border-2",
+        className,
         isActive
-          ? "bg-white text-black shadow-xs border border-black/10"
-          : "text-gray-600 hover:text-black",
-        className
+          ? "bg-black text-white border-black shadow-[2px_2px_0px_#F9D423]"
+          : "bg-white text-black border-black/80 hover:bg-[#FFFBE6] hover:border-black shadow-[2px_2px_0px_#000]"
       )}
       {...props}
     />

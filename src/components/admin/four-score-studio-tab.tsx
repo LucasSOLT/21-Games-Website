@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { CheckCircle2, RotateCcw, Shuffle } from "lucide-react";
+import { CheckCircle2, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +49,15 @@ export function FourScoreStudioTab({
       })
     );
   }, [targetDate, syncVersion]);
+
+  const defaultPuzzle = useMemo<FourScorePuzzle>(() => {
+    const resolved = getDailyPuzzleForGame<FourScorePuzzle>(
+      "four-score",
+      targetDate,
+      {}
+    );
+    return resolved?.puzzle ?? initialPuzzle;
+  }, [targetDate, initialPuzzle]);
 
   const [title, setTitle] = useState(initialPuzzle.title);
   const [digitsCsv, setDigitsCsv] = useState(initialPuzzle.digits.join(", "));
@@ -101,6 +110,20 @@ export function FourScoreStudioTab({
     setTitle(nextPuzzle.title);
     setDigitsCsv(nextPuzzle.digits.join(", "));
     setOpsCsv(nextPuzzle.operators.join(", "));
+    setErrors([]);
+  };
+
+  const handleClearAll = () => {
+    setTitle("");
+    setDigitsCsv("");
+    setOpsCsv("");
+    setErrors([]);
+  };
+
+  const handleRevertDefault = () => {
+    setTitle(defaultPuzzle.title);
+    setDigitsCsv(defaultPuzzle.digits.join(", "));
+    setOpsCsv(defaultPuzzle.operators.join(", "));
     setErrors([]);
   };
 
@@ -161,7 +184,7 @@ export function FourScoreStudioTab({
             Every board for {targetDate} is verified by the backtracking full-board math solver (`= 80`).
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant="outline"
@@ -175,15 +198,20 @@ export function FourScoreStudioTab({
           <Button
             type="button"
             variant="outline"
-            onClick={() => {
-              setTitle(initialPuzzle.title);
-              setDigitsCsv(initialPuzzle.digits.join(", "));
-              setOpsCsv(initialPuzzle.operators.join(", "));
-              setErrors([]);
-            }}
+            onClick={handleClearAll}
+            data-testid="admin-four-score-clear-all"
             className="border-2 border-black font-bold text-xs"
           >
-            <RotateCcw className="h-4 w-4 mr-1" /> Reset
+            <Trash2 className="h-4 w-4 mr-1" /> Clear All
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleRevertDefault}
+            data-testid="admin-four-score-revert-default"
+            className="border-2 border-black font-bold text-xs"
+          >
+            <RotateCcw className="h-4 w-4 mr-1" /> Revert to Default
           </Button>
         </div>
       </div>

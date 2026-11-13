@@ -16,8 +16,10 @@ import {
   Lock,
   Play,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
+  Trash2,
   Wand2,
 } from "lucide-react";
 import {
@@ -74,7 +76,6 @@ import { SixPicsStudioTab } from "@/components/admin/six-pics-studio-tab";
 import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
 import { MoveTwoStudioTab } from "@/components/admin/move-two-studio-tab";
 import { OneWinStudioTab } from "@/components/admin/one-win-studio-tab";
-import { MonthlyBufferPanel } from "@/components/admin/monthly-buffer-panel";
 import { HaikuSliceCutter } from "@/components/admin/haiku-slice-cutter";
 import {
   classifyDiagnosticError,
@@ -313,6 +314,61 @@ export default function AdminPage() {
     }
   };
 
+  const handleClearConnect5 = () => {
+    setC5Title("");
+    setC5Author("");
+    setC5Editor("");
+    setC5Words(["", "", "", "", ""]);
+    setC5Connections(["", "", "", ""]);
+    setC5Hints([]);
+  };
+
+  const handleRevertConnect5Default = () => {
+    const defaultC5 = getConnect5PuzzleForDate(targetDate, {});
+    setC5Title(defaultC5.title);
+    setC5Author(defaultC5.author);
+    setC5Editor(defaultC5.editor);
+    setC5Words([...defaultC5.words]);
+    setC5Connections([...defaultC5.connections]);
+    setC5Hints([...defaultC5.revealedHints]);
+  };
+
+  const handleClear21Things = () => {
+    setT21Title("");
+    setT21Creator("");
+    setT21Bio("");
+    setT21Stream("");
+    setT21Items(Array.from({ length: 21 }, () => ""));
+  };
+
+  const handleRevert21ThingsDefault = () => {
+    const default21 = get21ThingsBoardForDate(targetDate, {});
+    setT21Title(default21.title);
+    setT21Creator(default21.creatorName);
+    setT21Bio(default21.creatorBio);
+    setT21Stream("");
+    setT21Items(default21.items.slice(0, 21));
+  };
+
+  const handleClear17Syllables = () => {
+    setS17Theme("");
+    setS17Author("");
+    setS17Line1("");
+    setS17Line2("");
+    setS17Line3("");
+    setS17CustomWordChunks({});
+  };
+
+  const handleRevert17SyllablesDefault = () => {
+    const default17 = get17SyllablesPuzzleForDate(targetDate, {});
+    setS17Theme(default17.theme || "");
+    setS17Author(default17.author || "SOL Theory");
+    setS17Line1(default17.lines[0] || "");
+    setS17Line2(default17.lines[1] || "");
+    setS17Line3(default17.lines[2] || "");
+    setS17CustomWordChunks(default17.customWordChunks ?? {});
+  };
+
   useEffect(() => {
     let cancelled = false;
     async function fetchSchedule(dateKey: string) {
@@ -332,6 +388,7 @@ export default function AdminPage() {
       setT21Title(scheduled21.title);
       setT21Creator(scheduled21.creatorName);
       setT21Bio(scheduled21.creatorBio);
+      setT21Stream("");
       setT21Items(scheduled21.items.slice(0, 21));
 
       const local17 = getAdmin17SyllablesOverrides()[dateKey];
@@ -382,7 +439,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [targetDate]);
+  }, [activeTab, targetDate]);
 
   useEffect(() => {
     if (!isGM || activeTab !== "users") return;
@@ -1224,14 +1281,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Monthly Rolling Buffer (Month M+2) Batch Verifier & AI Provider Toggle (§0.2 & §0.3) */}
-        <MonthlyBufferPanel
-          onSelectDateAndGame={(dateKey, gameSlug) => {
-            setSelectedDate(dateKey);
-            setActiveTab(gameSlug);
-          }}
-        />
-
         {/* Date Guarding Banner (for Admins on Today or Past Dates) */}
         {!editPerm.canEdit && (
           <div className="rounded-2xl border-2 border-black bg-amber-50 p-4 sm:p-5 flex items-start gap-3.5 shadow-xs">
@@ -1260,7 +1309,7 @@ export default function AdminPage() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full sm:w-auto flex flex-wrap">
+          <TabsList className="w-full h-auto min-h-11 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 rounded-2xl border-2 border-black bg-gray-100 p-2.5 shadow-[3px_3px_0px_#000]">
             <TabsTrigger value="connect-5">
               🔗 Connect 5 Creator
             </TabsTrigger>
@@ -1305,17 +1354,41 @@ export default function AdminPage() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left Column: 5 Words & Metadata */}
               <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 space-y-4">
-                <div>
-                  <Badge variant="green" className="mb-1">
-                    Connect 5 Builder
-                  </Badge>
-                  <h3 className="font-headline font-black text-xl">
-                    1. Enter 5 Connected Words
-                  </h3>
-                  <p className="text-xs text-gray-600">
-                    Each word connects with the word above it (e.g., MOUSE → PAD
-                    → LOCK → DOWN → WIND). Variable lengths supported!
-                  </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <Badge variant="green" className="mb-1">
+                      Connect 5 Builder
+                    </Badge>
+                    <h3 className="font-headline font-black text-xl">
+                      1. Enter 5 Connected Words
+                    </h3>
+                    <p className="text-xs text-gray-600">
+                      Each word connects with the word above it (e.g., MOUSE → PAD
+                      → LOCK → DOWN → WIND). Variable lengths supported!
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleClearConnect5}
+                      data-testid="admin-connect-5-clear-all"
+                      className="border-2 border-black font-bold text-xs"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                      Clear All
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRevertConnect5Default}
+                      data-testid="admin-connect-5-revert-default"
+                      className="border-2 border-black font-bold text-xs"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Revert to Default
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1570,6 +1643,28 @@ export default function AdminPage() {
                     (max 5 words / ~30 chars per tile) or edit any tile below.
                   </p>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleClear21Things}
+                    data-testid="admin-21-things-clear-all"
+                    className="border-2 border-black font-bold text-xs"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Clear All
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleRevert21ThingsDefault}
+                    data-testid="admin-21-things-revert-default"
+                    className="border-2 border-black font-bold text-xs"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                    Revert to Default
+                  </Button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1735,16 +1830,40 @@ export default function AdminPage() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Left Column: 3 Haiku Lines & Metadata */}
               <div className="lg:col-span-6 rounded-2xl border-2 border-black bg-white p-5 space-y-4 shadow-[4px_4px_0px_#000]">
-                <div>
-                  <Badge variant="green" className="mb-1">
-                    🎋 17 Syllables Haiku Builder
-                  </Badge>
-                  <h3 className="font-headline font-black text-xl">
-                    1. Compose 5-7-5 Daily Haiku
-                  </h3>
-                  <p className="text-xs text-gray-600">
-                    Write 3 poetic lines adhering strictly to the 5-7-5 syllable structure. The game automatically slices your haiku into uppercase chunks for player reconstruction.
-                  </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <Badge variant="green" className="mb-1">
+                      🎋 17 Syllables Haiku Builder
+                    </Badge>
+                    <h3 className="font-headline font-black text-xl">
+                      1. Compose 5-7-5 Daily Haiku
+                    </h3>
+                    <p className="text-xs text-gray-600">
+                      Write 3 poetic lines adhering strictly to the 5-7-5 syllable structure. The game automatically slices your haiku into uppercase chunks for player reconstruction.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleClear17Syllables}
+                      data-testid="admin-17-syllables-clear-all"
+                      className="border-2 border-black font-bold text-xs"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" />
+                      Clear All
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleRevert17SyllablesDefault}
+                      data-testid="admin-17-syllables-revert-default"
+                      className="border-2 border-black font-bold text-xs"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Revert to Default
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

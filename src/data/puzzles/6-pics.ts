@@ -42,7 +42,12 @@ import {
   type SixPicsValidation,
 } from "@/lib/six-pics-engine";
 import { localSixPicsSynonyms } from "@/lib/ai-helper";
-import { fnv1a32 } from "@/lib/seeded-random";
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
 
 export {
   SCENE_DEFAULT_ALIASES,
@@ -567,13 +572,118 @@ function buildBank(): SixPicsPuzzle[] {
 /** 66-day curated 6 Pics puzzle bank. */
 export const SIX_PICS_PUZZLES: SixPicsPuzzle[] = buildBank();
 
+/**
+ * Generates all 720 permutations of [0, 1, 2, 3, 4, 5], excluding the two permutations
+ * ([0,1,2,3,4,5] and [1,0,3,2,5,4]) already used by the static 66-item bank.
+ */
+function buildNonBankPermutations6(): ReadonlyArray<
+  readonly [number, number, number, number, number, number]
+> {
+  const out: Array<readonly [number, number, number, number, number, number]> = [];
+  const factorials = [120, 24, 6, 2, 1, 1] as const;
+  for (let k = 0; k < 720; k++) {
+    const pool = [0, 1, 2, 3, 4, 5];
+    let rem = k;
+    const perm: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const f = factorials[i]!;
+      const idx = Math.floor(rem / f);
+      rem = rem % f;
+      perm.push(pool.splice(idx, 1)[0]!);
+    }
+    const sig = perm.join(",");
+    if (sig === "0,1,2,3,4,5" || sig === "1,0,3,2,5,4") continue;
+    out.push(perm as unknown as readonly [number, number, number, number, number, number]);
+  }
+  return out;
+}
+
+const NON_BANK_PERMUTATIONS_6 = buildNonBankPermutations6(); // 718 distinct permutations
+const SIX_PICS_DATE_CACHE = new Map<string, SixPicsPuzzle>();
+
+/**
+ * Deterministic, cached, non-repeating 2026–2027 bank resolution for 6 Pics.
+ * - For `0 <= diff < 66`, returns `SIX_PICS_PUZZLES[diff]`.
+ * - For all other dates, deterministically selects a theme + one of the 718 non-bank
+ *   6-clue permutations (`33 * 718 = 23,694` unique ordered clue sequences), guaranteeing
+ *   100% unique `(title, themeAnswer, captions)` across 2026–2027 and beyond.
+ */
+export function getSixPicsPuzzleForDate(
+  dateKey: string = getLocalDateKey()
+): SixPicsPuzzle {
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < SIX_PICS_PUZZLES.length) {
+    const base = SIX_PICS_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = SIX_PICS_DATE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const seqIdx =
+    diff >= SIX_PICS_PUZZLES.length
+      ? diff - SIX_PICS_PUZZLES.length
+      : 20000 - diff;
+
+  const numThemes = CURATED_THEMES.length; // 33
+  const numPerms = NON_BANK_PERMUTATIONS_6.length; // 718
+  const themeIdx = seqIdx % numThemes;
+  // Step through permutations with a stride coprime to 718 (718 = 2 * 359; 17 is coprime)
+  const round = Math.floor(seqIdx / numThemes);
+  const permIdx = (round * 17 + themeIdx * 5 + 1) % numPerms;
+
+  const [theme, curatedAliases, rawClues] = CURATED_THEMES[themeIdx]!;
+  const perm = NON_BANK_PERMUTATIONS_6[permIdx]!;
+  const orderedClues = perm.map((idx) => rawClues[idx]!);
+
+  const autoAliases = localSixPicsSynonyms(theme);
+  const mergedAliases = [
+    ...new Set(
+      [...curatedAliases, ...autoAliases].filter(
+        (a) => normalizeSixPicsText(a) !== normalizeSixPicsText(theme)
+      )
+    ),
+  ].slice(0, 16);
+
+  const subtitle = EDITORIAL_SUBTITLES[seqIdx % EDITORIAL_SUBTITLES.length]!;
+  const synthesized: SixPicsPuzzle = {
+    id: `6p-bank-${dateKey}`,
+    puzzleNumber,
+    title: `${subtitle} · Series ${round + 2}`,
+    themeAnswer: theme,
+    acceptedAliases: mergedAliases,
+    images: orderedClues.map(([caption, scene, extra], imgIdx) => ({
+      caption,
+      aliases: buildImageAliases(caption, scene, extra),
+      scene,
+      initialPiece: (seqIdx + imgIdx) % SIX_PICS_PIECES_PER_IMAGE,
+    })),
+    author: "SOL Theory",
+    editor: "Daily Editorial",
+    customDate: dateKey,
+  };
+
+  SIX_PICS_DATE_CACHE.set(dateKey, synthesized);
+  return synthesized;
+}
+
 /** Deterministic date-seeded fallback keyed by `6-pics:${dateKey}`. */
 export function generateSeededSixPicsPuzzle(
   dateKey: string,
   puzzleNumber: number
 ): SixPicsPuzzle {
-  const idx = fnv1a32(`6-pics:${dateKey}`) % SIX_PICS_PUZZLES.length;
-  const base = SIX_PICS_PUZZLES[idx]!;
+  const base = getSixPicsPuzzleForDate(dateKey);
   return {
     ...base,
     id: `6p-seed-${dateKey}`,

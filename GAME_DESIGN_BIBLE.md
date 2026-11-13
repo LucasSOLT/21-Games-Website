@@ -229,11 +229,12 @@
   - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
   - **100% Auto-Generated Monthly Batches**: Built-in deterministic generator + backtracking Math Solver (`src/lib/generators/four-score-generator.ts`) guarantees every generated puzzle has a verified whole-number full-board solution to `80`.
 
-### Game #2 — `Move Two` (`Move 2` — 3×3 Cube Domino Spatial Game) — Q41 to Q45
+### Game #2 — `Move Two` (`Move 2` — 5×5 2.5D Tilted Cube Domino Spatial Game) — Q41 to Q45
 - **Route**: `/games/move-2` | **Archive**: `/games/move-2/archive`
-- **Visual Perspective — NYT Minimalist 2D Active Face + Mini 3D Isometric Cube HUD (Q41)**:
-  - Main stage renders the current `3×3` face (`Face 1` through `Face 6`) in a crisp, flat, minimalist **2D top-down grid** with smooth directional slide/fold transitions when crossing onto the next face.
-  - Top-right HUD renders a clean **mini 3D isometric Rubik's-style cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered.
+- **Visual Perspective — 2.5D Perspective-Tilted (`~25°`) `5×5` Active Face + True 3D Extruded Die + Mini 3D Isometric Cube HUD (Q41)**:
+  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside a **2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a **Raised 3D Cube Rim**.
+  - Renders a **True 3D Extruded `1×1×2` Domino/Die** with shaded front thickness, top bevel, and pips—standing `2×` tall when `UPRIGHT` (`1×1` footprint) and lying `1×` tall across 2 adjacent cells when `FLAT_H` or `FLAT_V`.
+  - Top-right HUD renders a clean **mini 3D isometric Rubik's-style cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered, paired with a `localStorage`-persisted **Web Audio SFX mute toggle**.
 - **3D Domino (`1×1×2`) Bloxorz Rolling Physics (Q42)**:
   - The domino occupies either:
     - **`UPRIGHT` (`1×1` footprint on `(r, c)`)**: Moving in direction `(dr, dc)` tips it over into a `FLAT` (`2×1`) state covering `(r + dr, c + dc)` and `(r + 2*dr, c + 2*dc)`.
@@ -243,14 +244,15 @@
     - **`FLAT_V` (`2×1` vertical footprint on `(r, c)` and `(r+1, c)`)**:
       - Moving Up (`↑`) stands it `UPRIGHT` on `(r-1, c)`; moving Down (`↓`) stands it `UPRIGHT` on `(r+2, c)`.
       - Moving Left (`←`) or Right (`→`) rolls it sideways staying `FLAT_V` on `(r..r+1, c-1)` or `(r..r+1, c+1)`.
-- **Edge Portals (`→ Face k+1`), Solid Outer Walls & Hazard/Blocked Tiles (Q43 & Q44)**:
-  - Each face (`Face 1` through `Face 5`) has a clearly marked exit edge portal (`→ Face 2`, `→ Face 3`, ..., `→ Face 6`). Rolling across that exit border transitions the domino onto the entry edge of the next face!
-  - Non-exit outer borders act as **solid walls** (if a move would push part of the domino out of bounds on a non-exit edge or onto a solid wall block `⬛`, the domino bumps with a subtle shake and stays put).
-  - Internal **hazard/void holes** (`✕` tiles): if any part of the domino lands on a hazard hole, it resets to the entry state of the **current face** (and players also have an `"Undo Move"` and `"Reset Face"` button).
-  - **Winning Condition on Face 6**: Land on the **Red Target** on `Face 6` in the required posture (standing `UPRIGHT` on a 1-square red target, or lying `FLAT` across a 2-square red target).
-- **100% Auto-Generated Monthly Batches via BFS Pathfinding Solver (Q44 & Q45)**:
-  - `src/lib/generators/move-two-generator.ts` uses a **Breadth-First Search (BFS) state-space solver** `(face, posture, r1, c1, r2, c2)` across all 6 faces to procedurally generate obstacle layouts that are 100% guaranteed solvable and to compute the exact minimum move count (**Par**).
-  - **Controls & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, plus touch swipe gestures AND a minimalist on-screen D-Pad on mobile. Final score compares **Total Moves vs. Par** (`Solved in 18 moves · Par: 16 · ⭐⭐⭐`).
+- **Per-Face Coded Spawn (`face.start`), Recessed Target Holes (`face.hole`), Raised Cube Rim & Interior Void Hazards (Q43 & Q44)**:
+  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Spawn State** (`face.start`) and a **Recessed Target Hole** (`face.hole`: either a `1×1 UPRIGHT` shaft or a `2×1 FLAT_H` / `FLAT_V` trench).
+  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The 3D die only drops into `face.hole` when its posture and footprint **exactly match** the hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile trench; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the rim). Dropping into the hole on `Faces 1–5` animates the die sinking into the shaft/trench, rotates the 2.5D cube to `Face k+1`, and spawns the die at that face's coded `start`. Dropping into the final hole on `Face 6` wins the game!
+  - **Raised Cube Rim (Outer Edges)**: Rolling against any outer border of the `5×5` face (or a solid `"wall"` block) is blocked by the raised rim (`{ kind: "bump" }`) with a gentle bump shake and low thud SFX—**never** resetting the face or adding a move penalty.
+  - **Interior Dark Void Hazards (`✕` tiles)**: Touching an interior `"hazard"` tile increments moves by `+1`, plays the hazard buzz SFX, and resets the die to the current face's coded `start` state (players also have unlimited `"Undo Move"` and `"Reset Face"` buttons).
+- **100% Pre-Generated 2026–2027 Daily Bank, Interactive 5×5 `/admin` Studio & Web Audio SFX (Q44 & Q45)**:
+  - `src/lib/generators/move-two-generator.ts` uses per-face (`solveMoveTwoFace`) and 6-face (`solveMoveTwo`) **Breadth-First Search (BFS) solvers** to generate `5×5` layouts (`~5–8` moves/face, `~30–42` total Par across 6 faces) and pre-populate unique daily puzzles across all of 2026 and 2027.
+  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle hazards, move/change per-face `start` and `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
+  - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, touch swipe gestures, and an on-screen D-Pad on mobile, with synthesized Web Audio API sound effects (`src/lib/move-two-audio.ts`: roll clack, rim bump thud, hole drop + cube rotation whoosh, hazard reset buzz, and Face 6 victory chord). Final score compares **Total Moves vs. Par** (`Solved in 34 moves · Par: 34 · ⭐⭐⭐`).
 
 ### Game #1 — `1 Win` (Real-Time Community Gratitude Leaderboard) — Q46 to Q48
 - **Route**: `/games/1-win` | **Archive**: `/games/1-win/archive`

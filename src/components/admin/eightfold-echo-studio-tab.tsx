@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { CheckCircle2, RotateCcw, Shuffle } from "lucide-react";
+import { CheckCircle2, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,6 +52,15 @@ export function EightfoldEchoStudioTab({
     );
   }, [targetDate, syncVersion]);
 
+  const defaultPuzzle = useMemo<EightfoldEchoPuzzle>(() => {
+    const resolved = getDailyPuzzleForGame<EightfoldEchoPuzzle>(
+      "eightfold-echo",
+      targetDate,
+      {}
+    );
+    return resolved?.puzzle ?? initialPuzzle;
+  }, [targetDate, initialPuzzle]);
+
   const [draft, setDraft] = useState<EightfoldEchoPuzzle>(initialPuzzle);
   const [rerollCount, setRerollCount] = useState(0);
   const [seedInput, setSeedInput] = useState(initialPuzzle.seed ?? `date:${targetDate}`);
@@ -76,6 +85,23 @@ export function EightfoldEchoStudioTab({
       customDate: targetDate,
     });
     setDraft(nextPuzzle);
+    setErrors([]);
+  };
+
+  const handleClearAll = () => {
+    setSeedInput("");
+    setDraft((prev) => ({
+      ...prev,
+      title: "",
+      seed: "",
+      tiles: prev.tiles.map((t) => ({ ...t, customSvgUrl: "" })),
+    }));
+    setErrors([]);
+  };
+
+  const handleRevertDefault = () => {
+    setDraft(defaultPuzzle);
+    setSeedInput(defaultPuzzle.seed ?? `date:${targetDate}`);
     setErrors([]);
   };
 
@@ -160,13 +186,20 @@ export function EightfoldEchoStudioTab({
           <Button
             type="button"
             variant="outline"
-            onClick={() => {
-              setDraft(initialPuzzle);
-              setErrors([]);
-            }}
+            onClick={handleClearAll}
+            data-testid="admin-eightfold-echo-clear-all"
             className="border-2 border-black font-bold text-xs"
           >
-            <RotateCcw className="h-4 w-4 mr-1" /> Reset
+            <Trash2 className="h-4 w-4 mr-1" /> Clear All
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleRevertDefault}
+            data-testid="admin-eightfold-echo-revert-default"
+            className="border-2 border-black font-bold text-xs"
+          >
+            <RotateCcw className="h-4 w-4 mr-1" /> Revert to Default
           </Button>
         </div>
       </div>

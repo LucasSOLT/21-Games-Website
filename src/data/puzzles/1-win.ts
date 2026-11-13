@@ -8,7 +8,12 @@
  */
 
 import { fnv1a32, mulberry32 } from "@/lib/seeded-random";
-import { getPuzzleNumberForDate } from "@/lib/date-keys";
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
 
 export const ONE_WIN_MAX_WORDS = 4;
 export const ONE_WIN_MAX_CHARS = 35;
@@ -269,13 +274,71 @@ const COMMUNITY_WIN_POOL: readonly string[] = [
   "Clean Inbox",
 ];
 
-const DAILY_THEMES: ReadonlyArray<{ title: string; subtitle: string }> = [
-  { title: "Daily Gratitude Check-In", subtitle: "No win is too small — log yours blindly, then see where it ranks globally." },
-  { title: "One Small Victory", subtitle: "Celebrate 1 bright moment from today alongside players everywhere." },
-  { title: "Evening Reflection", subtitle: "Pause for ten seconds and name 1 thing that went right today." },
-  { title: "Shared Momentum", subtitle: "Short, honest wins connect thousands of days into one community board." },
-  { title: "Quiet Triumph", subtitle: "From deep sleep to inbox zero — what was your #1 win today?" },
-  { title: "Bright Spot", subtitle: "Capture 1 win in 1–4 words before unlocking today's live Top 100." },
+const DAILY_THEMES: ReadonlyArray<{
+  title: string;
+  subtitle: string;
+  prompt?: string;
+}> = [
+  {
+    title: "Daily Gratitude Check-In",
+    subtitle: "No win is too small — log yours blindly, then see where it ranks globally.",
+    prompt: ONE_WIN_DEFAULT_PROMPT,
+  },
+  {
+    title: "One Small Victory",
+    subtitle: "Celebrate 1 bright moment from today alongside players everywhere.",
+    prompt: "Name 1 small victory from your day today in 1–4 words to unlock the global Top 100!",
+  },
+  {
+    title: "Evening Reflection",
+    subtitle: "Pause for ten seconds and name 1 thing that went right today.",
+    prompt: "What is 1 thing that went right for you today? Share it in 1–4 words!",
+  },
+  {
+    title: "Shared Momentum",
+    subtitle: "Short, honest wins connect thousands of days into one community board.",
+    prompt: "What 1 positive habit or step forward did you complete today (1–4 words)?",
+  },
+  {
+    title: "Quiet Triumph",
+    subtitle: "From deep sleep to inbox zero — what was your #1 win today?",
+    prompt: "What quiet triumph from today deserves a nod? Log it in 1–4 words!",
+  },
+  {
+    title: "Bright Spot",
+    subtitle: "Capture 1 win in 1–4 words before unlocking today's live Top 100.",
+    prompt: "What was the brightest spot of your day today? Keep it to 1–4 words!",
+  },
+  {
+    title: "Mindful Milestone",
+    subtitle: "Every good day is built from simple moments of care and focus.",
+    prompt: "What is 1 mindful moment or personal win you are grateful for today (1–4 words)?",
+  },
+  {
+    title: "Daily Spark",
+    subtitle: "See how many players around the world shared your exact highlight today.",
+    prompt: "What sparked energy or joy in your day today? Enter 1–4 words!",
+  },
+  {
+    title: "Forward Motion",
+    subtitle: "Progress counts whether it is a finished project or a ten-minute walk.",
+    prompt: "What is 1 way you moved forward or took care of yourself today (1–4 words)?",
+  },
+  {
+    title: "Gratitude Pulse",
+    subtitle: "Log your #1 win blindly before the live community board reveals.",
+    prompt: "In 1–4 words, what is 1 win from today that made you smile?",
+  },
+  {
+    title: "Golden Minute",
+    subtitle: "One honest phrase is all it takes to anchor the day in gratitude.",
+    prompt: "What was 1 golden minute or highlight from your day today (1–4 words)?",
+  },
+  {
+    title: "Simple Accomplishment",
+    subtitle: "Real life wins are simple, human, and surprisingly universal.",
+    prompt: "What is 1 simple accomplishment from your day today? Keep it to 1–4 words!",
+  },
 ];
 
 export function buildSeedCommunityWins(seedKey: string): OneWinSeedItem[] {
@@ -344,7 +407,7 @@ export function generateOneWinPuzzle(
     id: meta?.id ?? `1w-${seedKey}`,
     puzzleNumber: meta?.puzzleNumber ?? 1,
     title: meta?.title?.trim() || picked.title,
-    prompt: meta?.prompt?.trim() || ONE_WIN_DEFAULT_PROMPT,
+    prompt: meta?.prompt?.trim() || picked.prompt || ONE_WIN_DEFAULT_PROMPT,
     subtitle: meta?.subtitle?.trim() || picked.subtitle,
     author: "SOL Theory",
     editor: "Daily Editorial",
@@ -363,6 +426,67 @@ export const ONE_WIN_PUZZLES: OneWinPromptPuzzle[] = Array.from(
       puzzleNumber: idx + 1,
     })
 );
+
+const ONE_WIN_DATE_CACHE = new Map<string, OneWinPromptPuzzle>();
+
+/**
+ * Deterministic, cached, non-repeating 2026–2027 bank resolution for 1 Win.
+ * - For `0 <= diff < 66`, returns `ONE_WIN_PUZZLES[diff]`.
+ * - For all other dates, deterministically synthesizes and caches a unique
+ *   daily gratitude prompt and baseline community leaderboard for `dateKey`.
+ */
+export function getOneWinPuzzleForDate(
+  dateKey: string = getLocalDateKey()
+): OneWinPromptPuzzle {
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < ONE_WIN_PUZZLES.length) {
+    const base = ONE_WIN_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = ONE_WIN_DATE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const seqIdx = diff >= 0 ? diff : 50000 - diff;
+  const theme = DAILY_THEMES[seqIdx % DAILY_THEMES.length]!;
+  const round = Math.floor(seqIdx / DAILY_THEMES.length) + 1;
+  const editionWords = [
+    "Morning",
+    "Evening",
+    "Midday",
+    "Golden",
+    "Mindful",
+    "Community",
+    "Bright",
+    "Shared",
+    "Peaceful",
+    "Steady",
+  ] as const;
+  const editionWord = editionWords[round % editionWords.length]!;
+  const vol = Math.floor(round / editionWords.length) + 1;
+  const synthesized = generateOneWinPuzzle(`bank:date:${dateKey}`, {
+    id: `ow-bank-${dateKey}`,
+    puzzleNumber,
+    customDate: dateKey,
+    title: `${theme.title} · ${editionWord} Vol. ${vol}`,
+    prompt: theme.prompt || ONE_WIN_DEFAULT_PROMPT,
+    subtitle: theme.subtitle,
+  });
+
+  ONE_WIN_DATE_CACHE.set(dateKey, synthesized);
+  return synthesized;
+}
 
 export function generateSeededOneWinPuzzle(
   dateKey: string,

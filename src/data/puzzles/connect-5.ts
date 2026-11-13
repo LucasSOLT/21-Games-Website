@@ -1,3 +1,11 @@
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
+import { fnv1a32, mulberry32 } from "@/lib/seeded-random";
+
 export interface Connect5HintCoord {
   /** 0-indexed row (1 = Row 2, 2 = Row 3, 3 = Row 4, 4 = Row 5). Row 0 is always 100% revealed. */
   row: number;
@@ -1232,3 +1240,225 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
     editor: "SOL Theory",
   },
 ];
+
+// ============================================================================
+// Deterministic 2026–2027 Non-Repeating Compound Bridge Synthesis & Cache
+// ============================================================================
+
+const EXTRA_COMPOUND_BRIDGES: ReadonlyArray<
+  readonly [wordA: string, wordB: string, explanation: string]
+> = [
+  ["OUT", "SIDE", "OUTSIDE — open air beyond the walls"],
+  ["OUT", "LINE", "OUTLINE — outer contour or summary sketch"],
+  ["OUT", "BACK", "OUTBACK — remote inland wilderness"],
+  ["OUT", "DOOR", "OUTDOOR — taking place in the open air"],
+  ["OUT", "WORK", "OUTWORK — surpass in effort or craftsmanship"],
+  ["SIDE", "WALK", "SIDEWALK — paved pedestrian footpath"],
+  ["SIDE", "LINE", "SIDELINE — boundary line of a sports court"],
+  ["SIDE", "BOARD", "SIDEBOARD — dining room serving cabinet"],
+  ["SIDE", "SHOW", "SIDESHOW — small attraction beside the main stage"],
+  ["WALK", "WAY", "WALKWAY — raised or paved passage for strolling"],
+  ["WALK", "OUT", "WALKOUT — sudden departure from a meeting"],
+  ["WAY", "OUT", "WAY OUT — exit path or far-flung destination"],
+  ["WAY", "FIND", "WAYFIND — navigate using landmarks and signs"],
+  ["BACK", "DOOR", "BACKDOOR — rear entrance to a building"],
+  ["BACK", "SIDE", "BACKSIDE — reverse or rear face"],
+  ["BACK", "BOARD", "BACKBOARD — vertical panel behind a basketball hoop"],
+  ["BACK", "LIGHT", "BACKLIGHT — illumination shining from behind"],
+  ["BACK", "FIRE", "BACKFIRE — unexpected reverse effect"],
+  ["BACK", "WATER", "BACKWATER — quiet river cove untouched by current"],
+  ["WATER", "FALL", "WATERFALL — cascade tumbling over a cliff"],
+  ["WATER", "LINE", "WATERLINE — level where a ship's hull meets the sea"],
+  ["WATER", "SIDE", "WATERSIDE — land bordering a lake, river, or harbor"],
+  ["WATER", "MARK", "WATERMARK — faint translucent design in paper"],
+  ["WATER", "WORK", "WATERWORK — ornamental fountain or municipal supply"],
+  ["LINE", "UP", "LINEUP — starting roster or scheduled sequence"],
+  ["LINE", "BACK", "LINEBACK — defensive anchor behind the front line"],
+  ["UP", "TIME", "UPTIME — period a system runs without interruption"],
+  ["UP", "BEAT", "UPBEAT — cheerful, optimistic tempo"],
+  ["UP", "LAND", "UPLAND — high ground above the valley floor"],
+  ["UP", "WIND", "UPWIND — into the direction from which the wind blows"],
+  ["UP", "SIDE", "UPSIDE — positive aspect or upward potential"],
+  ["WIND", "MILL", "WINDMILL — rotating sails powered by the breeze"],
+  ["WIND", "FALL", "WINDFALL — unexpected stroke of good fortune"],
+  ["WIND", "SHIELD", "WINDSHIELD — front glass screen of a vehicle"],
+  ["TOP", "SIDE", "TOPSIDE — upper deck of a vessel"],
+  ["TOP", "SOIL", "TOPSOIL — fertile upper layer of earth"],
+  ["TOP", "LIGHT", "TOPLIGHT — lantern mounted at the highest point"],
+  ["BOARD", "ROOM", "BOARDROOM — executive meeting table chamber"],
+  ["BOARD", "GAME", "BOARD GAME — tabletop strategy classic"],
+  ["ROOM", "MATE", "ROOMMATE — companion sharing living quarters"],
+  ["GAME", "TIME", "GAME TIME — moment the opening whistle blows"],
+  ["TIME", "LINE", "TIMELINE — chronological sequence of events"],
+  ["TIME", "OUT", "TIMEOUT — brief tactical pause in play"],
+  ["LIGHT", "WORK", "LIGHTWORK — effortless task completed with ease"],
+  ["LIGHT", "SIDE", "LIGHT SIDE — illuminated half of a sphere"],
+  ["HOUSE", "BOAT", "HOUSEBOAT — floating home moored on a canal"],
+  ["BOAT", "HOUSE", "BOATHOUSE — waterside shelter for skiffs and oars"],
+  ["SNOW", "FALL", "SNOWFALL — quiet blanket of winter flakes"],
+  ["SNOW", "BOARD", "SNOWBOARD — wide alpine plank for carving powder"],
+  ["FIRE", "SIDE", "FIRESIDE — cozy hearth area beside the flames"],
+  ["FIRE", "WOOD", "FIREWOOD — seasoned logs stacked for the stove"],
+  ["WOOD", "WORK", "WOODWORK — interior timber trim and joinery"],
+  ["WOOD", "LAND", "WOODLAND — forest tract shaded by trees"],
+  ["LAND", "MARK", "LANDMARK — recognizable monument or turning point"],
+  ["LAND", "FALL", "LANDFALL — first glimpse of shore after an ocean voyage"],
+  ["LAND", "SIDE", "LANDSIDE — terminal area before airport security"],
+  ["SUN", "BURN", "SUNBURN — warm pink glow from a day at the beach"],
+  ["SUN", "DOWN", "SUNDOWN — golden moment the sun dips below the horizon"],
+  ["SUN", "SPOT", "SUNSPOT — dark magnetic vortex on the solar surface"],
+  ["SPOT", "LIGHT", "SPOTLIGHT — focused stage beam on a solo performer"],
+];
+
+interface SynthesizedConnect5Chain {
+  words: [string, string, string, string, string];
+  connections: [string, string, string, string];
+}
+
+let cachedNonBankConnect5Chains: ReadonlyArray<SynthesizedConnect5Chain> | null =
+  null;
+
+function getNonBankConnect5Chains(): ReadonlyArray<SynthesizedConnect5Chain> {
+  if (cachedNonBankConnect5Chains) return cachedNonBankConnect5Chains;
+
+  const adj = new Map<string, Map<string, string>>();
+  const addEdge = (a: string, b: string, conn: string) => {
+    if (!adj.has(a)) adj.set(a, new Map());
+    const mapA = adj.get(a)!;
+    if (!mapA.has(b)) {
+      mapA.set(b, conn);
+    }
+  };
+
+  for (const p of CONNECT_5_PUZZLES) {
+    for (let i = 0; i < 4; i++) {
+      addEdge(p.words[i]!, p.words[i + 1]!, p.connections[i]!);
+    }
+  }
+  for (const [a, b, conn] of EXTRA_COMPOUND_BRIDGES) {
+    addEdge(a, b, conn);
+  }
+
+  const staticSignatures = new Set<string>(
+    CONNECT_5_PUZZLES.map((p) => p.words.join("->"))
+  );
+  const seenSignatures = new Set<string>(staticSignatures);
+  const chains: SynthesizedConnect5Chain[] = [];
+
+  for (const [w1, m1] of adj) {
+    for (const [w2, c1] of m1) {
+      if (w2 === w1) continue;
+      const m2 = adj.get(w2);
+      if (!m2) continue;
+      for (const [w3, c2] of m2) {
+        if (w3 === w1 || w3 === w2) continue;
+        const m3 = adj.get(w3);
+        if (!m3) continue;
+        for (const [w4, c3] of m3) {
+          if (w4 === w1 || w4 === w2 || w4 === w3) continue;
+          const m4 = adj.get(w4);
+          if (!m4) continue;
+          for (const [w5, c4] of m4) {
+            if (w5 === w1 || w5 === w2 || w5 === w3 || w5 === w4) continue;
+            const sig = `${w1}->${w2}->${w3}->${w4}->${w5}`;
+            if (seenSignatures.has(sig)) continue;
+            seenSignatures.add(sig);
+            chains.push({
+              words: [w1, w2, w3, w4, w5],
+              connections: [c1, c2, c3, c4],
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Deterministically shuffle so consecutive dates feature varied starting words
+  const rand = mulberry32(fnv1a32("connect-5:non-bank-pool:v1"));
+  for (let i = chains.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [chains[i], chains[j]] = [chains[j]!, chains[i]!];
+  }
+
+  cachedNonBankConnect5Chains = chains;
+  return chains;
+}
+
+function toConnect5TitleWord(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+const CONNECT_5_AUTHORS: ReadonlyArray<{ author: string; editor: string }> = [
+  { author: "SOL Theory", editor: "Daily Editorial" },
+  { author: "Puzzle Master", editor: "SOL Theory" },
+  { author: "Daily Games Team", editor: "SOL Theory" },
+  { author: "SOL Theory", editor: "Words & Logic Desk" },
+];
+
+const CONNECT_5_DATE_CACHE = new Map<string, Connect5Puzzle>();
+
+/**
+ * Returns a deterministic, validated, non-repeating Connect 5 puzzle for any dateKey.
+ * - For `0 <= diff < 66` (`diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey)`), returns `CONNECT_5_PUZZLES[diff]`.
+ * - For all other dates in 2026–2027 and beyond, deterministically selects and caches a unique
+ *   5-word compound bridge chain (`W1 -> W2 -> W3 -> W4 -> W5`) from the curated compound graph.
+ */
+export function getConnect5PuzzleForDate(
+  dateKey: string = getLocalDateKey(),
+  customOverrides?: Record<string, Connect5Puzzle>
+): Connect5Puzzle {
+  if (customOverrides && customOverrides[dateKey]) {
+    return customOverrides[dateKey];
+  }
+
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < CONNECT_5_PUZZLES.length) {
+    const base = CONNECT_5_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const cached = CONNECT_5_DATE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      customDate: dateKey,
+    };
+  }
+
+  const pool = getNonBankConnect5Chains();
+  const seqIdx =
+    diff >= CONNECT_5_PUZZLES.length
+      ? diff - CONNECT_5_PUZZLES.length
+      : 1500 + Math.abs(diff);
+  const chain = pool[seqIdx % pool.length]!;
+  const [w1, w2, w3, w4, w5] = chain.words;
+  const credits = CONNECT_5_AUTHORS[seqIdx % CONNECT_5_AUTHORS.length]!;
+
+  const revealedHints: Connect5HintCoord[] = [
+    { row: 1, col: seqIdx % w2.length },
+    { row: 2, col: (seqIdx + 1) % w3.length },
+    { row: 3, col: (seqIdx + 2) % w4.length },
+  ];
+
+  const synthesized: Connect5Puzzle = {
+    id: `c5-bank-${dateKey}`,
+    puzzleNumber,
+    title: `${toConnect5TitleWord(w1)} via ${toConnect5TitleWord(w3)} to ${toConnect5TitleWord(w5)}`,
+    words: [w1, w2, w3, w4, w5],
+    connections: chain.connections,
+    revealedHints,
+    author: credits.author,
+    editor: credits.editor,
+    customDate: dateKey,
+  };
+
+  CONNECT_5_DATE_CACHE.set(dateKey, synthesized);
+  return synthesized;
+}
+

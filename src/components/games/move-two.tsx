@@ -13,9 +13,12 @@ import {
   RotateCcw,
   Trophy,
   Undo2,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import {
+  MOVE_TWO_GRID_SIZE,
   buildMoveTwoShareText,
   computeMoveTwoStars,
   getDominoCells,
@@ -23,8 +26,19 @@ import {
   stepMoveTwoDomino,
   type MoveTwoDirection,
   type MoveTwoDominoState,
+  type MoveTwoPosture,
   type MoveTwoPuzzle,
+  type MoveTwoTarget,
 } from "@/data/puzzles/move-2";
+import {
+  isMoveTwoMuted,
+  playMoveTwoHazardSfx,
+  playMoveTwoHoleDropSfx,
+  playMoveTwoRimBumpSfx,
+  playMoveTwoRollSfx,
+  playMoveTwoVictorySfx,
+  setMoveTwoMuted,
+} from "@/lib/move-two-audio";
 import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
 import {
   clearGameProgress,
@@ -86,6 +100,12 @@ function recordMoveTwoCompletion(
   setGameStats("move-2", stats);
 }
 
+function formatHoleBadge(posture: MoveTwoPosture, isFinalFace: boolean): string {
+  const shape =
+    posture === "UPRIGHT" ? "1×1" : posture === "FLAT_H" ? "1×2" : "2×1";
+  return isFinalFace ? `🎯 ${shape}` : `⬇ ${shape}`;
+}
+
 /**
  * Mini 3D Isometric Rubik's-Style Cube HUD (Q41):
  * Displays a crisp isometric 3D cube alongside all 6 face indicators (`1 → 6`),
@@ -106,13 +126,13 @@ function IsometricCubeHud({
 
   return (
     <div
-      className="inline-flex items-center gap-2.5 rounded-2xl border-2 border-black bg-white px-2.5 py-1.5 shadow-[0_2px_0_#111]"
+      className="inline-flex items-center gap-2 rounded-2xl border-2 border-black bg-white px-2.5 py-1.5 shadow-[0_2px_0_#111]"
       data-testid="move-two-cube-hud"
       aria-label={`Cube progress: Face ${activeFace + 1} of 6`}
     >
       <svg
-        width="38"
-        height="40"
+        width="36"
+        height="38"
         viewBox="0 0 44 46"
         className="shrink-0"
         aria-hidden="true"
@@ -125,9 +145,25 @@ function IsometricCubeHud({
           strokeWidth="2.2"
           strokeLinejoin="round"
         />
-        {/* 3x3 subtle grid lines on top face */}
-        <line x1="15.6" y1="6.3" x2="34.6" y2="16.3" stroke="#111111" strokeOpacity="0.22" strokeWidth="1" />
-        <line x1="9.3" y1="9.6" x2="28.3" y2="19.6" stroke="#111111" strokeOpacity="0.22" strokeWidth="1" />
+        {/* 5x5 subtle grid lines on top face */}
+        <line
+          x1="15.6"
+          y1="6.3"
+          x2="34.6"
+          y2="16.3"
+          stroke="#111111"
+          strokeOpacity="0.22"
+          strokeWidth="1"
+        />
+        <line
+          x1="9.3"
+          y1="9.6"
+          x2="28.3"
+          y2="19.6"
+          stroke="#111111"
+          strokeOpacity="0.22"
+          strokeWidth="1"
+        />
         {/* Front-left isometric rhombus */}
         <polygon
           points="3,13 22,23 22,43 3,33"
@@ -157,11 +193,12 @@ function IsometricCubeHud({
       <div className="grid grid-cols-6 gap-1">
         {[0, 1, 2, 3, 4, 5].map((idx) => {
           const isCurrent = !won && idx === activeFace;
-          const isConquered = won || idx < activeFace || (idx <= conqueredMax && idx !== activeFace);
+          const isConquered =
+            won || idx < activeFace || (idx <= conqueredMax && idx !== activeFace);
           return (
             <span
               key={idx}
-              title={`Face ${idx + 1}${idx === 5 ? " (Red Target)" : ""}`}
+              title={`Face ${idx + 1}${idx === 5 ? " (Final Goal Hole)" : ""}`}
               className={cn(
                 "h-5 w-5 rounded-md border text-[10px] font-mono font-black flex items-center justify-center transition-all",
                 isCurrent
@@ -204,6 +241,8 @@ export function MoveTwoGame() {
   const activeDateKey = dateParam || liveTodayKey;
   return <MoveTwoBoard key={activeDateKey} activeDateKey={activeDateKey} />;
 }
+
+const GRID_INDICES = [0, 1, 2, 3, 4] as const;
 
 function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   const initialPuzzle = useMemo<MoveTwoPuzzle>(() => {
@@ -252,15 +291,33 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     kind: "bump" | "hazard" | "portal";
     message: string;
   } | null>(null);
-  const [bumping, setBumping] = useState(false);
+  const [bumpDir, setBumpDir] = useState<MoveTwoDirection | null>(null);
+  const [cubeTransition, setCubeTransition] = useState<
+    "idle" | "dropping" | "rotating"
+  >("idle");
+  const [muted, setMuted] = useState<boolean>(() => isMoveTwoMuted());
   const [helpOpen, setHelpOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
 
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionTimer1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transitionTimer2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTransitionTimers = useCallback(() => {
+    if (transitionTimer1Ref.current) {
+      clearTimeout(transitionTimer1Ref.current);
+      transitionTimer1Ref.current = null;
+    }
+    if (transitionTimer2Ref.current) {
+      clearTimeout(transitionTimer2Ref.current);
+      transitionTimer2Ref.current = null;
+    }
+  }, []);
 
   const applyNewPuzzle = useCallback(
     (next: MoveTwoPuzzle) => {
+      clearTransitionTimers();
       clearGameProgress("move-2", activeDateKey);
       setPuzzle(next);
       setDomino(next.start);
@@ -270,21 +327,20 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       setHistory([]);
       setStatus("playing");
       setFeedback(null);
+      setCubeTransition("idle");
     },
-    [activeDateKey]
+    [activeDateKey, clearTransitionTimers]
   );
 
   // Remote override sync + live Realtime puzzle updates
   useEffect(() => {
     let active = true;
-    void fetchRemoteOverrideForGame("move-2", activeDateKey).then(
-      (remote) => {
-        if (!active || !isMoveTwoPuzzle(remote)) return;
-        if (computePuzzleContentHash(remote) !== puzzleHash) {
-          applyNewPuzzle(remote);
-        }
+    void fetchRemoteOverrideForGame("move-2", activeDateKey).then((remote) => {
+      if (!active || !isMoveTwoPuzzle(remote)) return;
+      if (computePuzzleContentHash(remote) !== puzzleHash) {
+        applyNewPuzzle(remote);
       }
-    );
+    });
 
     const onUpdated = (e: Event) => {
       if (!active) return;
@@ -307,8 +363,9 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   useEffect(() => {
     return () => {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      clearTransitionTimers();
     };
-  }, []);
+  }, [clearTransitionTimers]);
 
   const showTransientFeedback = useCallback(
     (kind: "bump" | "hazard" | "portal", message: string) => {
@@ -316,7 +373,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
       feedbackTimerRef.current = setTimeout(() => {
         setFeedback(null);
-      }, 1800);
+      }, 2000);
     },
     []
   );
@@ -342,15 +399,25 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     [activeDateKey, puzzle.id, puzzleHash]
   );
 
+  const handleToggleMute = useCallback(() => {
+    const next = !muted;
+    setMuted(next);
+    setMoveTwoMuted(next);
+  }, [muted]);
+
   const handleMove = useCallback(
     (dir: MoveTwoDirection) => {
       if (status !== "playing") return;
 
       const outcome = stepMoveTwoDomino(puzzle, domino, dir);
       if (outcome.kind === "bump") {
-        setBumping(true);
-        setTimeout(() => setBumping(false), 260);
-        showTransientFeedback("bump", "Blocked by solid border or wall.");
+        playMoveTwoRimBumpSfx();
+        setBumpDir(dir);
+        setTimeout(() => setBumpDir(null), 240);
+        showTransientFeedback(
+          "bump",
+          "Blocked by the raised cube rim — try another direction."
+        );
         return;
       }
 
@@ -366,37 +433,64 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       setMoves(nextMoves);
 
       if (outcome.kind === "hazard") {
-        const entryState = faceEntries[domino.face] ?? puzzle.start;
-        setBumping(true);
-        setTimeout(() => setBumping(false), 260);
+        playMoveTwoHazardSfx();
+        const faceStart = puzzle.faces[domino.face]?.start;
+        const entryState: MoveTwoDominoState =
+          faceEntries[domino.face] ??
+          (faceStart
+            ? {
+                face: domino.face,
+                posture: faceStart.posture,
+                r: faceStart.r,
+                c: faceStart.c,
+              }
+            : puzzle.start);
+        setBumpDir(dir);
+        setTimeout(() => setBumpDir(null), 260);
         setDomino(entryState);
         showTransientFeedback(
           "hazard",
-          `Hazard tile! Reset to Face ${domino.face + 1} entry.`
+          `Dark void hazard! Reset to Face ${domino.face + 1} spawn.`
         );
         persist(entryState, nextMoves, conqueredMax, faceEntries, "playing");
         return;
       }
 
       if (outcome.kind === "portal") {
+        playMoveTwoHoleDropSfx();
+        clearTransitionTimers();
+        setCubeTransition("dropping");
+        transitionTimer1Ref.current = setTimeout(() => {
+          setCubeTransition("rotating");
+        }, 160);
+        transitionTimer2Ref.current = setTimeout(() => {
+          setCubeTransition("idle");
+        }, 420);
+
         const nextConquered = Math.max(conqueredMax, outcome.toFace);
         const nextEntries = {
           ...faceEntries,
-          [outcome.toFace]:
-            faceEntries[outcome.toFace] ?? outcome.next,
+          [outcome.toFace]: faceEntries[outcome.toFace] ?? outcome.next,
         };
         setDomino(outcome.next);
         setConqueredMax(nextConquered);
         setFaceEntries(nextEntries);
         showTransientFeedback(
           "portal",
-          `Rolled onto Face ${outcome.toFace + 1}!`
+          `Dropped into hole! Cube rotated to Face ${outcome.toFace + 1}.`
         );
         persist(outcome.next, nextMoves, nextConquered, nextEntries, "playing");
         return;
       }
 
       if (outcome.kind === "won") {
+        playMoveTwoVictorySfx();
+        clearTransitionTimers();
+        setCubeTransition("dropping");
+        transitionTimer1Ref.current = setTimeout(() => {
+          setCubeTransition("idle");
+        }, 280);
+
         const stars = computeMoveTwoStars(nextMoves, puzzle.par);
         setDomino(outcome.next);
         setConqueredMax(5);
@@ -407,7 +501,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         return;
       }
 
-      // Normal move within the active face
+      // Standard roll within the active 5×5 face
+      playMoveTwoRollSfx(outcome.next.posture);
       setDomino(outcome.next);
       persist(outcome.next, nextMoves, conqueredMax, faceEntries, "playing");
     },
@@ -421,11 +516,14 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       persist,
       activeDateKey,
       showTransientFeedback,
+      clearTransitionTimers,
     ]
   );
 
   const handleUndo = useCallback(() => {
     if (status !== "playing" || history.length === 0) return;
+    clearTransitionTimers();
+    setCubeTransition("idle");
     const prev = history[history.length - 1]!;
     setHistory((h) => h.slice(0, -1));
     setDomino(prev.domino);
@@ -440,11 +538,21 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       prev.faceEntries,
       "playing"
     );
-  }, [status, history, persist]);
+  }, [status, history, persist, clearTransitionTimers]);
 
   const handleResetFace = useCallback(() => {
     if (status !== "playing") return;
-    const entry = faceEntries[domino.face] ?? puzzle.start;
+    const faceStart = puzzle.faces[domino.face]?.start;
+    const entry: MoveTwoDominoState =
+      faceEntries[domino.face] ??
+      (faceStart
+        ? {
+            face: domino.face,
+            posture: faceStart.posture,
+            r: faceStart.r,
+            c: faceStart.c,
+          }
+        : puzzle.start);
     if (
       entry.face === domino.face &&
       entry.posture === domino.posture &&
@@ -458,12 +566,13 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       { domino, moves, conqueredMax, faceEntries: { ...faceEntries } },
     ]);
     setDomino(entry);
-    showTransientFeedback("portal", `Reset to Face ${domino.face + 1} start.`);
+    showTransientFeedback("portal", `Reset to Face ${domino.face + 1} spawn.`);
     persist(entry, moves, conqueredMax, faceEntries, "playing");
   }, [
     status,
     faceEntries,
     domino,
+    puzzle.faces,
     puzzle.start,
     moves,
     conqueredMax,
@@ -472,6 +581,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   ]);
 
   const handleRestartFull = useCallback(() => {
+    clearTransitionTimers();
     clearGameProgress("move-2", activeDateKey);
     setDomino(puzzle.start);
     setMoves(0);
@@ -480,7 +590,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     setHistory([]);
     setStatus("playing");
     setFeedback(null);
-  }, [activeDateKey, puzzle.start]);
+    setCubeTransition("idle");
+  }, [activeDateKey, puzzle.start, clearTransitionTimers]);
 
   // Desktop Arrow / WASD + Z undo controls (strictly after splash screen dismiss)
   useEffect(() => {
@@ -511,13 +622,41 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   }, [splashDismissed, status, handleMove, handleUndo]);
 
   const activeFace = puzzle.faces[domino.face]!;
-  const occupiedKeys = useMemo(
-    () => new Set(getDominoCells(domino).map((c) => `${c.r},${c.c}`)),
-    [domino]
+  const faceHole = useMemo<MoveTwoTarget>(
+    () =>
+      activeFace.hole ??
+      (domino.face === 5
+        ? puzzle.target
+        : {
+            posture: "UPRIGHT",
+            r: MOVE_TWO_GRID_SIZE - 1,
+            c: MOVE_TWO_GRID_SIZE - 1,
+          }),
+    [activeFace.hole, domino.face, puzzle.target]
   );
-  const targetKeys = useMemo(
-    () => new Set(getDominoCells(puzzle.target).map((c) => `${c.r},${c.c}`)),
-    [puzzle.target]
+  const faceStart = useMemo<MoveTwoTarget>(
+    () =>
+      activeFace.start ?? {
+        posture: puzzle.start.posture,
+        r: puzzle.start.r,
+        c: puzzle.start.c,
+      },
+    [activeFace.start, puzzle.start.posture, puzzle.start.r, puzzle.start.c]
+  );
+
+  const occupiedCells = useMemo(() => getDominoCells(domino), [domino]);
+  const occupiedKeys = useMemo(
+    () => new Set(occupiedCells.map((c) => `${c.r},${c.c}`)),
+    [occupiedCells]
+  );
+  const holeCells = useMemo(() => getDominoCells(faceHole), [faceHole]);
+  const holeKeys = useMemo(
+    () => new Set(holeCells.map((c) => `${c.r},${c.c}`)),
+    [holeCells]
+  );
+  const startKeys = useMemo(
+    () => new Set(getDominoCells(faceStart).map((c) => `${c.r},${c.c}`)),
+    [faceStart]
   );
 
   const stars = computeMoveTwoStars(moves, puzzle.par);
@@ -545,7 +684,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         <GameSplashScreen
           gameSlug="move-2"
           gameTitle="Move Two"
-          tagline="Roll the 1×1×2 domino across 6 cube faces to land on the Red Target."
+          tagline="Roll the 3D 2×1 die across 6 tilted 5×5 cube faces and drop into each recessed hole."
           theme={`${puzzle.title} · Par ${puzzle.par}`}
           author={puzzle.author}
           puzzleNumber={puzzle.puzzleNumber}
@@ -563,17 +702,24 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
   const postureLabel =
     domino.posture === "UPRIGHT"
-      ? "Standing 1×1"
+      ? "Standing 1×1 (Tall)"
       : domino.posture === "FLAT_H"
       ? "Flat 1×2 ↔"
       : "Flat 2×1 ↕";
 
-  const targetPostureLabel =
-    puzzle.target.posture === "UPRIGHT"
-      ? "Stand Upright (1×1) on Red"
-      : puzzle.target.posture === "FLAT_H"
-      ? "Lie Flat (1×2 ↔) on Red"
-      : "Lie Flat (2×1 ↕) on Red";
+  const holeRequirementLabel =
+    faceHole.posture === "UPRIGHT"
+      ? "Drop Upright (1×1) into Hole"
+      : faceHole.posture === "FLAT_H"
+      ? "Drop Flat (1×2 ↔) into Trench"
+      : "Drop Flat (2×1 ↕) into Trench";
+
+  const stageTransform =
+    cubeTransition === "rotating"
+      ? "rotateX(32deg) rotateY(-14deg) scale(0.96)"
+      : cubeTransition === "dropping"
+      ? "rotateX(27deg) scale(0.99)"
+      : "rotateX(25deg)";
 
   return (
     <GameShell
@@ -582,17 +728,17 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       puzzleNumber={puzzle.puzzleNumber}
       dateKey={activeDateKey}
       author={puzzle.author}
-      subtitle="Roll the 3D domino across 6 cube faces to reach the Red Target."
+      subtitle="Roll the 3D 2×1 die into each face's recessed hole across all 6 cube faces."
       helpOpen={helpOpen}
       onHelpOpenChange={setHelpOpen}
       statsOpen={statsOpen}
       onStatsOpenChange={setStatsOpen}
     >
       <div
-        className="mx-auto max-w-lg space-y-4 select-none"
+        className="mx-auto max-w-lg space-y-3.5 select-none"
         data-testid="move-two-board"
       >
-        {/* Top Status + Mini 3D Isometric Cube HUD */}
+        {/* Top Status + Mini 3D Isometric Cube HUD + Mute Button */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -607,20 +753,39 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </span>
             </div>
             <p className="text-[11px] font-semibold text-neutral-600">
-              Domino: <span className="font-bold text-black">{postureLabel}</span>
-              {domino.face === 5 && (
-                <span className="ml-2 text-red-700 font-bold">
-                  · Goal: {targetPostureLabel}
-                </span>
-              )}
+              Die: <span className="font-bold text-black">{postureLabel}</span>
+              <span
+                className={cn(
+                  "ml-2 font-bold",
+                  domino.face === 5 ? "text-red-700" : "text-emerald-800"
+                )}
+              >
+                · {holeRequirementLabel}
+              </span>
             </p>
           </div>
 
-          <IsometricCubeHud
-            activeFace={domino.face}
-            conqueredMax={conqueredMax}
-            won={status === "won"}
-          />
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleToggleMute}
+              data-testid="move-two-mute-toggle"
+              aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
+              title={muted ? "Sound Muted (Tap to Unmute)" : "Sound On (Tap to Mute)"}
+              className="h-9 w-9 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 flex items-center justify-center shadow-[0_2px_0_#111] cursor-pointer transition-colors"
+            >
+              {muted ? (
+                <VolumeX className="h-4 w-4 text-neutral-500" />
+              ) : (
+                <Volume2 className="h-4 w-4 text-black" />
+              )}
+            </button>
+            <IsometricCubeHud
+              activeFace={domino.face}
+              conqueredMax={conqueredMax}
+              won={status === "won"}
+            />
+          </div>
         </div>
 
         {/* Transient feedback banner */}
@@ -639,21 +804,21 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               {feedback.message}
             </p>
           ) : domino.face < 5 ? (
-            <p className="text-xs font-semibold text-neutral-500">
-              Roll cleanly across the{" "}
-              <span className="font-black text-emerald-800 uppercase">
-                {activeFace.exitEdge}
+            <p className="text-xs font-semibold text-neutral-600">
+              Align the 3D die to{" "}
+              <span className="font-black text-emerald-800">
+                {holeRequirementLabel}
               </span>{" "}
-              portal edge to enter Face {domino.face + 2}.
+              to drop into Face {domino.face + 2}.
             </p>
           ) : (
             <p className="text-xs font-bold text-red-700 flex items-center gap-1">
-              <Flag className="h-3.5 w-3.5" /> Final Face! {targetPostureLabel}
+              <Flag className="h-3.5 w-3.5" /> Final Face 6! {holeRequirementLabel}
             </p>
           )}
         </div>
 
-        {/* 2D Active 3x3 Face with Portal Edge Indicators & Touch Swipe */}
+        {/* 2.5D Tilted (~25°) 5×5 Cube Face with Raised Outer Rim & True 3D Extruded 2×1 Die */}
         <div
           onTouchStart={(e) => {
             const t = e.touches[0];
@@ -673,125 +838,194 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               handleMove(dy > 0 ? "down" : "up");
             }
           }}
+          style={{ perspective: "920px" }}
           className={cn(
-            "relative mx-auto w-full max-w-[330px] flex flex-col items-center transition-transform duration-150",
-            bumping && "translate-x-1 -translate-y-0.5"
+            "relative mx-auto w-full max-w-[360px] py-1 flex flex-col items-center transition-transform duration-150",
+            bumpDir === "left" && "-translate-x-1.5",
+            bumpDir === "right" && "translate-x-1.5",
+            bumpDir === "up" && "-translate-y-1.5",
+            bumpDir === "down" && "translate-y-1.5"
           )}
+          data-testid="move-two-25d-stage"
         >
-          {/* Top Portal Indicator */}
-          {activeFace.exitEdge === "up" ? (
-            <div className="mb-1.5 inline-flex items-center gap-1 rounded-full border-2 border-black bg-[#b6df52] px-3 py-0.5 text-xs font-black text-black shadow-[0_2px_0_#111]">
-              <ArrowUp className="h-3.5 w-3.5" /> Portal → Face {domino.face + 2}
-            </div>
-          ) : (
-            <div className="mb-1.5 h-5" />
-          )}
-
-          <div className="flex items-center justify-center w-full gap-1.5">
-            {/* Left Portal Indicator */}
-            {activeFace.exitEdge === "left" ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-black bg-[#b6df52] px-1.5 py-3 text-[10px] font-black text-black shadow-[0_2px_0_#111] shrink-0">
-                <ArrowLeft className="h-3.5 w-3.5 mb-0.5" />
-                <span>F{domino.face + 2}</span>
+          {/* Tilted 3D Cube Slab */}
+          <div
+            style={{
+              transform: stageTransform,
+              transformStyle: "preserve-3d",
+            }}
+            className="w-full transition-transform duration-300 ease-out"
+          >
+            {/* Raised Outer Cube Rim Frame */}
+            <div className="rounded-3xl bg-gradient-to-b from-neutral-800 via-neutral-900 to-black p-2.5 border-4 border-black shadow-[0_14px_0_#111111,0_22px_30px_rgba(0,0,0,0.28)]">
+              <div className="flex items-center justify-between px-2 pb-1.5 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-300">
+                <span>Face {domino.face + 1} · 5×5 Cube Surface</span>
+                <span className="text-[#b6df52]">Raised Rim Guard</span>
               </div>
-            ) : (
-              <div className="w-7 shrink-0" />
-            )}
 
-            {/* 3x3 Grid Stage */}
-            <div
-              key={`face-${domino.face}`}
-              className={cn(
-                "grid grid-cols-3 gap-2 p-3 rounded-2xl bg-[#FAF9F6] border-4 border-black shadow-[0_6px_0_#111111] flex-1 aspect-square max-w-[264px] animate-in fade-in zoom-in-95 duration-150",
-                activeFace.exitEdge === "up" && "border-t-emerald-500 border-t-dashed",
-                activeFace.exitEdge === "down" && "border-b-emerald-500 border-b-dashed",
-                activeFace.exitEdge === "left" && "border-l-emerald-500 border-l-dashed",
-                activeFace.exitEdge === "right" && "border-r-emerald-500 border-r-dashed"
-              )}
-            >
-              {[0, 1, 2].map((r) =>
-                [0, 1, 2].map((c) => {
-                  const key = `${r},${c}`;
-                  const cellType = activeFace.grid[r]![c];
-                  const hasDomino = occupiedKeys.has(key);
-                  const isTarget = domino.face === 5 && targetKeys.has(key);
+              {/* 5×5 Recessed Board Grid inside Raised Rim */}
+              <div
+                key={`face-${domino.face}`}
+                className="grid grid-cols-5 gap-1.5 p-2 rounded-2xl bg-[#EAE6DF] border-2 border-neutral-700 shadow-inner aspect-square"
+              >
+                {GRID_INDICES.map((r) =>
+                  GRID_INDICES.map((c) => {
+                    const key = `${r},${c}`;
+                    const cellType = activeFace.grid[r]?.[c] ?? "floor";
+                    const hasDomino = occupiedKeys.has(key);
+                    const isHole = holeKeys.has(key);
+                    const isStart = startKeys.has(key);
+                    const isFinalFace = domino.face === 5;
+                    const isPrimaryHoleAnchor =
+                      r === faceHole.r && c === faceHole.c;
 
-                  return (
-                    <div
-                      key={key}
-                      data-testid={`m2-cell-${r}-${c}`}
-                      className={cn(
-                        "relative rounded-xl border-2 flex items-center justify-center transition-all",
-                        cellType === "wall"
-                          ? "bg-neutral-900 border-black text-neutral-500"
-                          : cellType === "hazard"
-                          ? "bg-red-50/80 border-red-300 border-dashed text-red-600"
-                          : isTarget
-                          ? "bg-red-500/15 border-red-600 text-red-700"
-                          : "bg-white border-neutral-300"
-                      )}
-                    >
-                      {cellType === "wall" && (
-                        <span
-                          className="h-5 w-5 rounded-sm bg-neutral-700 border border-neutral-600"
-                          aria-label="Solid wall"
-                        />
-                      )}
-                      {cellType === "hazard" && (
-                        <X className="h-6 w-6 stroke-[3] text-red-500" aria-label="Hazard hole" />
-                      )}
-                      {isTarget && !hasDomino && (
-                        <div className="flex flex-col items-center justify-center text-center">
-                          <span className="h-4 w-4 rounded-sm bg-red-600 border border-black block" />
-                          <span className="text-[9px] font-black uppercase text-red-800 mt-0.5">
-                            {puzzle.target.posture === "UPRIGHT" ? "1×1" : "2×1"}
+                    // Determine if this cell is part of a 2-cell FLAT_H or FLAT_V domino or hole
+                    const isDominoAnchor = r === domino.r && c === domino.c;
+                    const dominoPartnerRight =
+                      hasDomino && domino.posture === "FLAT_H" && isDominoAnchor;
+                    const dominoPartnerLeft =
+                      hasDomino &&
+                      domino.posture === "FLAT_H" &&
+                      !isDominoAnchor;
+                    const dominoPartnerDown =
+                      hasDomino && domino.posture === "FLAT_V" && isDominoAnchor;
+                    const dominoPartnerUp =
+                      hasDomino &&
+                      domino.posture === "FLAT_V" &&
+                      !isDominoAnchor;
+
+                    return (
+                      <div
+                        key={key}
+                        data-testid={`m2-cell-${r}-${c}`}
+                        className={cn(
+                          "relative rounded-xl border-2 flex items-center justify-center transition-all",
+                          cellType === "wall"
+                            ? "bg-neutral-900 border-black text-neutral-400 shadow-[0_3px_0_#000]"
+                            : cellType === "hazard"
+                            ? "bg-neutral-950 border-red-500/90 text-red-500 shadow-[inset_0_4px_8px_rgba(0,0,0,0.85)]"
+                            : isHole
+                            ? isFinalFace
+                              ? "bg-neutral-950 border-red-500 text-red-300 shadow-[inset_0_5px_10px_rgba(0,0,0,0.95)] ring-2 ring-red-400/50"
+                              : "bg-neutral-950 border-[#b6df52] text-[#b6df52] shadow-[inset_0_5px_10px_rgba(0,0,0,0.95)] ring-2 ring-[#b6df52]/40"
+                            : isStart
+                            ? "bg-[#f7fbe9] border-emerald-600/60 shadow-[0_2px_0_#cbd5e1]"
+                            : "bg-white border-neutral-300 shadow-[0_2px_0_#cbd5e1]"
+                        )}
+                      >
+                        {/* Start Pad subtle marker */}
+                        {isStart && !hasDomino && !isHole && cellType === "floor" && (
+                          <span className="text-[8px] font-mono font-black uppercase tracking-tighter text-emerald-700/70">
+                            SPAWN
                           </span>
-                        </div>
-                      )}
-                      {hasDomino && (
-                        <div
-                          data-testid={`m2-domino-${r}-${c}`}
-                          className={cn(
-                            "inset-1 absolute rounded-lg border-2 border-black flex items-center justify-center font-mono font-black transition-all",
-                            status === "won"
-                              ? "bg-[#2ECC71] text-black shadow-[0_3px_0_#111]"
-                              : domino.posture === "UPRIGHT"
-                              ? "bg-[#111111] text-white shadow-[0_4px_0_#52525b] scale-[1.03]"
-                              : "bg-[#b6df52] text-black shadow-[0_2px_0_#111]"
-                          )}
-                        >
-                          {domino.posture === "UPRIGHT" ? (
-                            <span className="h-3.5 w-3.5 rounded-full border-2 border-white bg-[#b6df52]" />
-                          ) : (
-                            <span className="h-2.5 w-2.5 rounded-full bg-black" />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
+                        )}
 
-            {/* Right Portal Indicator */}
-            {activeFace.exitEdge === "right" ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-black bg-[#b6df52] px-1.5 py-3 text-[10px] font-black text-black shadow-[0_2px_0_#111] shrink-0">
-                <ArrowRight className="h-3.5 w-3.5 mb-0.5" />
-                <span>F{domino.face + 2}</span>
+                        {/* Solid Wall Block */}
+                        {cellType === "wall" && (
+                          <span
+                            className="h-5 w-5 rounded-sm bg-neutral-700 border border-neutral-500 shadow-[0_2px_0_#000]"
+                            aria-label="Solid wall"
+                          />
+                        )}
+
+                        {/* Interior Dark Void Hazard Tile */}
+                        {cellType === "hazard" && (
+                          <div
+                            className="flex flex-col items-center justify-center"
+                            aria-label="Dark void hazard"
+                          >
+                            <X className="h-5 w-5 stroke-[3] text-red-500 drop-shadow-[0_0_4px_rgba(239,68,68,0.6)]" />
+                          </div>
+                        )}
+
+                        {/* Recessed Target Hole Cavity */}
+                        {isHole && !hasDomino && (
+                          <div className="inset-1 absolute rounded-lg border border-dashed border-current/50 bg-gradient-to-b from-black via-neutral-900 to-neutral-950 flex flex-col items-center justify-center text-center overflow-hidden">
+                            <span
+                              className={cn(
+                                "h-2.5 w-2.5 rounded-full border",
+                                isFinalFace
+                                  ? "bg-red-500/40 border-red-400"
+                                  : "bg-[#b6df52]/30 border-[#b6df52]"
+                              )}
+                            />
+                            {isPrimaryHoleAnchor && (
+                              <span
+                                className={cn(
+                                  "text-[8px] font-mono font-black uppercase leading-none mt-0.5",
+                                  isFinalFace ? "text-red-300" : "text-[#b6df52]"
+                                )}
+                              >
+                                {formatHoleBadge(faceHole.posture, isFinalFace)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* True 3D Extruded 2×1 Domino / Die */}
+                        {hasDomino && (
+                          <div
+                            data-testid={`m2-domino-${r}-${c}`}
+                            className={cn(
+                              "inset-0.5 absolute rounded-lg border-2 border-black flex flex-col items-center justify-between overflow-hidden font-mono font-black transition-all duration-150 z-10",
+                              cubeTransition === "dropping" &&
+                                "scale-75 translate-y-1.5 opacity-60",
+                              status === "won"
+                                ? "bg-gradient-to-b from-[#4ade80] to-[#16a34a] text-black shadow-[0_5px_0_#052e16]"
+                                : domino.posture === "UPRIGHT"
+                                ? "bg-gradient-to-b from-[#d9f99d] via-[#b6df52] to-[#84cc16] text-black -translate-y-2 scale-[1.08] shadow-[0_9px_0_#1a2e05,0_12px_14px_rgba(0,0,0,0.45)]"
+                                : "bg-gradient-to-b from-white via-neutral-100 to-neutral-200 text-black -translate-y-0.5 shadow-[0_5px_0_#111111,0_7px_10px_rgba(0,0,0,0.3)]",
+                              dominoPartnerRight && "rounded-r-sm",
+                              dominoPartnerLeft && "rounded-l-sm",
+                              dominoPartnerDown && "rounded-b-sm",
+                              dominoPartnerUp && "rounded-t-sm"
+                            )}
+                          >
+                            {/* Top Bevel Highlight */}
+                            <div className="w-full h-1 bg-white/60 shrink-0" />
+
+                            {/* Die Pips & 2×1 Posture Indicator */}
+                            {domino.posture === "UPRIGHT" ? (
+                              <div className="flex flex-col items-center justify-center gap-0.5 my-auto">
+                                <div className="flex items-center gap-1">
+                                  <span className="h-2 w-2 rounded-full bg-black border border-white/40" />
+                                  <span className="h-2 w-2 rounded-full bg-black border border-white/40" />
+                                </div>
+                                <span className="text-[7px] font-black uppercase tracking-tighter text-neutral-900 leading-none">
+                                  2× TALL
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center my-auto">
+                                {isDominoAnchor ? (
+                                  <span className="h-2.5 w-2.5 rounded-full bg-black shadow-inner" />
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-black" />
+                                    <span className="h-2 w-2 rounded-full bg-black" />
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* 3D Front Extruded Thickness Lip */}
+                            <div
+                              className={cn(
+                                "w-full shrink-0 border-t border-black/40",
+                                domino.posture === "UPRIGHT"
+                                  ? "h-2.5 bg-[#4d7c0f]"
+                                  : "h-1.5 bg-neutral-400"
+                              )}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            ) : (
-              <div className="w-7 shrink-0" />
-            )}
-          </div>
-
-          {/* Bottom Portal Indicator */}
-          {activeFace.exitEdge === "down" ? (
-            <div className="mt-1.5 inline-flex items-center gap-1 rounded-full border-2 border-black bg-[#b6df52] px-3 py-0.5 text-xs font-black text-black shadow-[0_2px_0_#111]">
-              <ArrowDown className="h-3.5 w-3.5" /> Portal → Face {domino.face + 2}
             </div>
-          ) : (
-            <div className="mt-1.5 h-5" />
-          )}
+          </div>
         </div>
 
         {/* Victory Card or Controls (Undo / Reset Face + Mobile D-Pad) */}
@@ -807,7 +1041,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </span>
             </div>
             <p className="text-xs font-medium text-neutral-600">
-              All 6 cube faces conquered on Move Two #{puzzle.puzzleNumber} (&ldquo;
+              All 6 5×5 cube faces conquered on Move Two #{puzzle.puzzleNumber} (&ldquo;
               {puzzle.title}&rdquo;).
             </p>
             <ResultShareButtons
@@ -902,8 +1136,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </button>
             </div>
 
-            <p className="text-center text-[11px] text-neutral-400 font-medium">
-              Use Arrow keys / WASD, swipe the board, or tap the D-Pad · Walls ⬛ block · Hazards ✕ reset face
+            <p className="text-center text-[11px] text-neutral-500 font-medium">
+              Arrow keys / WASD, swipe, or tap D-Pad · Outer rim blocks · Void ✕ resets face · Match hole posture to drop in
             </p>
           </div>
         )}

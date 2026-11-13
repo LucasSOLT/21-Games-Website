@@ -4,6 +4,13 @@
  * Target location: src/data/puzzles/17-syllables.ts
  */
 
+import {
+  ROTATION_ANCHOR,
+  daysBetweenDateKeys,
+  getLocalDateKey,
+  getPuzzleNumberForDate,
+} from "@/lib/date-keys";
+
 export interface HaikuWord {
   text: string; // Uppercase word, e.g. "AUTUMN"
   chunks: string[]; // e.g. ["AU", "TUMN"]
@@ -202,6 +209,9 @@ export function sliceSingleWord(word: string, shouldSplit: boolean): string[] {
     return [upper.slice(0, 2), upper.slice(2)];
   }
   if (upper.length === 5) {
+    if (upper.endsWith("ASS")) {
+      return [upper.slice(0, 3), upper.slice(3)];
+    }
     return [upper.slice(0, 2), upper.slice(2)];
   }
   if (upper.length === 6) {
@@ -1045,3 +1055,214 @@ export const SEVENTEEN_SYLLABLES_PUZZLES: SeventeenSyllablesPuzzle[] =
       chunks,
     };
   });
+
+// ============================================================================
+// Deterministic 2026–2027 Non-Repeating 5-7-5 Haiku Synthesis & Cache
+// Every word in SYNTH_FIVE_OPENERS, SYNTH_SEVEN_MIDDLES, and SYNTH_FIVE_CLOSERS
+// is strictly present in KNOWN_SYLLABLES and evaluates to [5, 7, 5] syllables.
+// ============================================================================
+
+const SYNTH_FIVE_OPENERS: ReadonlyArray<{ line: string; theme: string }> = [
+  { line: "CLEAR BLUE MORNING SKY", theme: "Morning Sky" },
+  { line: "PALE MOONLIGHT ON SNOW", theme: "Moonlight on Snow" },
+  { line: "GREEN PINES IN THE MIST", theme: "Misty Pines" },
+  { line: "WARM BREEZE THROUGH THE TREES", theme: "Woodland Breeze" },
+  { line: "WILD WAVES ON THE SAND", theme: "Coastal Surf" },
+  { line: "BRIGHT STARS IN THE NIGHT", theme: "Starlit Night" },
+  { line: "COOL RAIN ON THE PATH", theme: "Rainy Pathway" },
+  { line: "GOLD SUNSET AT DUSK", theme: "Golden Dusk" },
+  { line: "SOFT DEW ON THE GRASS", theme: "Morning Dew" },
+  { line: "TALL OAK ON THE HILL", theme: "Hilltop Oak" },
+  { line: "DEEP LAKE IN THE WOODS", theme: "Forest Lake" },
+  { line: "FRESH SNOW ON THE BOUGH", theme: "Winter Bough" },
+  { line: "STILL POOL IN THE GROVE", theme: "Hidden Grove" },
+  { line: "WHITE CLOUDS IN THE EAST", theme: "Eastern Horizon" },
+  { line: "RED LEAVES IN THE WIND", theme: "Autumn Wind" },
+  { line: "LONE SHIP ON THE SEA", theme: "Open Sea" },
+  { line: "CALM HARBOR AT DAWN", theme: "Harbor Dawn" },
+  { line: "SWEET SONG OF THE BIRDS", theme: "Birdsong" },
+  { line: "PURE LIGHT OF THE MOON", theme: "Lunar Glow" },
+  { line: "DARK CLOUDS OVER LAND", theme: "Passing Storm" },
+  { line: "SLOW STREAM IN THE VALE", theme: "Valley Stream" },
+  { line: "FIRST FROST ON THE FIELD", theme: "First Frost" },
+  { line: "HIGH CLIFF BY THE SEA", theme: "Coastal Cliff" },
+  { line: "WARM HEARTH IN THE ROOM", theme: "Evening Hearth" },
+  { line: "SMOOTH STONE IN THE CREEK", theme: "Mountain Creek" },
+  { line: "PINK BLOOM IN THE SPRING", theme: "Spring Blossom" },
+  { line: "LONG ROAD TO THE NORTH", theme: "Northern Road" },
+  { line: "WIDE SKY OVER HILLS", theme: "Open Hills" },
+  { line: "COLD WIND FROM THE EAST", theme: "East Wind" },
+  { line: "GENTLE EVENING BREEZE", theme: "Evening Calm" },
+  { line: "SILENT MOUNTAIN TRAIL", theme: "Alpine Trail" },
+  { line: "GOLDEN SUMMER DAY", theme: "Summer Warmth" },
+  { line: "SILVER WINTER NIGHT", theme: "Winter Stillness" },
+  { line: "QUIET FOREST PATH", theme: "Forest Solitude" },
+  { line: "DISTANT THUNDER CALLS", theme: "Distant Thunder" },
+  { line: "MORNING SUNLIGHT SHINES", theme: "First Sunlight" },
+  { line: "CEDAR BRANCHES BLOOM", theme: "Cedar Grove" },
+  { line: "AUTUMN GARDEN REST", theme: "Garden Peace" },
+  { line: "STARLIGHT ON THE WAVE", theme: "Starlit Tide" },
+  { line: "MEADOW IN THE SUN", theme: "Sunlit Meadow" },
+];
+
+const SYNTH_SEVEN_MIDDLES: readonly string[] = [
+  "SHADOWS DRIFT ACROSS THE LAKE",
+  "WATER RUNS INTO THE SEA",
+  "SOFT WIND WHISPERS THROUGH THE GROVE",
+  "SILVER RIPPLES ON THE POOL",
+  "GOLDEN RAYS UPON THE HILL",
+  "PETALS FALL UPON THE STONE",
+  "STARLIGHT SHINES ACROSS THE DEEP",
+  "DISTANT BELLS ACROSS THE VALE",
+  "GENTLE WATERS WASH THE SAND",
+  "MORNING DEW UPON THE LEAVES",
+  "QUIET FOOTSTEPS ON THE TRAIL",
+  "COOL WINDS CARRY SCENT OF PINE",
+  "MOONLIGHT GLOWS UPON THE SNOW",
+  "AUTUMN WINDS ACROSS THE FIELD",
+  "BRIGHT SUN RISES IN THE EAST",
+  "WILD BIRDS SING AMONG THE TREES",
+  "DARK CLOUDS DRIFT BEYOND THE HILL",
+  "SOFT LIGHT SHINES BENEATH THE BOUGHS",
+  "SNOW IS FALLING ON THE ROAD",
+  "GREEN MOSS SLEEPING ON THE ROCKS",
+  "CLEAR STREAM RUNS BENEATH THE PINES",
+  "WARM SUN SHINES UPON THE EARTH",
+  "PALE FOG DRIFTING OVER SEAS",
+  "LANTERN GLOWING IN THE DARK",
+  "CRICKETS SINGING IN THE NIGHT",
+  "FLOWERS OPENING IN SPRING",
+  "CURRENTS PULLING TO THE DEEP",
+  "ECHOES FLOATING THROUGH THE WOODS",
+  "WILLOW SWAYING IN THE BREEZE",
+  "CANDLE BURNING IN THE ROOM",
+  "HARVEST MOON UPON THE SKY",
+  "PEBBLES SHINING IN THE STREAM",
+  "SEASONS PASSING ONE BY ONE",
+  "VALLEY SLEEPING UNDER MIST",
+  "CHERRY PETALS IN THE WIND",
+  "COURAGE LIVING IN THE HEART",
+];
+
+const SYNTH_FIVE_CLOSERS: readonly string[] = [
+  "PEACE IS IN THE HEART",
+  "NIGHT IS CALM AND STILL",
+  "LIGHT SHALL GUIDE OUR WAY",
+  "DREAMS AWAKE TONIGHT",
+  "EARTH IS QUIET NOW",
+  "TIME IS FLOWING ON",
+  "SPRING SHALL COME AGAIN",
+  "REST BENEATH THE STARS",
+  "DAWN SHALL RISE AGAIN",
+  "HEARTS ARE SAFE AND WARM",
+  "MIND IS CLEAR AND FREE",
+  "JOY IS HERE TODAY",
+  "LOVE SHALL NOT BE LOST",
+  "SLEEP BENEATH THE MOON",
+  "WALK ALONG THE ROAD",
+  "LISTEN TO THE WIND",
+  "SILENT IS THE NIGHT",
+  "WATER SHINES LIKE GLASS",
+  "SHADOWS FADE AWAY",
+  "MORNING WAKES ANEW",
+  "RIVER RUNS TO SEA",
+  "OCEAN WAVES ARE STILL",
+  "FOREST SHALL KEEP PEACE",
+  "WINTER FADES TO SPRING",
+  "SUMMER WARMTH IS HERE",
+  "TWILIGHT CLOSES IN",
+  "STARLIGHT ON THE PATH",
+  "VALLEY IS AT REST",
+  "MOUNTAINS STAND IN MIST",
+  "ISLAND IN THE SUN",
+  "CANYON GLOWS IN GOLD",
+  "HARBOR LAMP IS BRIGHT",
+  "HEAR THE TEMPLE BELL",
+  "GARDEN BLOOMS AGAIN",
+  "DESERT SKY IS CLEAR",
+  "PATHWAY TO THE SEA",
+  "ECHO OF THE PAST",
+  "JOURNEY NOW BEGINS",
+  "BEAUTY ALL AROUND",
+  "WORLD IS WIDE AND BRIGHT",
+];
+
+const HAIKU_AUTHORS: readonly string[] = [
+  "SOL Theory",
+  "Daily Editorial",
+  "Words Desk",
+  "Poetry Curator",
+];
+
+const SYNTHESIZED_17_CACHE = new Map<string, SeventeenSyllablesPuzzle>();
+
+/**
+ * Returns a deterministic, [5, 7, 5] validated, non-repeating 17 Syllables puzzle for any dateKey.
+ * - For `0 <= diff < 66` (`diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey)`), returns `SEVENTEEN_SYLLABLES_PUZZLES[diff]`.
+ * - For all other dates in 2026–2027 and beyond, deterministically constructs and caches a unique
+ *   5-7-5 haiku where every word is in `KNOWN_SYLLABLES` and `chunks` has 14..20 items.
+ */
+export function get17SyllablesPuzzleForDate(
+  dateKey: string = getLocalDateKey(),
+  customOverrides?: Record<string, SeventeenSyllablesPuzzle>
+): SeventeenSyllablesPuzzle {
+  if (customOverrides && customOverrides[dateKey]) {
+    return customOverrides[dateKey];
+  }
+
+  const puzzleNumber = getPuzzleNumberForDate(dateKey);
+  const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
+  if (diff >= 0 && diff < SEVENTEEN_SYLLABLES_PUZZLES.length) {
+    const base = SEVENTEEN_SYLLABLES_PUZZLES[diff]!;
+    return {
+      ...base,
+      puzzleNumber,
+      dateKey,
+    };
+  }
+
+  const cached = SYNTHESIZED_17_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
+      puzzleNumber,
+      dateKey,
+    };
+  }
+
+  const seqIdx =
+    diff >= SEVENTEEN_SYLLABLES_PUZZLES.length
+      ? diff - SEVENTEEN_SYLLABLES_PUZZLES.length
+      : 20000 - diff;
+
+  const n1 = SYNTH_FIVE_OPENERS.length; // 40
+  const n2 = SYNTH_SEVEN_MIDDLES.length; // 36
+  const n3 = SYNTH_FIVE_CLOSERS.length; // 40
+  const totalCombos = n1 * n2 * n3; // 57,600
+  // 4147 is coprime to 57,600 (57600 = 2^8 * 3^2 * 5^2; 4147 = 11 * 13 * 29)
+  const comboIdx = (seqIdx * 4147 + 19) % totalCombos;
+
+  const i1 = comboIdx % n1;
+  const i2 = Math.floor(comboIdx / n1) % n2;
+  const i3 = Math.floor(comboIdx / (n1 * n2)) % n3;
+
+  const opener = SYNTH_FIVE_OPENERS[i1]!;
+  const middle = SYNTH_SEVEN_MIDDLES[i2]!;
+  const closer = SYNTH_FIVE_CLOSERS[i3]!;
+  const lines: [string, string, string] = [opener.line, middle, closer];
+  const chunks = sliceHaikuIntoChunks(lines, 16);
+
+  const synthesized: SeventeenSyllablesPuzzle = {
+    id: `17s-bank-${dateKey}`,
+    puzzleNumber,
+    dateKey,
+    theme: opener.theme,
+    author: HAIKU_AUTHORS[seqIdx % HAIKU_AUTHORS.length]!,
+    lines,
+    chunks,
+  };
+
+  SYNTHESIZED_17_CACHE.set(dateKey, synthesized);
+  return synthesized;
+}
+
