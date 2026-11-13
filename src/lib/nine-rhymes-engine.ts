@@ -104,6 +104,17 @@ export interface TranscriptMessage {
   kind: "intro" | "prompt" | "guess" | "hint-request" | "hint" | "reveal-request" | "feedback" | "summary";
 }
 
+export function getRhymeTargetForRound(
+  puzzle: Pick<NineRhymesPuzzle, "starterWord" | "clues">,
+  roundIndex: number
+): string {
+  if (roundIndex <= 0) {
+    return puzzle.starterWord.toUpperCase();
+  }
+  const prevIdx = Math.min(roundIndex - 1, puzzle.clues.length - 1);
+  return (puzzle.clues[prevIdx]?.answer ?? puzzle.starterWord).toUpperCase();
+}
+
 export function buildTranscript(
   puzzle: Pick<NineRhymesPuzzle, "id" | "starterWord" | "clues" | "puzzleNumber">,
   state: NineRhymesProgressState
@@ -118,7 +129,17 @@ export function buildTranscript(
   const lastRound = Math.min(done, NINE_RHYMES_CLUE_COUNT - 1);
   for (let i = 0; i <= lastRound; i++) {
     const clue = puzzle.clues[i]!;
-    push(`q${i}`, "nine", `Word ${i + 1} of ${NINE_RHYMES_CLUE_COUNT}\n${renderPrompt(clue)}`, "prompt");
+    const rhymeTarget = getRhymeTargetForRound(puzzle, i);
+    const rhymeLead =
+      i === 0
+        ? `Rhymes with ${rhymeTarget}`
+        : `The next word rhymes with ${rhymeTarget}`;
+    push(
+      `q${i}`,
+      "nine",
+      `Word ${i + 1} of ${NINE_RHYMES_CLUE_COUNT} · ${rhymeLead}\n${renderPrompt(clue)}`,
+      "prompt"
+    );
 
     const result = state.results[i];
     const hinted = result ? result.hinted : state.currentHinted;

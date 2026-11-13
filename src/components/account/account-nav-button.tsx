@@ -27,13 +27,13 @@ export function AccountNavButton({
           "inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-full border-2 border-black bg-white font-black text-black transition-all hover:bg-[#FFFBE6] active:translate-y-0.5 whitespace-nowrap shrink-0",
           variant === "hero"
             ? "px-2.5 min-[375px]:px-4 py-1.5 min-[375px]:py-2 text-[11px] min-[375px]:text-xs sm:text-sm shadow-[2px_2px_0px_#000]"
-            : "h-7 min-[375px]:h-8 sm:h-9 px-2 min-[375px]:px-2.5 sm:px-3 text-[11px] sm:text-xs shadow-[1px_1px_0px_#000]",
+            : "h-7 min-[375px]:h-8 sm:h-9 px-1.5 min-[375px]:px-2.5 sm:px-3 text-[10px] min-[375px]:text-[11px] sm:text-xs shadow-[1px_1px_0px_#000]",
           className
         )}
         title="Log in or create a free SOL Theory account"
         aria-label="Log In"
       >
-        <User className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+        <User className="h-3 w-3 min-[375px]:h-3.5 min-[375px]:w-3.5 sm:h-4 sm:w-4 shrink-0" />
         <span>Log In</span>
       </button>
     );

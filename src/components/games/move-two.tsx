@@ -103,13 +103,13 @@ function recordMoveTwoCompletion(
 function formatHoleBadge(posture: MoveTwoPosture, isFinalFace: boolean): string {
   const shape =
     posture === "UPRIGHT" ? "1×1" : posture === "FLAT_H" ? "1×2" : "2×1";
-  return isFinalFace ? `🎯 ${shape}` : `⬇ ${shape}`;
+  return isFinalFace ? `GOAL ${shape}` : `HOLE ${shape}`;
 }
 
 /**
- * Mini 3D Isometric Rubik's-Style Cube HUD (Q41):
- * Displays a crisp isometric 3D cube alongside all 6 face indicators (`1 → 6`),
- * highlighting conquered faces in green and the active face in high-contrast lime/black.
+ * Mini 3D Isometric Cube HUD (Q41):
+ * Displays a crisp NYT-styled isometric 3D cube alongside all 6 face indicators (`1 → 6`),
+ * highlighting completed faces and the Face 6 green final goal hole.
  */
 function IsometricCubeHud({
   activeFace,
@@ -140,7 +140,7 @@ function IsometricCubeHud({
         {/* Top isometric rhombus */}
         <polygon
           points="22,3 41,13 22,23 3,13"
-          fill={won ? "#2ECC71" : topActive ? "#b6df52" : "#f4f4f5"}
+          fill={won ? "#2ECC71" : topActive ? "#F7DA21" : "#F7F7F5"}
           stroke="#111111"
           strokeWidth="2.2"
           strokeLinejoin="round"
@@ -152,7 +152,7 @@ function IsometricCubeHud({
           x2="34.6"
           y2="16.3"
           stroke="#111111"
-          strokeOpacity="0.22"
+          strokeOpacity="0.2"
           strokeWidth="1"
         />
         <line
@@ -161,13 +161,13 @@ function IsometricCubeHud({
           x2="28.3"
           y2="19.6"
           stroke="#111111"
-          strokeOpacity="0.22"
+          strokeOpacity="0.2"
           strokeWidth="1"
         />
         {/* Front-left isometric rhombus */}
         <polygon
           points="3,13 22,23 22,43 3,33"
-          fill={won ? "#27ae60" : leftActive ? "#b6df52" : "#e4e4e7"}
+          fill={won ? "#27ae60" : leftActive ? "#F7DA21" : "#EAE8E1"}
           stroke="#111111"
           strokeWidth="2.2"
           strokeLinejoin="round"
@@ -179,10 +179,10 @@ function IsometricCubeHud({
             won
               ? "#1e8449"
               : activeFace === 5
-              ? "#fca5a5"
+              ? "#2ECC71"
               : rightActive
-              ? "#b6df52"
-              : "#d4d4d8"
+              ? "#F7DA21"
+              : "#DCD9D0"
           }
           stroke="#111111"
           strokeWidth="2.2"
@@ -202,11 +202,13 @@ function IsometricCubeHud({
               className={cn(
                 "h-5 w-5 rounded-md border text-[10px] font-mono font-black flex items-center justify-center transition-all",
                 isCurrent
-                  ? "border-2 border-black bg-[#b6df52] text-black scale-110 shadow-[0_1px_0_#111]"
+                  ? idx === 5
+                    ? "border-2 border-black bg-[#2ECC71] text-black scale-110 shadow-[0_1px_0_#111]"
+                    : "border-2 border-black bg-[#F7DA21] text-black scale-110 shadow-[0_1px_0_#111]"
                   : isConquered
                   ? "border-emerald-700 bg-emerald-500 text-white"
                   : idx === 5
-                  ? "border-red-300 bg-red-50 text-red-700"
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-800"
                   : "border-neutral-300 bg-neutral-100 text-neutral-500"
               )}
             >
@@ -292,6 +294,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     message: string;
   } | null>(null);
   const [bumpDir, setBumpDir] = useState<MoveTwoDirection | null>(null);
+  const [rollDir, setRollDir] = useState<MoveTwoDirection | null>(null);
   const [cubeTransition, setCubeTransition] = useState<
     "idle" | "dropping" | "rotating"
   >("idle");
@@ -301,10 +304,15 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionTimer1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionTimer2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearTransitionTimers = useCallback(() => {
+    if (rollTimerRef.current) {
+      clearTimeout(rollTimerRef.current);
+      rollTimerRef.current = null;
+    }
     if (transitionTimer1Ref.current) {
       clearTimeout(transitionTimer1Ref.current);
       transitionTimer1Ref.current = null;
@@ -327,6 +335,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       setHistory([]);
       setStatus("playing");
       setFeedback(null);
+      setRollDir(null);
       setCubeTransition("idle");
     },
     [activeDateKey, clearTransitionTimers]
@@ -373,7 +382,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
       feedbackTimerRef.current = setTimeout(() => {
         setFeedback(null);
-      }, 2000);
+      }, 2200);
     },
     []
   );
@@ -405,6 +414,14 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     setMoveTwoMuted(next);
   }, [muted]);
 
+  const triggerRollAnimation = useCallback((dir: MoveTwoDirection) => {
+    if (rollTimerRef.current) clearTimeout(rollTimerRef.current);
+    setRollDir(dir);
+    rollTimerRef.current = setTimeout(() => {
+      setRollDir(null);
+    }, 320);
+  }, []);
+
   const handleMove = useCallback(
     (dir: MoveTwoDirection) => {
       if (status !== "playing") return;
@@ -413,11 +430,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       if (outcome.kind === "bump") {
         playMoveTwoRimBumpSfx();
         setBumpDir(dir);
-        setTimeout(() => setBumpDir(null), 240);
-        showTransientFeedback(
-          "bump",
-          "Blocked by the raised cube rim — try another direction."
-        );
+        setTimeout(() => setBumpDir(null), 260);
+        showTransientFeedback("bump", "Blocked by a wall.");
         return;
       }
 
@@ -446,11 +460,11 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               }
             : puzzle.start);
         setBumpDir(dir);
-        setTimeout(() => setBumpDir(null), 260);
+        setTimeout(() => setBumpDir(null), 280);
         setDomino(entryState);
         showTransientFeedback(
           "hazard",
-          `Dark void hazard! Reset to Face ${domino.face + 1} spawn.`
+          "You hit an obstacle! Resetting position."
         );
         persist(entryState, nextMoves, conqueredMax, faceEntries, "playing");
         return;
@@ -459,13 +473,14 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       if (outcome.kind === "portal") {
         playMoveTwoHoleDropSfx();
         clearTransitionTimers();
+        triggerRollAnimation(dir);
         setCubeTransition("dropping");
         transitionTimer1Ref.current = setTimeout(() => {
           setCubeTransition("rotating");
-        }, 160);
+        }, 320);
         transitionTimer2Ref.current = setTimeout(() => {
           setCubeTransition("idle");
-        }, 420);
+        }, 840);
 
         const nextConquered = Math.max(conqueredMax, outcome.toFace);
         const nextEntries = {
@@ -477,7 +492,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         setFaceEntries(nextEntries);
         showTransientFeedback(
           "portal",
-          `Dropped into hole! Cube rotated to Face ${outcome.toFace + 1}.`
+          `Nice! Moving to Face ${outcome.toFace + 1} of 6.`
         );
         persist(outcome.next, nextMoves, nextConquered, nextEntries, "playing");
         return;
@@ -486,10 +501,11 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       if (outcome.kind === "won") {
         playMoveTwoVictorySfx();
         clearTransitionTimers();
+        triggerRollAnimation(dir);
         setCubeTransition("dropping");
         transitionTimer1Ref.current = setTimeout(() => {
           setCubeTransition("idle");
-        }, 280);
+        }, 360);
 
         const stars = computeMoveTwoStars(nextMoves, puzzle.par);
         setDomino(outcome.next);
@@ -501,8 +517,9 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         return;
       }
 
-      // Standard roll within the active 5×5 face
+      // Standard roll within the active 5×5 face with slower 320ms physics animation
       playMoveTwoRollSfx(outcome.next.posture);
+      triggerRollAnimation(dir);
       setDomino(outcome.next);
       persist(outcome.next, nextMoves, conqueredMax, faceEntries, "playing");
     },
@@ -517,12 +534,14 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       activeDateKey,
       showTransientFeedback,
       clearTransitionTimers,
+      triggerRollAnimation,
     ]
   );
 
   const handleUndo = useCallback(() => {
     if (status !== "playing" || history.length === 0) return;
     clearTransitionTimers();
+    setRollDir(null);
     setCubeTransition("idle");
     const prev = history[history.length - 1]!;
     setHistory((h) => h.slice(0, -1));
@@ -565,8 +584,9 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       ...prev,
       { domino, moves, conqueredMax, faceEntries: { ...faceEntries } },
     ]);
+    setRollDir(null);
     setDomino(entry);
-    showTransientFeedback("portal", `Reset to Face ${domino.face + 1} spawn.`);
+    showTransientFeedback("portal", "Position reset.");
     persist(entry, moves, conqueredMax, faceEntries, "playing");
   }, [
     status,
@@ -590,6 +610,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     setHistory([]);
     setStatus("playing");
     setFeedback(null);
+    setRollDir(null);
     setCubeTransition("idle");
   }, [activeDateKey, puzzle.start, clearTransitionTimers]);
 
@@ -684,7 +705,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         <GameSplashScreen
           gameSlug="move-2"
           gameTitle="Move Two"
-          tagline="Roll the 3D 2×1 die across 6 tilted 5×5 cube faces and drop into each recessed hole."
+          tagline="Move the 3D 2×1 block across 6 cube faces and drop into each hole."
           theme={`${puzzle.title} · Par ${puzzle.par}`}
           author={puzzle.author}
           puzzleNumber={puzzle.puzzleNumber}
@@ -702,24 +723,38 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
   const postureLabel =
     domino.posture === "UPRIGHT"
-      ? "Standing 1×1 (Tall)"
+      ? "Standing 1×1 (2 Stacked)"
       : domino.posture === "FLAT_H"
       ? "Flat 1×2 ↔"
       : "Flat 2×1 ↕";
 
   const holeRequirementLabel =
     faceHole.posture === "UPRIGHT"
-      ? "Drop Upright (1×1) into Hole"
+      ? "Drop Standing (1×1) into Hole"
       : faceHole.posture === "FLAT_H"
-      ? "Drop Flat (1×2 ↔) into Trench"
-      : "Drop Flat (2×1 ↕) into Trench";
+      ? "Drop Flat (1×2 ↔) into Hole"
+      : "Drop Flat (2×1 ↕) into Hole";
 
   const stageTransform =
     cubeTransition === "rotating"
-      ? "rotateX(32deg) rotateY(-14deg) scale(0.96)"
+      ? "rotateX(33deg) rotateY(-16deg) scale(0.95)"
       : cubeTransition === "dropping"
-      ? "rotateX(27deg) scale(0.99)"
+      ? "rotateX(28deg) scale(0.98)"
       : "rotateX(25deg)";
+
+  // 3D rolling physics transform on the 2x1 block actor (320ms smooth roll)
+  const blockRollTransform =
+    cubeTransition === "dropping"
+      ? "translateY(8px) scale(0.78)"
+      : rollDir === "right"
+      ? "translateY(-5px) rotateZ(5deg) scale(1.03)"
+      : rollDir === "left"
+      ? "translateY(-5px) rotateZ(-5deg) scale(1.03)"
+      : rollDir === "up"
+      ? "translateY(-7px) scale(1.04)"
+      : rollDir === "down"
+      ? "translateY(-3px) scale(1.03)"
+      : "translateY(0px) scale(1)";
 
   return (
     <GameShell
@@ -728,7 +763,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       puzzleNumber={puzzle.puzzleNumber}
       dateKey={activeDateKey}
       author={puzzle.author}
-      subtitle="Roll the 3D 2×1 die into each face's recessed hole across all 6 cube faces."
+      subtitle="Move the 3D 2×1 block into the hole on all 6 faces of the cube."
       helpOpen={helpOpen}
       onHelpOpenChange={setHelpOpen}
       statsOpen={statsOpen}
@@ -753,11 +788,11 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </span>
             </div>
             <p className="text-[11px] font-semibold text-neutral-600">
-              Die: <span className="font-bold text-black">{postureLabel}</span>
+              Block: <span className="font-bold text-black">{postureLabel}</span>
               <span
                 className={cn(
                   "ml-2 font-bold",
-                  domino.face === 5 ? "text-red-700" : "text-emerald-800"
+                  domino.face === 5 ? "text-emerald-700" : "text-sky-800"
                 )}
               >
                 · {holeRequirementLabel}
@@ -797,28 +832,28 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                 feedback.kind === "portal"
                   ? "bg-emerald-50 border-emerald-300 text-emerald-900"
                   : feedback.kind === "hazard"
-                  ? "bg-red-50 border-red-300 text-red-800"
-                  : "bg-neutral-100 border-neutral-300 text-neutral-700"
+                  ? "bg-amber-50 border-amber-400 text-amber-950"
+                  : "bg-neutral-100 border-neutral-300 text-neutral-800"
               )}
             >
               {feedback.message}
             </p>
           ) : domino.face < 5 ? (
             <p className="text-xs font-semibold text-neutral-600">
-              Align the 3D die to{" "}
-              <span className="font-black text-emerald-800">
+              Move the 2×1 block to{" "}
+              <span className="font-black text-sky-800">
                 {holeRequirementLabel}
               </span>{" "}
-              to drop into Face {domino.face + 2}.
+              to advance to Face {domino.face + 2}.
             </p>
           ) : (
-            <p className="text-xs font-bold text-red-700 flex items-center gap-1">
+            <p className="text-xs font-bold text-emerald-700 flex items-center gap-1">
               <Flag className="h-3.5 w-3.5" /> Final Face 6! {holeRequirementLabel}
             </p>
           )}
         </div>
 
-        {/* 2.5D Tilted (~25°) 5×5 Cube Face with Raised Outer Rim & True 3D Extruded 2×1 Die */}
+        {/* NYT-Styled 2.5D Tilted (~25°) 5×5 Cube Face & 3D Stacked 2×1 Block */}
         <div
           onTouchStart={(e) => {
             const t = e.touches[0];
@@ -840,7 +875,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           }}
           style={{ perspective: "920px" }}
           className={cn(
-            "relative mx-auto w-full max-w-[360px] py-1 flex flex-col items-center transition-transform duration-150",
+            "relative mx-auto w-full max-w-[360px] py-2 flex flex-col items-center transition-transform duration-200",
             bumpDir === "left" && "-translate-x-1.5",
             bumpDir === "right" && "translate-x-1.5",
             bumpDir === "up" && "-translate-y-1.5",
@@ -854,19 +889,28 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               transform: stageTransform,
               transformStyle: "preserve-3d",
             }}
-            className="w-full transition-transform duration-300 ease-out"
+            className="w-full transition-transform duration-500 ease-out"
           >
-            {/* Raised Outer Cube Rim Frame */}
-            <div className="rounded-3xl bg-gradient-to-b from-neutral-800 via-neutral-900 to-black p-2.5 border-4 border-black shadow-[0_14px_0_#111111,0_22px_30px_rgba(0,0,0,0.28)]">
-              <div className="flex items-center justify-between px-2 pb-1.5 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-300">
-                <span>Face {domino.face + 1} · 5×5 Cube Surface</span>
-                <span className="text-[#b6df52]">Raised Rim Guard</span>
+            {/* NYT Games Editorial Cube Frame */}
+            <div className="rounded-3xl bg-[#F7F7F5] p-3 border-[3px] border-[#111111] shadow-[0_12px_0_#111111,0_20px_28px_rgba(0,0,0,0.14)]">
+              <div className="flex items-center justify-between px-1.5 pb-2 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-600">
+                <span>Face {domino.face + 1} of 6 · 5×5 Cube</span>
+                <span
+                  className={cn(
+                    "px-2 py-0.5 rounded-full border border-black/20",
+                    domino.face === 5
+                      ? "bg-emerald-100 text-emerald-900"
+                      : "bg-[#FFFBE6] text-neutral-900"
+                  )}
+                >
+                  {domino.face === 5 ? "Green Goal Hole" : "2×1 Block"}
+                </span>
               </div>
 
-              {/* 5×5 Recessed Board Grid inside Raised Rim */}
+              {/* 5×5 Cube Surface Grid + Animated 3D 2×1 Block Actor */}
               <div
                 key={`face-${domino.face}`}
-                className="grid grid-cols-5 gap-1.5 p-2 rounded-2xl bg-[#EAE6DF] border-2 border-neutral-700 shadow-inner aspect-square"
+                className="relative grid grid-cols-5 gap-1.5 p-2 rounded-2xl bg-[#EAE8E1] border-2 border-[#111111] shadow-inner aspect-square"
               >
                 {GRID_INDICES.map((r) =>
                   GRID_INDICES.map((c) => {
@@ -879,44 +923,29 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                     const isPrimaryHoleAnchor =
                       r === faceHole.r && c === faceHole.c;
 
-                    // Determine if this cell is part of a 2-cell FLAT_H or FLAT_V domino or hole
-                    const isDominoAnchor = r === domino.r && c === domino.c;
-                    const dominoPartnerRight =
-                      hasDomino && domino.posture === "FLAT_H" && isDominoAnchor;
-                    const dominoPartnerLeft =
-                      hasDomino &&
-                      domino.posture === "FLAT_H" &&
-                      !isDominoAnchor;
-                    const dominoPartnerDown =
-                      hasDomino && domino.posture === "FLAT_V" && isDominoAnchor;
-                    const dominoPartnerUp =
-                      hasDomino &&
-                      domino.posture === "FLAT_V" &&
-                      !isDominoAnchor;
-
                     return (
                       <div
                         key={key}
                         data-testid={`m2-cell-${r}-${c}`}
                         className={cn(
-                          "relative rounded-xl border-2 flex items-center justify-center transition-all",
+                          "relative rounded-xl border-2 flex items-center justify-center transition-colors",
                           cellType === "wall"
-                            ? "bg-neutral-900 border-black text-neutral-400 shadow-[0_3px_0_#000]"
+                            ? "bg-[#171717] border-[#111111] text-white shadow-[0_3px_0_#000]"
                             : cellType === "hazard"
-                            ? "bg-neutral-950 border-red-500/90 text-red-500 shadow-[inset_0_4px_8px_rgba(0,0,0,0.85)]"
+                            ? "bg-amber-50/95 border-neutral-800 text-neutral-900 shadow-[inset_0_2px_4px_rgba(0,0,0,0.12)]"
                             : isHole
                             ? isFinalFace
-                              ? "bg-neutral-950 border-red-500 text-red-300 shadow-[inset_0_5px_10px_rgba(0,0,0,0.95)] ring-2 ring-red-400/50"
-                              : "bg-neutral-950 border-[#b6df52] text-[#b6df52] shadow-[inset_0_5px_10px_rgba(0,0,0,0.95)] ring-2 ring-[#b6df52]/40"
+                              ? "bg-emerald-950 border-[#2ECC71] text-emerald-200 shadow-[inset_0_5px_10px_rgba(0,0,0,0.85)] ring-2 ring-[#2ECC71]/60"
+                              : "bg-neutral-900 border-sky-500 text-sky-200 shadow-[inset_0_5px_10px_rgba(0,0,0,0.85)] ring-2 ring-sky-400/40"
                             : isStart
-                            ? "bg-[#f7fbe9] border-emerald-600/60 shadow-[0_2px_0_#cbd5e1]"
-                            : "bg-white border-neutral-300 shadow-[0_2px_0_#cbd5e1]"
+                            ? "bg-[#FFFBE6] border-amber-500/70 shadow-[0_2px_0_#d4d4d8]"
+                            : "bg-white border-neutral-300 shadow-[0_2px_0_#d4d4d8]"
                         )}
                       >
-                        {/* Start Pad subtle marker */}
+                        {/* Start Tile subtle marker */}
                         {isStart && !hasDomino && !isHole && cellType === "floor" && (
-                          <span className="text-[8px] font-mono font-black uppercase tracking-tighter text-emerald-700/70">
-                            SPAWN
+                          <span className="text-[8px] font-mono font-black uppercase tracking-tighter text-amber-800/80">
+                            START
                           </span>
                         )}
 
@@ -924,36 +953,43 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                         {cellType === "wall" && (
                           <span
                             className="h-5 w-5 rounded-sm bg-neutral-700 border border-neutral-500 shadow-[0_2px_0_#000]"
-                            aria-label="Solid wall"
+                            aria-label="Wall"
                           />
                         )}
 
-                        {/* Interior Dark Void Hazard Tile */}
+                        {/* Obstacle Tile */}
                         {cellType === "hazard" && (
                           <div
                             className="flex flex-col items-center justify-center"
-                            aria-label="Dark void hazard"
+                            aria-label="Obstacle"
                           >
-                            <X className="h-5 w-5 stroke-[3] text-red-500 drop-shadow-[0_0_4px_rgba(239,68,68,0.6)]" />
+                            <X className="h-5 w-5 stroke-[2.75] text-neutral-800" />
                           </div>
                         )}
 
-                        {/* Recessed Target Hole Cavity */}
+                        {/* Recessed Target Hole Cavity (Green on Face 6, Sky on Faces 1–5) */}
                         {isHole && !hasDomino && (
-                          <div className="inset-1 absolute rounded-lg border border-dashed border-current/50 bg-gradient-to-b from-black via-neutral-900 to-neutral-950 flex flex-col items-center justify-center text-center overflow-hidden">
+                          <div
+                            className={cn(
+                              "inset-1 absolute rounded-lg border border-dashed flex flex-col items-center justify-center text-center overflow-hidden",
+                              isFinalFace
+                                ? "border-[#2ECC71] bg-gradient-to-b from-emerald-950 via-emerald-900 to-emerald-950"
+                                : "border-sky-400/70 bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950"
+                            )}
+                          >
                             <span
                               className={cn(
-                                "h-2.5 w-2.5 rounded-full border",
+                                "h-2.5 w-2.5 rounded-sm border",
                                 isFinalFace
-                                  ? "bg-red-500/40 border-red-400"
-                                  : "bg-[#b6df52]/30 border-[#b6df52]"
+                                  ? "bg-[#2ECC71] border-white/80 shadow-[0_0_8px_rgba(46,204,113,0.7)]"
+                                  : "bg-sky-400/40 border-sky-300"
                               )}
                             />
                             {isPrimaryHoleAnchor && (
                               <span
                                 className={cn(
-                                  "text-[8px] font-mono font-black uppercase leading-none mt-0.5",
-                                  isFinalFace ? "text-red-300" : "text-[#b6df52]"
+                                  "text-[7px] font-mono font-black uppercase leading-none mt-0.5",
+                                  isFinalFace ? "text-[#2ECC71]" : "text-sky-300"
                                 )}
                               >
                                 {formatHoleBadge(faceHole.posture, isFinalFace)}
@@ -962,67 +998,172 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                           </div>
                         )}
 
-                        {/* True 3D Extruded 2×1 Domino / Die */}
+                        {/* Occupied cell test-id marker (preserves m2-domino-${r}-${c} for automated checks) */}
                         {hasDomino && (
-                          <div
+                          <span
                             data-testid={`m2-domino-${r}-${c}`}
-                            className={cn(
-                              "inset-0.5 absolute rounded-lg border-2 border-black flex flex-col items-center justify-between overflow-hidden font-mono font-black transition-all duration-150 z-10",
-                              cubeTransition === "dropping" &&
-                                "scale-75 translate-y-1.5 opacity-60",
-                              status === "won"
-                                ? "bg-gradient-to-b from-[#4ade80] to-[#16a34a] text-black shadow-[0_5px_0_#052e16]"
-                                : domino.posture === "UPRIGHT"
-                                ? "bg-gradient-to-b from-[#d9f99d] via-[#b6df52] to-[#84cc16] text-black -translate-y-2 scale-[1.08] shadow-[0_9px_0_#1a2e05,0_12px_14px_rgba(0,0,0,0.45)]"
-                                : "bg-gradient-to-b from-white via-neutral-100 to-neutral-200 text-black -translate-y-0.5 shadow-[0_5px_0_#111111,0_7px_10px_rgba(0,0,0,0.3)]",
-                              dominoPartnerRight && "rounded-r-sm",
-                              dominoPartnerLeft && "rounded-l-sm",
-                              dominoPartnerDown && "rounded-b-sm",
-                              dominoPartnerUp && "rounded-t-sm"
-                            )}
+                            className="sr-only"
                           >
-                            {/* Top Bevel Highlight */}
-                            <div className="w-full h-1 bg-white/60 shrink-0" />
-
-                            {/* Die Pips & 2×1 Posture Indicator */}
-                            {domino.posture === "UPRIGHT" ? (
-                              <div className="flex flex-col items-center justify-center gap-0.5 my-auto">
-                                <div className="flex items-center gap-1">
-                                  <span className="h-2 w-2 rounded-full bg-black border border-white/40" />
-                                  <span className="h-2 w-2 rounded-full bg-black border border-white/40" />
-                                </div>
-                                <span className="text-[7px] font-black uppercase tracking-tighter text-neutral-900 leading-none">
-                                  2× TALL
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center my-auto">
-                                {isDominoAnchor ? (
-                                  <span className="h-2.5 w-2.5 rounded-full bg-black shadow-inner" />
-                                ) : (
-                                  <div className="flex items-center gap-1">
-                                    <span className="h-2 w-2 rounded-full bg-black" />
-                                    <span className="h-2 w-2 rounded-full bg-black" />
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* 3D Front Extruded Thickness Lip */}
-                            <div
-                              className={cn(
-                                "w-full shrink-0 border-t border-black/40",
-                                domino.posture === "UPRIGHT"
-                                  ? "h-2.5 bg-[#4d7c0f]"
-                                  : "h-1.5 bg-neutral-400"
-                              )}
-                            />
-                          </div>
+                            2×1 Block at ({r}, {c})
+                          </span>
                         )}
                       </div>
                     );
                   })
                 )}
+
+                {/* Animated 3D Stacked 2×1 Block Actor (No Domino Pips; 2 Stacked Cubes when UPRIGHT; 320ms Physics Roll) */}
+                <div
+                  data-testid="move-two-3d-block"
+                  data-posture={domino.posture}
+                  style={{
+                    left: `${domino.c * 20}%`,
+                    top: `${domino.r * 20}%`,
+                    width: domino.posture === "FLAT_H" ? "40%" : "20%",
+                    height: domino.posture === "FLAT_V" ? "40%" : "20%",
+                    transform: blockRollTransform,
+                    transition:
+                      "left 320ms cubic-bezier(0.22, 1, 0.36, 1), top 320ms cubic-bezier(0.22, 1, 0.36, 1), width 320ms cubic-bezier(0.22, 1, 0.36, 1), height 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+                  }}
+                  className="pointer-events-none absolute z-20 p-1.5"
+                >
+                  {domino.posture === "UPRIGHT" ? (
+                    /* UPRIGHT (1×1 footprint): Two 3D unit blocks visibly stacked on top of each other */
+                    <div className="relative w-full h-full">
+                      {/* Stacked Tower rising in 2.5D space */}
+                      <div
+                        className={cn(
+                          "absolute inset-x-0 -top-5 bottom-0 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
+                          status === "won"
+                            ? "shadow-[4px_7px_0_#14532d,0_12px_18px_rgba(0,0,0,0.28)]"
+                            : "shadow-[4px_7px_0_#111111,0_12px_18px_rgba(0,0,0,0.26)]"
+                        )}
+                      >
+                        {/* Top Bevel Roof of Upper Cube */}
+                        <div
+                          className={cn(
+                            "h-2.5 w-full border-b-2 border-[#111111] shrink-0",
+                            status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
+                          )}
+                        />
+
+                        {/* Upper Cube (Block 2 of 2) */}
+                        <div
+                          className={cn(
+                            "flex-1 w-full border-b-2 border-[#111111] relative flex items-center justify-center",
+                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                          )}
+                        >
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
+                        </div>
+
+                        {/* Bottom Cube (Block 1 of 2 — stacked beneath Upper Cube) */}
+                        <div
+                          className={cn(
+                            "flex-1 w-full relative flex items-center justify-center",
+                            status === "won" ? "bg-[#27ae60]" : "bg-[#EAB308]"
+                          )}
+                        >
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/20" />
+                        </div>
+
+                        {/* 3D Front Base Extrusion Lip */}
+                        <div
+                          className={cn(
+                            "h-2 w-full border-t-2 border-[#111111] shrink-0",
+                            status === "won" ? "bg-[#15803d]" : "bg-[#A16207]"
+                          )}
+                        />
+                      </div>
+                    </div>
+                  ) : domino.posture === "FLAT_H" ? (
+                    /* FLAT_H (1×2 horizontal): Two connected 3D unit blocks side-by-side */
+                    <div
+                      className={cn(
+                        "w-full h-full -translate-y-1 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
+                        status === "won"
+                          ? "shadow-[3px_5px_0_#14532d,0_8px_14px_rgba(0,0,0,0.22)]"
+                          : "shadow-[3px_5px_0_#111111,0_8px_14px_rgba(0,0,0,0.2)]"
+                      )}
+                    >
+                      {/* Top Bevel Highlight */}
+                      <div
+                        className={cn(
+                          "h-1.5 w-full border-b border-[#111111]/60 shrink-0",
+                          status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
+                        )}
+                      />
+                      {/* Two side-by-side unit cubes with crisp center seam */}
+                      <div className="flex-1 grid grid-cols-2 w-full">
+                        <div
+                          className={cn(
+                            "border-r-2 border-[#111111]",
+                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                          )}
+                        />
+                        <div
+                          className={cn(
+                            "relative",
+                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                          )}
+                        >
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
+                        </div>
+                      </div>
+                      {/* 3D Front Extruded Thickness Lip */}
+                      <div
+                        className={cn(
+                          "h-2 w-full border-t-2 border-[#111111] shrink-0",
+                          status === "won" ? "bg-[#15803d]" : "bg-[#CA8A04]"
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    /* FLAT_V (2×1 vertical): Two connected 3D unit blocks front-to-back */
+                    <div
+                      className={cn(
+                        "w-full h-full -translate-y-1 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
+                        status === "won"
+                          ? "shadow-[3px_5px_0_#14532d,0_8px_14px_rgba(0,0,0,0.22)]"
+                          : "shadow-[3px_5px_0_#111111,0_8px_14px_rgba(0,0,0,0.2)]"
+                      )}
+                    >
+                      {/* Top Bevel Highlight */}
+                      <div
+                        className={cn(
+                          "h-1.5 w-full border-b border-[#111111]/60 shrink-0",
+                          status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
+                        )}
+                      />
+                      {/* Two vertical unit cubes with crisp center seam */}
+                      <div className="flex-1 grid grid-rows-2 w-full">
+                        <div
+                          className={cn(
+                            "border-b-2 border-[#111111] relative",
+                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                          )}
+                        >
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
+                        </div>
+                        <div
+                          className={cn(
+                            "relative",
+                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                          )}
+                        >
+                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
+                        </div>
+                      </div>
+                      {/* 3D Front Extruded Thickness Lip */}
+                      <div
+                        className={cn(
+                          "h-2 w-full border-t-2 border-[#111111] shrink-0",
+                          status === "won" ? "bg-[#15803d]" : "bg-[#CA8A04]"
+                        )}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -1041,7 +1182,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </span>
             </div>
             <p className="text-xs font-medium text-neutral-600">
-              All 6 5×5 cube faces conquered on Move Two #{puzzle.puzzleNumber} (&ldquo;
+              All 6 5×5 cube faces completed on Move Two #{puzzle.puzzleNumber} (&ldquo;
               {puzzle.title}&rdquo;).
             </p>
             <ResultShareButtons
@@ -1097,13 +1238,13 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             {/* Minimalist Mobile / Desktop On-Screen D-Pad */}
             <div
               className="mx-auto grid grid-cols-3 gap-1.5 w-40"
-              aria-label="Directional roll controls"
+              aria-label="Directional move controls"
               data-testid="move-two-dpad"
             >
               <div />
               <button
                 type="button"
-                aria-label="Roll Up"
+                aria-label="Move Up"
                 onClick={() => handleMove("up")}
                 className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
               >
@@ -1112,7 +1253,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               <div />
               <button
                 type="button"
-                aria-label="Roll Left"
+                aria-label="Move Left"
                 onClick={() => handleMove("left")}
                 className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
               >
@@ -1120,7 +1261,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </button>
               <button
                 type="button"
-                aria-label="Roll Down"
+                aria-label="Move Down"
                 onClick={() => handleMove("down")}
                 className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
               >
@@ -1128,7 +1269,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </button>
               <button
                 type="button"
-                aria-label="Roll Right"
+                aria-label="Move Right"
                 onClick={() => handleMove("right")}
                 className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
               >
@@ -1137,7 +1278,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             </div>
 
             <p className="text-center text-[11px] text-neutral-500 font-medium">
-              Arrow keys / WASD, swipe, or tap D-Pad · Outer rim blocks · Void ✕ resets face · Match hole posture to drop in
+              Arrow keys / WASD, swipe, or tap D-Pad · Walls block · Obstacles (✕) reset position · Match the hole to drop in
             </p>
           </div>
         )}

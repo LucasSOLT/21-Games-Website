@@ -113,117 +113,84 @@ export function GameLogo({
     case "rhymes": {
       return (
         <svg {...svgProps}>
-          {/* Nine's Main Chat Bubble with hard-offset shadow */}
-          <path
-            d="M 18 16 H 56 C 62 16 66 20 66 26 V 46 C 66 52 62 56 56 56 H 22 L 11 67 L 14 56 C 10 56 7 52 7 46 V 26 C 7 20 10 16 18 16 Z"
+          {/* Minimalist NYT Games Editorial Card with crisp offset ink shadow */}
+          <rect
+            x="12"
+            y="12"
+            width="60"
+            height="60"
+            rx="14"
             fill={INK}
-            transform="translate(2.5, 2.5)"
           />
-          <path
-            d="M 18 16 H 56 C 62 16 66 20 66 26 V 46 C 66 52 62 56 56 56 H 22 L 11 67 L 14 56 C 10 56 7 52 7 46 V 26 C 7 20 10 16 18 16 Z"
+          <rect
+            x="9"
+            y="9"
+            width="60"
+            height="60"
+            rx="14"
             fill={WHITE}
             stroke={INK}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
+            strokeWidth="2.6"
           />
 
-          {/* Bold golden numeral 9 inside Nine's bubble */}
+          {/* Left NYT Gold Badge housing bold geometric numeral 9 */}
+          <rect
+            x="15"
+            y="16"
+            width="24"
+            height="46"
+            rx="7"
+            fill={YELLOW}
+            stroke={INK}
+            strokeWidth="2.4"
+          />
+          {/* Bold geometric numeral 9 */}
           <circle
-            cx="26"
+            cx="27"
             cy="31"
-            r="6"
+            r="6.2"
+            fill={WHITE}
+            stroke={INK}
+            strokeWidth="2.6"
+          />
+          <path
+            d="M 33.2 31 V 45 C 33.2 50 29.5 52.5 25 52.5 C 22.5 52.5 21 51.2 20.2 49.5"
+            fill="none"
+            stroke={INK}
+            strokeWidth="2.6"
+            strokeLinecap="round"
+          />
+
+          {/* Right: 3 minimalist stepped linear rhyme-chain bars */}
+          <rect
+            x="44"
+            y="18"
+            width="19"
+            height="10"
+            rx="4"
             fill={YELLOW}
             stroke={INK}
-            strokeWidth="2.4"
+            strokeWidth="2.2"
           />
-          <path
-            d="M 32 31 V 42 C 32 45 28 46 24.5 44"
-            fill="none"
+          <rect
+            x="44"
+            y="34"
+            width="19"
+            height="10"
+            rx="4"
+            fill={GREEN}
             stroke={INK}
-            strokeWidth="2.5"
-            strokeLinecap="round"
+            strokeWidth="2.2"
           />
-
-          {/* Acoustic rhyming soundwaves radiating from 9 */}
-          <path
-            d="M 37 28 A 6 6 0 0 1 37 38"
-            fill="none"
-            stroke={PURPLE}
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 42 24 A 12 12 0 0 1 42 42"
-            fill="none"
-            stroke={YELLOW}
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 47 21 A 18 18 0 0 1 47 45"
-            fill="none"
-            stroke={PURPLE}
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
-
-          {/* Clue blanks prompt: _ _ _ _ */}
-          <path
-            d="M 18 51 H 24 M 28 51 H 34 M 38 51 H 44 M 48 51 H 54"
+          <rect
+            x="44"
+            y="50"
+            width="19"
+            height="10"
+            rx="4"
+            fill={PURPLE}
             stroke={INK}
-            strokeWidth="2"
-            strokeLinecap="round"
-            opacity="0.4"
-          />
-
-          {/* Active Reply / Typing Indicator Bubble at top-right */}
-          <g>
-            <rect
-              x="44.5"
-              y="6.5"
-              width="28"
-              height="16"
-              rx="8"
-              fill={INK}
-            />
-            <rect
-              x="43"
-              y="5"
-              width="28"
-              height="16"
-              rx="8"
-              fill={PURPLE}
-              stroke={INK}
-              strokeWidth="2.2"
-            />
-            <path
-              d="M 48 20 L 45 24 L 52 20 Z"
-              fill={PURPLE}
-              stroke={INK}
-              strokeWidth="2.2"
-              strokeLinejoin="round"
-            />
-            {/* 3 typing indicator dots */}
-            <circle cx="51" cy="13" r="2" fill={WHITE} />
-            <circle cx="57" cy="13" r="2.2" fill={WHITE} />
-            <circle cx="63" cy="13" r="2" fill={WHITE} />
-          </g>
-
-          {/* Nine avatar badge at bottom-left */}
-          <circle
-            cx="9"
-            cy="69"
-            r="6"
-            fill={YELLOW}
-            stroke={INK}
-            strokeWidth="2"
-          />
-          <path
-            d="M 7 71 V 67 L 11 71 V 67"
-            stroke={INK}
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+            strokeWidth="2.2"
           />
         </svg>
       );
@@ -1220,7 +1187,7 @@ export function GameLogo({
     case "move-2": {
       return (
         <svg {...svgProps}>
-          {/* Subtle isometric ground grid lines */}
+          {/* Subtle isometric cube grid lines */}
           <path
             d="M 8 74 H 72 M 20 74 L 38 56 M 42 74 L 60 56 M 29 65 H 67"
             stroke={INK}
@@ -1229,7 +1196,7 @@ export function GameLogo({
             opacity="0.2"
           />
 
-          {/* Red Target Tile at top-right (landing zone) */}
+          {/* Green Final Goal Hole at top-right */}
           <g>
             <rect
               x="52.5"
@@ -1245,28 +1212,29 @@ export function GameLogo({
               width="22"
               height="22"
               rx="4"
-              fill="#EF4444"
+              fill={GREEN}
               stroke={INK}
               strokeWidth="2.5"
             />
-            {/* Concentric bullseye target rings */}
-            <circle
-              cx="61"
-              cy="21"
-              r="6.5"
-              fill="none"
-              stroke={WHITE}
-              strokeWidth="2"
+            {/* Recessed inner hole frame */}
+            <rect
+              x="54.5"
+              y="14.5"
+              width="13"
+              height="13"
+              rx="2.5"
+              fill="#15803D"
+              stroke={INK}
+              strokeWidth="1.8"
             />
-            <circle cx="61" cy="21" r="2.5" fill={WHITE} />
           </g>
 
-          {/* Dynamic tumbling / rolling arc toward red target */}
+          {/* Dynamic rolling arc toward green goal hole */}
           <path
-            d="M 35 28 C 35 14 45 13 48 18"
+            d="M 34 26 C 36 14 45 13 48 18"
             fill="none"
             stroke={INK}
-            strokeWidth="2.6"
+            strokeWidth="2.5"
             strokeDasharray="3 2"
             strokeLinecap="round"
           />
@@ -1275,88 +1243,67 @@ export function GameLogo({
             fill={INK}
           />
 
-          {/* Isometric Domino Shadow */}
+          {/* 3D Stacked 2x1 Block Shadow */}
           <path
-            d="M 10 70 L 32 60 L 50 48 L 40 68 Z"
+            d="M 10 70 L 28 70 L 36 62 L 18 62 Z"
             fill={INK}
-            opacity="0.25"
+            opacity="0.22"
           />
 
-          {/* 3D Isometric 1x1x2 Domino Block */}
-          {/* Trailing Cube Unit (Cube 2 - Gold) */}
+          {/* 3D Stacked 2x1 Block (Two unit cubes stacked vertically — zero pips) */}
+          {/* Bottom Cube Unit */}
           <g>
             {/* Front Face */}
             <rect
-              x="8"
-              y="50"
-              width="18"
-              height="18"
+              x="10"
+              y="48"
+              width="20"
+              height="20"
               rx="2"
               fill={YELLOW}
               stroke={INK}
               strokeWidth="2.4"
             />
-            {/* Top Face */}
+            {/* Right Extruded Wall */}
             <path
-              d="M 8 50 L 16 42 H 34 L 26 50 Z"
-              fill="#FDE047"
-              stroke={INK}
-              strokeWidth="2.4"
-              strokeLinejoin="round"
-            />
-            {/* Right Face */}
-            <path
-              d="M 26 50 L 34 42 V 60 L 26 68 Z"
+              d="M 30 48 L 38 40 V 60 L 30 68 Z"
               fill="#CA8A04"
               stroke={INK}
               strokeWidth="2.4"
               strokeLinejoin="round"
             />
-            {/* Domino pips on top face */}
-            <circle cx="18" cy="46" r="1.5" fill={INK} />
-            <circle cx="24" cy="46" r="1.5" fill={INK} />
           </g>
 
-          {/* Leading Cube Unit (Cube 1 - Vibrant Green) */}
+          {/* Upper Stacked Cube Unit */}
           <g>
             {/* Front Face */}
             <rect
-              x="22"
-              y="38"
-              width="18"
-              height="18"
+              x="10"
+              y="28"
+              width="20"
+              height="20"
               rx="2"
-              fill={GREEN}
+              fill={YELLOW}
               stroke={INK}
               strokeWidth="2.4"
             />
-            {/* Top Face */}
+            {/* Top Bevel Face */}
             <path
-              d="M 22 38 L 30 30 H 48 L 40 38 Z"
-              fill="#4ADE80"
+              d="M 10 28 L 18 20 H 38 L 30 28 Z"
+              fill="#FEF08A"
               stroke={INK}
               strokeWidth="2.4"
               strokeLinejoin="round"
             />
-            {/* Right Face */}
+            {/* Right Extruded Wall */}
             <path
-              d="M 40 38 L 48 30 V 48 L 40 56 Z"
-              fill="#16A34A"
+              d="M 30 28 L 38 20 V 40 L 30 48 Z"
+              fill="#CA8A04"
               stroke={INK}
               strokeWidth="2.4"
               strokeLinejoin="round"
             />
-            {/* Single center pip on leading cube */}
-            <circle cx="35" cy="34" r="1.8" fill={INK} />
           </g>
-
-          {/* Seam line between the 2 domino cubes */}
-          <path
-            d="M 26 50 L 34 42"
-            stroke={INK}
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
         </svg>
       );
     }

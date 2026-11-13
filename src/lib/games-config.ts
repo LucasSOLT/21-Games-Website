@@ -177,9 +177,9 @@ export const ALL_GAMES: GameConfig[] = [
     slug: "move-2",
     showCreate: false,
     isPlayable: true,
-    tagline: "5×5 3D cube domino puzzle",
+    tagline: "5×5 3D cube block puzzle",
     description:
-      "Roll the 3D 2×1 die across 6 tilted 5×5 cube faces and drop into each recessed hole.",
+      "Move the 3D 2×1 block across 6 5×5 cube faces and drop into each hole.",
   },
   {
     name: "1 Win",

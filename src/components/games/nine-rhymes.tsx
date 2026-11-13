@@ -42,6 +42,7 @@ import {
   buildTranscript,
   draftToPuzzle,
   formatScore,
+  getRhymeTargetForRound,
   matchesAnswer,
   pointsForGuess,
   totalScore,
@@ -497,7 +498,9 @@ function NineRhymesBoard({
             className="shrink-0 rounded-full bg-black text-white px-2.5 py-1 text-[11px] font-black tracking-wide"
             data-testid="nine-starter-badge"
           >
-            Starter: {puzzle.starterWord.toUpperCase()}
+            {results.length === 0
+              ? `Starter: ${puzzle.starterWord.toUpperCase()}`
+              : `Rhymes with: ${getRhymeTargetForRound(puzzle, Math.min(results.length, NINE_RHYMES_CLUE_COUNT - 1))}`}
           </span>
         </div>
 

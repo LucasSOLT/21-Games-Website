@@ -104,8 +104,34 @@ kit.eq(eng.buildReceiptEmojis(results as never), "🟩🟨⬜⬜⬜⬜⬜⬜⬜"
 const tr0 = eng.buildTranscript(good, { results: [], currentHinted: false } as never);
 kit.assert(tr0[0].text === `Here's today's word: ${good.starterWord.toUpperCase()}`, "intro bubble");
 kit.assert(tr0.some((m: { kind: string }) => m.kind === "prompt"), "first prompt shown");
+kit.eq(
+  eng.getRhymeTargetForRound(good, 0),
+  good.starterWord.toUpperCase(),
+  "Round 1 rhymes with the starter word"
+);
+kit.eq(
+  eng.getRhymeTargetForRound(good, 1),
+  good.clues[0].answer.toUpperCase(),
+  "Round 2 rhymes with Round 1's answer"
+);
+kit.assert(
+  tr0[1]!.text.includes(`Word 1 of 9 · Rhymes with ${good.starterWord.toUpperCase()}`),
+  "Round 1 prompt bubble shows 'Rhymes with <STARTER>'"
+);
 const full = Array.from({ length: 9 }, () => ({ outcome: "correct", guess: "x", hinted: false, points: 1 }));
 const trF = eng.buildTranscript(good, { results: full, currentHinted: false } as never);
+kit.assert(
+  [1, 2, 3, 4, 5, 6, 7, 8].every((i) => {
+    const promptMsg = trF.find((m: { id: string }) => m.id === `q${i}`);
+    return Boolean(
+      promptMsg &&
+        promptMsg.text.includes(
+          `Word ${i + 1} of 9 · The next word rhymes with ${good.clues[i - 1]!.answer.toUpperCase()}`
+        )
+    );
+  }),
+  "Rounds 2..9 prompt bubbles linearly say 'The next word rhymes with <previous word>'"
+);
 kit.assert(trF[trF.length - 1].text === "That's all 9! You scored 9 / 9 today.", "summary bubble");
 const share = eng.buildShareText({ puzzleNumber: 12, results: full as never });
 kit.assert(share.startsWith("9 Rhymes #12\n9 / 9\n"), "share text header + score");

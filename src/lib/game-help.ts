@@ -36,10 +36,10 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "9-rhymes": {
     summary:
-      "Text with Nine: 9 daily clues that all share ONE exact perfect rhyme sound.",
-    headline: "Nine Rhymes, One Sound",
+      "Text with Nine: 9 daily clues where each new word rhymes with the word right before it.",
+    headline: "Linear 9-Word Rhyme Chain",
     rules: [
-      "Start from the pinned **Starter word**; every answer rhymes with it.",
+      "**Word 1** rhymes with today's **Starter word**, and each new word rhymes with the **previous word** in the chain.",
       "Each prompt shows the exact **letter count**; you get **1 guess** per word.",
       "**New hint** costs 0.5 pts (1× per round); **Reveal answer** scores 0.",
       "Score out of 9: 🟩 full point · 🟨 half point · ⬜ miss.",
@@ -87,13 +87,14 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "move-2": {
     summary:
-      "Roll the 3D 1×1×2 die across six tilted 5×5 cube faces and drop into each face's recessed hole.",
-    headline: "Drop Into All 6 Recessed Cube Holes",
+      "Move the 3D 2×1 block across six 5×5 cube faces and drop into each face's hole.",
+    headline: "Drop the 2×1 Block Into All 6 Holes",
     rules: [
-      "Roll with **Arrow keys / WASD**, swipe, or the on-screen **D-Pad**.",
-      "Match each face's **Recessed Hole** posture (**1×1 Upright** or **1×2 / 2×1 Flat**) to drop in and rotate to the next cube face.",
-      "The **Raised Outer Rim** gently blocks edge rolls; interior **✕ Void Hazards** reset the current face.",
-      "Conquer all 6 faces and beat **Par** for ⭐⭐⭐.",
+      "Move with **Arrow keys / WASD**, swipe, or the on-screen **D-Pad**.",
+      "When the block is **standing (1×1)**, two blocks are stacked on top of each other; tipping it lays the **2×1 block flat** across two tiles.",
+      "Line up the block with each face's **Hole** (**1×1 Standing** or **1×2 / 2×1 Flat**) to drop in and move to the next face.",
+      "**Walls** block your movement. Hitting an **Obstacle (✕)** resets your position on the current face.",
+      "Drop into the **green goal hole** on Face 6 and beat **Par** for ⭐⭐⭐.",
     ],
   },
   "1-win": {

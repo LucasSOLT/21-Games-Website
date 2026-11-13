@@ -136,11 +136,15 @@
 
 ### Game #9 — `9 Rhymes` (iMessage-Style Text Chat with "Nine") — Q12 to Q19
 - **Route**: `/games/9-rhymes` | **Archive**: `/games/9-rhymes/archive`
-- **Visual Interface**:
+- **Visual Interface & Minimalist NYT-Styled Logo**:
   - Minimalist NYT-meets-Apple-iMessage chat view.
-  - **Top Contact Header (Q17)**: Shows **"Nine"** with the `9 Rhymes` mini emblem, the pinned **Starter Word** badge (`Starter: TIME`), and a live uncluttered status pill: `Word 3 of 9 · Score: 2.5 / 9`.
-- **Rhyme Family & Word-Length Rules (Q12 & Q13)**:
-  - **One Exact Perfect Rhyme Sound (Q12)**: All 10 words in a game (1 Starter Word + 9 target answers) share **one exact Perfect Rhyme sound** (including single- and multi-syllable perfect rhymes like *Time → Dime → Chime → Sublime → Overtime → Paradigm*).
+  - **Minimalist NYT-Styled `9 Rhymes` Logo (`game-logo.tsx`)**: Clean geometric card emblem with `#171717` ink border and offset shadow, pairing a bold geometric numeral `9` inside an NYT Gold (`#F9D423`) tile with 3 stepped horizontal rhyme-chain bars in Gold (`#F9D423`), Emerald (`#2ECC71`), and Lavender (`#DAA8D0`).
+  - **Top Contact Header (Q17)**: Shows **"Nine"** with the `9 Rhymes` mini emblem, the active rhyme badge (`Starter: CAR` on Word 1, then `Rhymes with: FAR` on Word 2, etc.), and a live uncluttered status pill: `Word 3 of 9 · Score: 2.5 / 9`.
+- **Linear Word-to-Word Rhyme Progression & Word-Length Rules (Q12 & Q13)**:
+  - **One Exact Perfect Rhyme Sound + Linear Chain Progression (Q12)**: All 10 words in a game (1 Starter Word + 9 target answers) share **one exact Perfect Rhyme sound**, and **each new word prompts the player to rhyme with the word immediately before it**:
+    - Bubble 0 introduces the starter word: `"Here's today's word: CAR"`.
+    - **Word 1 of 9** rhymes with the Starter Word (`"Word 1 of 9 · Rhymes with CAR"`).
+    - **Words 2 through 9** prompt the player to rhyme with the preceding target word (`"Word 2 of 9 · The next word rhymes with FAR"`, `"Word 3 of 9 · The next word rhymes with STAR"`, ..., `"Word 9 of 9 · The next word rhymes with [Word 8]"`), giving the game a linear chain progression feel.
   - **Exact Letter-Count Clue in Every Blank (Q13)**: Nine's fill-in-the-blank prompt always displays spaced underscores matching the exact letter count plus a badge (e.g., `"Finish the sentence: 'Wow, this guy split on a _ _ _ _ (4 letters).'"`) so homophones/near-spellings (`RIME (4)` vs `RHYME (5)`) are 100% unambiguous.
 - **Chat Pacing & Typing Indicator (Q16)**:
   - Nine starts the chat with Bubble 1: `"Here's today's word: TIME"` followed immediately by Bubble 2 (Round 1's fill-in-the-blank sentence).
@@ -184,8 +188,9 @@
 
 ### Game #6 — `6 Pics` (6-Piece Jigsaw Image-Naming Game) — Q27 to Q33
 - **Route**: `/games/6-pics` | **Archive**: `/games/6-pics/archive`
-- **Clean Top Navigation Rule (All Games & Archives)**:
+- **Clean Top Navigation & Mobile Header Ellipsis Truncation Rule (All Games & Archives)**:
   - Individual game headers (`GameShell`) and archive headers (`GameArchiveView`) **never** render a multi-game horizontal pill switcher bar (which crowds centered titles with 9 live games). Players return to the homepage via the `SOL GaMES` mark or `← All Games` button to switch games.
+  - On narrow mobile viewports (`320px–430px`), `GameShell` gives left and right button clusters `shrink-0 sm:flex-1` and the center title container `flex-1 min-w-0 overflow-hidden` with `truncate min-w-0` on `<h1>` so longer game titles (`"Eightfold Echo"`, `"17 Syllables"`, etc.) cleanly truncate with an ellipsis (`"Eightfold E…"`) next to `#puzzleNumber` without ever colliding with header controls.
 - **Visible Overarching Theme + 6 Jigsaw-Covered Images (Q27 & Q28)**:
   - The puzzle's **Overarching Theme** (e.g., `Theme: Hawaii`) is **visible at the top** throughout gameplay to guide the player's guesses.
   - Players progress sequentially through **6 focused `4:3` images** (`Pic 1 of 6` → `Pic 6 of 6`), trying to **guess the name of EACH image** while revealing as few puzzle pieces as possible.
@@ -229,14 +234,19 @@
   - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
   - **100% Auto-Generated Monthly Batches**: Built-in deterministic generator + backtracking Math Solver (`src/lib/generators/four-score-generator.ts`) guarantees every generated puzzle has a verified whole-number full-board solution to `80`.
 
-### Game #2 — `Move Two` (`Move 2` — 5×5 2.5D Tilted Cube Domino Spatial Game) — Q41 to Q45
+### Game #2 — `Move Two` (`Move 2` — NYT-Styled 5×5 2.5D Tilted Cube & 3D Stacked `2×1` Block Game) — Q41 to Q45
 - **Route**: `/games/move-2` | **Archive**: `/games/move-2/archive`
-- **Visual Perspective — 2.5D Perspective-Tilted (`~25°`) `5×5` Active Face + True 3D Extruded Die + Mini 3D Isometric Cube HUD (Q41)**:
-  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside a **2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a **Raised 3D Cube Rim**.
-  - Renders a **True 3D Extruded `1×1×2` Domino/Die** with shaded front thickness, top bevel, and pips—standing `2×` tall when `UPRIGHT` (`1×1` footprint) and lying `1×` tall across 2 adjacent cells when `FLAT_H` or `FLAT_V`.
-  - Top-right HUD renders a clean **mini 3D isometric Rubik's-style cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered, paired with a `localStorage`-persisted **Web Audio SFX mute toggle**.
-- **3D Domino (`1×1×2`) Bloxorz Rolling Physics (Q42)**:
-  - The domino occupies either:
+- **NYT Games Editorial Aesthetic + 2.5D Perspective-Tilted (`~25°`) `5×5` Cube + 3D Stacked `2×1` Block (Q41)**:
+  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside an **NYT Games-styled 2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a crisp warm off-white cube rim (`#F7F7F5` with `#111111` ink borders and 3D depth lip), clean white floor tiles, solid ink walls, and subtle obstacle tiles. The game board is a **cube** (never a die/dice).
+  - **3D Stacked `2×1` Block (Zero Domino/Die Pips)**:
+    - The moving piece is a clean NYT Gold (`#F7DA21`) **3D `2×1` block** made of two connected unit cubes—with **zero dice pips or domino dots**:
+      - When **standing (`UPRIGHT`, `1×1` footprint)**: visually rendered as **two 3D blocks stacked vertically on top of each other** (a bottom cube resting on the tile + a distinct horizontal 3D seam + an upper cube stacked above it with a bright top face `#FEF08A` and shaded front/side 3D walls `#CA8A04`).
+      - When **lying flat (`FLAT_H` `1×2` or `FLAT_V` `2×1`)**: visually rendered as **two connected 3D unit blocks lying side-by-side** across the two occupied grid squares with a crisp center seam, top bevel, and 3D front thickness lip.
+  - **Deliberate, Visible 3D Rolling Physics Animation (`~320ms`)**:
+    - Every move animates the `2×1` block tipping/rolling smoothly across the `5×5` grid over **`~320ms` (`cubic-bezier(0.22, 1, 0.36, 1)`)** with a mid-roll 3D tilt/arc so players clearly see how standing (`1×1`) tips into flat (`2×1`) and flat rolls or stands up. Hole drops (`320ms`) and cube face rotations (`520ms`) are similarly paced.
+  - Top-right HUD renders a clean **mini 3D isometric cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered, paired with a `localStorage`-persisted **Web Audio SFX mute toggle**.
+- **3D `2×1` Block Rolling Physics (Q42)**:
+  - The `2×1` block occupies either:
     - **`UPRIGHT` (`1×1` footprint on `(r, c)`)**: Moving in direction `(dr, dc)` tips it over into a `FLAT` (`2×1`) state covering `(r + dr, c + dc)` and `(r + 2*dr, c + 2*dc)`.
     - **`FLAT_H` (`1×2` horizontal footprint on `(r, c)` and `(r, c+1)`)**:
       - Moving Left (`←`) stands it `UPRIGHT` on `(r, c-1)`; moving Right (`→`) stands it `UPRIGHT` on `(r, c+2)`.
@@ -244,15 +254,21 @@
     - **`FLAT_V` (`2×1` vertical footprint on `(r, c)` and `(r+1, c)`)**:
       - Moving Up (`↑`) stands it `UPRIGHT` on `(r-1, c)`; moving Down (`↓`) stands it `UPRIGHT` on `(r+2, c)`.
       - Moving Left (`←`) or Right (`→`) rolls it sideways staying `FLAT_V` on `(r..r+1, c-1)` or `(r..r+1, c+1)`.
-- **Per-Face Coded Spawn (`face.start`), Recessed Target Holes (`face.hole`), Raised Cube Rim & Interior Void Hazards (Q43 & Q44)**:
-  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Spawn State** (`face.start`) and a **Recessed Target Hole** (`face.hole`: either a `1×1 UPRIGHT` shaft or a `2×1 FLAT_H` / `FLAT_V` trench).
-  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The 3D die only drops into `face.hole` when its posture and footprint **exactly match** the hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile trench; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the rim). Dropping into the hole on `Faces 1–5` animates the die sinking into the shaft/trench, rotates the 2.5D cube to `Face k+1`, and spawns the die at that face's coded `start`. Dropping into the final hole on `Face 6` wins the game!
-  - **Raised Cube Rim (Outer Edges)**: Rolling against any outer border of the `5×5` face (or a solid `"wall"` block) is blocked by the raised rim (`{ kind: "bump" }`) with a gentle bump shake and low thud SFX—**never** resetting the face or adding a move penalty.
-  - **Interior Dark Void Hazards (`✕` tiles)**: Touching an interior `"hazard"` tile increments moves by `+1`, plays the hazard buzz SFX, and resets the die to the current face's coded `start` state (players also have unlimited `"Undo Move"` and `"Reset Face"` buttons).
+- **Per-Face Coded Start (`face.start`), Recessed Target Holes (`face.hole`), Green Final Goal Hole on Face 6 & Generic Copy (Q43 & Q44)**:
+  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Start State** (`face.start`) and a **Recessed Target Hole** (`face.hole`: either a `1×1 UPRIGHT` hole or a `2×1 FLAT_H` / `FLAT_V` hole).
+  - **Hole Color Coding — Emerald Green Final Goal on Face 6**:
+    - Faces `1–5` render their recessed transition hole in **Sky/Cyan (`#0EA5E9`)** (`HOLE`).
+    - **Face 6 (`face === 5`) renders the final winning hole in Emerald Green (`#2ECC71` / `emerald-500`)** (`GOAL`) across the board, HUD, `/admin` studio preview, and game logo.
+  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The `2×1` block only drops into `face.hole` when its posture and footprint **exactly match** the hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile hole; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the surface). Dropping into the hole on `Faces 1–5` animates the block sinking into the hole, rotates the cube to `Face k+1`, and places the block at that face's coded `start`. Dropping into the green goal hole on `Face 6` wins the game!
+  - **Clean, Generic Player-Facing Copy (How to Play & Toasts)**:
+    - Outer border or wall block collision (`{ kind: "bump" }`): shows **`"Blocked by a wall."`** with a gentle bump shake and zero move penalty.
+    - Obstacle tile collision (`{ kind: "hazard" }`, `✕` tiles): increments moves by `+1`, resets the block to the current face's start tile, and shows **`"You hit an obstacle! Resetting position."`**
+    - Face hole transition: shows **`"Nice! Moving to Face X of 6."`**
+    - Reset Face button: shows **`"Position reset."`**
 - **100% Pre-Generated 2026–2027 Daily Bank, Interactive 5×5 `/admin` Studio & Web Audio SFX (Q44 & Q45)**:
   - `src/lib/generators/move-two-generator.ts` uses per-face (`solveMoveTwoFace`) and 6-face (`solveMoveTwo`) **Breadth-First Search (BFS) solvers** to generate `5×5` layouts (`~5–8` moves/face, `~30–42` total Par across 6 faces) and pre-populate unique daily puzzles across all of 2026 and 2027.
-  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle hazards, move/change per-face `start` and `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
-  - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, touch swipe gestures, and an on-screen D-Pad on mobile, with synthesized Web Audio API sound effects (`src/lib/move-two-audio.ts`: roll clack, rim bump thud, hole drop + cube rotation whoosh, hazard reset buzz, and Face 6 victory chord). Final score compares **Total Moves vs. Par** (`Solved in 34 moves · Par: 34 · ⭐⭐⭐`).
+  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle obstacles, move/change per-face `start` and `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
+  - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, touch swipe gestures, and an on-screen D-Pad on mobile, with synthesized Web Audio API sound effects (`src/lib/move-two-audio.ts`: roll clack, wall bump thud, hole drop + cube rotation whoosh, obstacle reset buzz, and Face 6 victory chord). Final score compares **Total Moves vs. Par** (`Solved in 34 moves · Par: 34 · ⭐⭐⭐`).
 
 ### Game #1 — `1 Win` (Real-Time Community Gratitude Leaderboard) — Q46 to Q48
 - **Route**: `/games/1-win` | **Archive**: `/games/1-win/archive`

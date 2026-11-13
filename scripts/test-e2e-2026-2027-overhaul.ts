@@ -1108,4 +1108,39 @@ kit.assert(
   "[T4·4] .gitignore excludes .agents/ directory from git tracking"
 );
 
+// Verify Mobile Header Ellipsis Truncation, Minimalist 9 Rhymes Logo, Linear 9 Rhymes Chain & Move Two NYT 3D Stacked Block Overhaul
+const gameShellSrc = readSrc("src/components/game-shell.tsx");
+kit.assert(
+  gameShellSrc.includes('data-testid="game-shell-title"') &&
+    gameShellSrc.includes("flex-1 min-w-0 overflow-hidden") &&
+    gameShellSrc.includes("truncate min-w-0"),
+  "[T4·5] GameShell header center title uses flex-1 min-w-0 overflow-hidden and truncate min-w-0 for clean mobile ellipsis truncation"
+);
+
+const gameLogoSrc = readSrc("src/components/game-logo.tsx");
+kit.assert(
+  gameLogoSrc.includes("Minimalist NYT Games Editorial Card") &&
+    gameLogoSrc.includes("Green Final Goal Hole at top-right") &&
+    !gameLogoSrc.includes("Domino pips on top face"),
+  "[T4·6] game-logo.tsx renders minimalist NYT Games 9 Rhymes emblem and Move Two green goal hole with 3D stacked 2x1 block (no domino pips)"
+);
+
+const nineEngineSrc = readSrc("src/lib/nine-rhymes-engine.ts");
+kit.assert(
+  nineEngineSrc.includes("getRhymeTargetForRound") &&
+    nineEngineSrc.includes("The next word rhymes with "),
+  "[T4·7] nine-rhymes-engine.ts prompts each new word to rhyme linearly with the word immediately before it"
+);
+
+kit.assert(
+  m2GameSrc.includes('data-testid="move-two-3d-block"') &&
+    m2GameSrc.includes("320ms") &&
+    m2GameSrc.includes("Blocked by a wall.") &&
+    m2GameSrc.includes("You hit an obstacle! Resetting position.") &&
+    m2GameSrc.includes("#2ECC71") &&
+    !m2GameSrc.includes("Dark void hazard"),
+  "[T4·8] move-two.tsx renders NYT-styled cube, 3D stacked 2x1 block with 320ms physics roll, green Face 6 goal hole, and generic copy"
+);
+
 kit.finish();
+

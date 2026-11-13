@@ -415,8 +415,13 @@ kit.assert(
   gameSrc.includes("perspective") &&
     gameSrc.includes("rotateX(25deg)") &&
     gameSrc.includes("grid-cols-5") &&
-    gameSrc.includes("move-two-mute-toggle"),
-  "Move Two renders 2.5D perspective-tilted (rotateX(25deg)) 5×5 stage and SFX mute toggle"
+    gameSrc.includes("move-two-mute-toggle") &&
+    gameSrc.includes("move-two-3d-block") &&
+    gameSrc.includes("320ms") &&
+    gameSrc.includes("Blocked by a wall.") &&
+    gameSrc.includes("You hit an obstacle! Resetting position.") &&
+    gameSrc.includes("#2ECC71"),
+  "Move Two renders NYT-styled 2.5D 5×5 cube, 3D stacked 2×1 block with 320ms physics roll, green Face 6 goal hole, and generic copy"
 );
 
 const studioSrc = fs.readFileSync(

@@ -118,9 +118,9 @@ export function GameShell({
     <div className="min-h-screen bg-[#FCFCFD] text-black flex flex-col">
       {/* Top Game Navigation Bar */}
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
-        <div className="mx-auto max-w-6xl px-2 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1.5 sm:gap-3">
+        <div className="mx-auto max-w-6xl px-1.5 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1 sm:gap-3">
           {/* Left: Brand Mark + Back Home */}
-          <div className="flex items-center gap-1.5 sm:gap-3 sm:flex-1 min-w-0">
+          <div className="flex items-center gap-1 sm:gap-3 shrink-0 sm:flex-1 min-w-0">
             <Link
               href="/"
               className="group flex items-center shrink-0 transition-transform hover:scale-105 active:scale-95"
@@ -145,28 +145,32 @@ export function GameShell({
             </Link>
           </div>
 
-          {/* Center: Title + Puzzle # + Date */}
-          <div className="flex flex-col items-center text-center min-w-0 shrink-0">
-            <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2">
-              <h1 className="font-headline font-black text-sm min-[375px]:text-base sm:text-2xl tracking-tight whitespace-nowrap">
+          {/* Center: Title + Puzzle # + Date (truncates cleanly with ellipsis on narrow mobile) */}
+          <div className="flex flex-col items-center justify-center text-center flex-1 min-w-0 overflow-hidden px-0.5 sm:px-2">
+            <div className="flex items-center justify-center gap-1 sm:gap-2 max-w-full min-w-0">
+              <h1
+                data-testid="game-shell-title"
+                title={gameTitle}
+                className="font-headline font-black text-xs min-[375px]:text-sm sm:text-2xl tracking-tight truncate min-w-0"
+              >
                 {gameTitle}
               </h1>
               {puzzleNumber > 0 && (
                 <Badge
                   variant="outline"
-                  className="font-mono text-[10px] min-[375px]:text-[11px] sm:text-xs px-1 min-[375px]:px-1.5 sm:px-2.5 py-0 sm:py-0.5 shrink-0"
+                  className="font-mono text-[10px] sm:text-xs px-1 sm:px-2 py-0 sm:py-0.5 shrink-0"
                 >
                   #{puzzleNumber}
                 </Badge>
               )}
             </div>
-            <p className="hidden sm:block text-[11px] sm:text-xs text-gray-500 truncate">
+            <p className="hidden sm:block text-[11px] sm:text-xs text-gray-500 truncate max-w-full">
               {formatLongDate(dateKey)} · By {author}
             </p>
           </div>
 
           {/* Right: Action Slot + Archive / Stats / Help / Account */}
-          <div className="flex items-center justify-end gap-1 sm:gap-2 sm:flex-1 min-w-0">
+          <div className="flex items-center justify-end gap-1 sm:gap-2 shrink-0 sm:flex-1 min-w-0">
             {headerRightSlot && (
               <div className={cn("items-center shrink-0", unifiedHeader ? "flex" : "hidden sm:flex")}>
                 {headerRightSlot}

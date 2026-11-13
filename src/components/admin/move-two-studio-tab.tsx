@@ -411,13 +411,13 @@ export function MoveTwoStudioTab({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <Badge variant="green" className="mb-1">
-            🎲 Move Two 5×5 Studio
+            🧊 Move Two 5×5 Studio
           </Badge>
           <h3 className="font-headline font-black text-xl">
-            Interactive 6-Face 5×5 Cube Layout &amp; Recessed Hole Editor
+            Interactive 6-Face 5×5 Cube Layout &amp; Hole Editor
           </h3>
           <p className="text-xs text-gray-600">
-            Pre-filled for {targetDate} with BFS-verified 5×5 faces. Click any tile to edit hazards, spawn points, or recessed target holes.
+            Pre-filled for {targetDate} with BFS-verified 5×5 faces. Click any tile to edit obstacles, start positions, or target holes.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -489,7 +489,7 @@ export function MoveTwoStudioTab({
           </span>
           {(
             [
-              { id: "hazard", label: "Toggle Hazard (✕)" },
+              { id: "hazard", label: "Toggle Obstacle (✕)" },
               { id: "start", label: "Set Start (S)" },
               { id: "hole", label: "Set Hole (H)" },
             ] as const
@@ -533,7 +533,7 @@ export function MoveTwoStudioTab({
             >
               <div className="flex items-center justify-between text-xs font-black uppercase">
                 <span>
-                  Face {face.index + 1} {isFinal ? "· Final Goal" : `→ Face ${face.index + 2}`}
+                  Face {face.index + 1} {isFinal ? "· Green Goal" : `→ Face ${face.index + 2}`}
                 </span>
                 <span
                   className={cn(
@@ -550,7 +550,7 @@ export function MoveTwoStudioTab({
               </div>
 
               {/* 5×5 Grid */}
-              <div className="grid grid-cols-5 gap-1 bg-neutral-900 p-1.5 rounded-xl border-2 border-black">
+              <div className="grid grid-cols-5 gap-1 bg-[#EAE8E1] p-1.5 rounded-xl border-2 border-black">
                 {GRID_INDICES.map((r) =>
                   GRID_INDICES.map((c) => {
                     const key = `${r},${c}`;
@@ -569,13 +569,13 @@ export function MoveTwoStudioTab({
                           cell === "wall"
                             ? "bg-neutral-800 border-black text-white"
                             : cell === "hazard"
-                            ? "bg-neutral-950 border-red-500 text-red-500"
+                            ? "bg-amber-50 border-neutral-800 text-neutral-900"
                             : isStart
-                            ? "bg-[#b6df52] border-black text-black"
+                            ? "bg-[#F7DA21] border-black text-black"
                             : isHole
                             ? isFinal
-                              ? "bg-red-600 border-black text-white"
-                              : "bg-emerald-600 border-black text-white"
+                              ? "bg-[#2ECC71] border-black text-black"
+                              : "bg-sky-600 border-black text-white"
                             : "bg-white border-neutral-300 text-neutral-400 hover:bg-neutral-100"
                         )}
                       >
