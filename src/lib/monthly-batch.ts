@@ -282,7 +282,7 @@ function verifySingleGamePayload(
         if (!solved.solvable || solved.minMoves !== p.par) {
           errors.push(`BFS par mismatch (${solved.minMoves} vs ${p.par})`);
         }
-        solverDetail = `6-face BFS Par ${p.par} verified`;
+        solverDetail = `Bloxorz 6×6/8×8/10×10 BFS Par ${solved.stages.easy.minMoves}/${solved.stages.medium.minMoves}/${solved.stages.hard.minMoves} verified`;
       }
       break;
     }

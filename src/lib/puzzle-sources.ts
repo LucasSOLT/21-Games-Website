@@ -53,9 +53,8 @@ import {
   type FourScorePuzzle,
 } from "@/data/puzzles/four-score";
 import {
-  MOVE_TWO_PUZZLES,
-  generateMoveTwoPuzzle,
   generateSeededMoveTwoPuzzle,
+  getMoveTwoPuzzleForDate,
   isMoveTwoPuzzle,
   type MoveTwoPuzzle,
 } from "@/data/puzzles/move-2";
@@ -65,11 +64,7 @@ import {
   isOneWinPuzzle,
   type OneWinPromptPuzzle,
 } from "@/data/puzzles/1-win";
-import {
-  ROTATION_ANCHOR,
-  daysBetweenDateKeys,
-  getPuzzleNumberForDate,
-} from "@/lib/date-keys";
+import { getPuzzleNumberForDate } from "@/lib/date-keys";
 import type { AllGameSlug } from "@/lib/games-config";
 import {
   fnv1a32,
@@ -255,60 +250,16 @@ const fourScoreSource: PuzzleSource<FourScorePuzzle> = {
   }),
 };
 
-const MOVE_TWO_DATE_CACHE = new Map<string, MoveTwoPuzzle>();
-const SEEN_MOVE_TWO_SIGNATURES = new Set<string>(
-  MOVE_TWO_PUZZLES.map((p) => JSON.stringify(p.faces))
-);
-
 const moveTwoSource: PuzzleSource<MoveTwoPuzzle> = {
   slug: "move-2",
   validate: isMoveTwoPuzzle,
   fromBank(dateKey) {
-    const puzzleNumber = getPuzzleNumberForDate(dateKey);
-    const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
-    if (diff >= 0 && diff < MOVE_TWO_PUZZLES.length) {
-      const base = MOVE_TWO_PUZZLES[diff]!;
-      return {
-        ...base,
-        puzzleNumber,
-        customDate: dateKey,
-      };
-    }
-    const cached = MOVE_TWO_DATE_CACHE.get(dateKey);
-    if (cached) {
-      return {
-        ...cached,
-        puzzleNumber,
-        customDate: dateKey,
-      };
-    }
-    let chosen: MoveTwoPuzzle | null = null;
-    for (let attempt = 0; attempt < 32; attempt++) {
-      const seed =
-        attempt === 0 ? `bank:date:${dateKey}` : `bank:date:${dateKey}:a${attempt}`;
-      const candidate = generateMoveTwoPuzzle(seed, {
-        id: `m2-bank-${dateKey}`,
-        puzzleNumber,
-        customDate: dateKey,
-      });
-      const sig = JSON.stringify(candidate.faces);
-      if (!SEEN_MOVE_TWO_SIGNATURES.has(sig)) {
-        SEEN_MOVE_TWO_SIGNATURES.add(sig);
-        chosen = candidate;
-        break;
-      }
-      if (!chosen) {
-        chosen = candidate;
-      }
-    }
-    const finalPuzzle = chosen!;
-    MOVE_TWO_DATE_CACHE.set(dateKey, finalPuzzle);
-    return finalPuzzle;
+    return getMoveTwoPuzzleForDate(dateKey);
   },
   generateSeeded: (dateKey) =>
     generateSeededMoveTwoPuzzle(dateKey, getPuzzleNumberForDate(dateKey)),
   summarize: (p) => ({
-    title: `${p.title} (Par ${p.par})`,
+    title: `${p.title} (6×6 · 8×8 · 10×10)`,
     author: p.author,
     editor: p.editor,
     puzzleNumber: p.puzzleNumber,

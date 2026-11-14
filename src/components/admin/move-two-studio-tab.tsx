@@ -6,19 +6,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  MOVE_TWO_POSTURES,
-  emptyMoveTwoFloorGrid,
+  MOVE_TWO_BOARD_SIZES,
+  MOVE_TWO_DIFFICULTIES,
+  MOVE_TWO_DIFFICULTY_META,
+  createMoveTwoGrid,
+  generateBloxorzStage,
   generateMoveTwoPuzzle,
-  getDominoCells,
+  getInitialBlockState,
   getMoveTwoPuzzleForDate,
+  isMoveTwoPuzzle,
+  solveBloxorzStage,
   solveMoveTwo,
-  solveMoveTwoFace,
   validateMoveTwoPuzzle,
-  type MoveTwoFace,
-  type MoveTwoPosture,
+  type MoveTwoBridgeDef,
+  type MoveTwoCoord,
+  type MoveTwoDifficulty,
   type MoveTwoPuzzle,
-  type MoveTwoTarget,
+  type MoveTwoStage,
+  type MoveTwoSwitchBehavior,
+  type MoveTwoSwitchDef,
+  type MoveTwoTileType,
 } from "@/data/puzzles/move-2";
+import { MoveTwoBloxorzCanvas } from "@/components/games/move-two-canvas";
 import { getDailyPuzzleForGame, getPuzzleNumberForDate } from "@/lib/daily-engine";
 import { getAdminOverridesForGame } from "@/lib/game-storage";
 import type { GenericPublishRequest } from "@/components/admin/generic-publish";
@@ -35,73 +44,227 @@ export interface MoveTwoStudioTabProps {
   onClearOverride?: () => void;
 }
 
-type FaceEditTool = "hazard" | "start" | "hole";
+type StudioPaintTool =
+  | "void"
+  | "floor"
+  | "fragile"
+  | "bridge_A"
+  | "bridge_B"
+  | "soft_A"
+  | "soft_B"
+  | "heavy_A"
+  | "heavy_B"
+  | "start"
+  | "goal";
 
-const GRID_INDICES = [0, 1, 2, 3, 4] as const;
+const PAINT_TOOLS: ReadonlyArray<{
+  id: StudioPaintTool;
+  label: string;
+  swatchClass: string;
+}> = [
+  {
+    id: "floor",
+    label: "Stone Floor",
+    swatchClass: "bg-white border-black text-black",
+  },
+  {
+    id: "void",
+    label: "Void (Empty)",
+    swatchClass: "bg-neutral-200 border-neutral-500 text-neutral-700",
+  },
+  {
+    id: "fragile",
+    label: "Fragile Orange",
+    swatchClass: "bg-[#FB923C] border-black text-black",
+  },
+  {
+    id: "bridge_A",
+    label: "Bridge A",
+    swatchClass: "bg-[#DBEAFE] border-blue-700 text-blue-950",
+  },
+  {
+    id: "bridge_B",
+    label: "Bridge B",
+    swatchClass: "bg-[#BFDBFE] border-blue-800 text-blue-950",
+  },
+  {
+    id: "soft_A",
+    label: "○ Switch → A",
+    swatchClass: "bg-sky-100 border-sky-700 text-sky-950",
+  },
+  {
+    id: "soft_B",
+    label: "○ Switch → B",
+    swatchClass: "bg-sky-100 border-sky-700 text-sky-950",
+  },
+  {
+    id: "heavy_A",
+    label: "✕ Heavy → A",
+    swatchClass: "bg-violet-100 border-violet-700 text-violet-950",
+  },
+  {
+    id: "heavy_B",
+    label: "✕ Heavy → B",
+    swatchClass: "bg-violet-100 border-violet-700 text-violet-950",
+  },
+  {
+    id: "start",
+    label: "Set Start (S)",
+    swatchClass: "bg-[#F7DA21] border-black text-black",
+  },
+  {
+    id: "goal",
+    label: "Set Goal (G)",
+    swatchClass: "bg-[#2ECC71] border-black text-black",
+  },
+];
 
-function clampAnchorForPosture(
-  r: number,
-  c: number,
-  posture: MoveTwoPosture
-): { r: number; c: number } {
-  const maxR = posture === "FLAT_V" ? 3 : 4;
-  const maxC = posture === "FLAT_H" ? 3 : 4;
+function buildBlankBloxorzStage(difficulty: MoveTwoDifficulty): MoveTwoStage {
+  const size = MOVE_TWO_BOARD_SIZES[difficulty];
+  const grid = createMoveTwoGrid(size, "void");
+  // Carve a clean connected floating stone island ready for manual sculpting
+  for (let r = 1; r < size - 1; r++) {
+    for (let c = 1; c < size - 1; c++) {
+      grid[r]![c] = "floor";
+    }
+  }
+  const start: MoveTwoCoord = { r: 1, c: 1 };
+  const goal: MoveTwoCoord = { r: size - 2, c: size - 2 };
+  const solved = solveBloxorzStage({
+    size,
+    grid,
+    start,
+    goal,
+    bridges: [],
+    switches: [],
+  });
   return {
-    r: Math.max(0, Math.min(maxR, r)),
-    c: Math.max(0, Math.min(maxC, c)),
+    difficulty,
+    size,
+    grid,
+    start,
+    goal,
+    bridges: [],
+    switches: [],
+    par: solved.solvable ? solved.minMoves : 6,
+    canonicalMoves: solved.moves,
   };
-}
-
-function targetsOverlap(a: MoveTwoTarget, b: MoveTwoTarget): boolean {
-  const aKeys = new Set(getDominoCells(a).map((c) => `${c.r},${c.c}`));
-  return getDominoCells(b).some((c) => aKeys.has(`${c.r},${c.c}`));
 }
 
 function buildCleanBlankMoveTwoPuzzle(targetDate: string): MoveTwoPuzzle {
-  const faces = [0, 1, 2, 3, 4, 5].map((index) => {
-    const grid = emptyMoveTwoFloorGrid();
-    const start: MoveTwoTarget = { posture: "UPRIGHT", r: 0, c: 0 };
-    const hole: MoveTwoTarget = { posture: "UPRIGHT", r: 4, c: 4 };
-    const solved = solveMoveTwoFace({ index, grid, start, hole });
-    return {
-      index,
-      grid,
-      start,
-      hole,
-      parMoves: solved.solvable ? solved.minMoves : 6,
-      exitEdge: null,
-    } satisfies MoveTwoFace;
-  }) as MoveTwoPuzzle["faces"];
-
-  const start = {
-    face: 0,
-    posture: faces[0].start.posture,
-    r: faces[0].start.r,
-    c: faces[0].start.c,
-  };
-  const target = { ...faces[5].hole };
-  const solved = solveMoveTwo({ faces, start, target });
-
+  const easy = buildBlankBloxorzStage("easy");
+  const medium = buildBlankBloxorzStage("medium");
+  const hard = buildBlankBloxorzStage("hard");
   return {
+    version: 3,
     id: `m2-admin-${targetDate}`,
     puzzleNumber: getPuzzleNumberForDate(targetDate),
     title: "",
     author: "SOL Theory",
     editor: "Daily Editorial",
-    faces,
-    start,
-    target,
-    par: solved.solvable ? solved.minMoves : 36,
-    canonicalMoves: solved.moves,
+    stages: { easy, medium, hard },
+    par: medium.par,
     customDate: targetDate,
   };
 }
 
 /**
- * `/admin` Interactive 5×5 6-Face Studio Editor for Move Two:
- * Supports toggling interior dark void hazards (`✕`), moving/changing per-face Start (`S`) and
- * Recessed Hole (`H`) postures (`1×1 Upright`, `1×2 Flat ↔`, `2×1 Flat ↕`), live per-face & 6-face
- * BFS Par verification, `"Clear All"` (local form state only), and `"Revert to Default"`.
+ * Normalizes `bridges` and `switches` arrays after painting or toggling cells on `stage`
+ * so `validateMoveTwoStage` and `solveBloxorzStage` remain 100% consistent.
+ */
+function normalizeStageAfterEdit(
+  stage: MoveTwoStage,
+  nextGrid: MoveTwoTileType[][],
+  nextStart: MoveTwoCoord,
+  nextGoal: MoveTwoCoord,
+  nextBridgesRaw: MoveTwoBridgeDef[],
+  nextSwitchesRaw: MoveTwoSwitchDef[]
+): MoveTwoStage {
+  // Keep only bridge cells that are actually marked "bridge" in nextGrid
+  const cleanedBridges: MoveTwoBridgeDef[] = [];
+  const claimedBridgeCells = new Set<string>();
+
+  for (const b of nextBridgesRaw) {
+    const validCells = b.cells.filter((cell) => {
+      const key = `${cell.r},${cell.c}`;
+      if (nextGrid[cell.r]?.[cell.c] !== "bridge" || claimedBridgeCells.has(key)) {
+        return false;
+      }
+      claimedBridgeCells.add(key);
+      return true;
+    });
+    if (validCells.length > 0) {
+      cleanedBridges.push({
+        id: b.id,
+        cells: validCells,
+        initiallyOpen: b.initiallyOpen,
+      });
+    }
+  }
+
+  // Ensure any orphaned "bridge" cell on nextGrid is assigned to Bridge A
+  const orphanCells: MoveTwoCoord[] = [];
+  for (let r = 0; r < stage.size; r++) {
+    for (let c = 0; c < stage.size; c++) {
+      if (nextGrid[r]![c] === "bridge" && !claimedBridgeCells.has(`${r},${c}`)) {
+        orphanCells.push({ r, c });
+      }
+    }
+  }
+  if (orphanCells.length > 0) {
+    const existingA = cleanedBridges.find((b) => b.id === "A");
+    if (existingA) {
+      existingA.cells.push(...orphanCells);
+    } else {
+      cleanedBridges.push({
+        id: "A",
+        cells: orphanCells,
+        initiallyOpen: false,
+      });
+    }
+  }
+
+  const validBridgeIds = new Set(cleanedBridges.map((b) => b.id));
+  const cleanedSwitches: MoveTwoSwitchDef[] = [];
+
+  for (const sw of nextSwitchesRaw) {
+    const tile = nextGrid[sw.r]?.[sw.c];
+    const expectedTile = sw.kind === "soft" ? "soft_switch" : "heavy_switch";
+    if (tile !== expectedTile) continue;
+    if (!validBridgeIds.has(sw.bridgeId)) {
+      // Revert switch tile to plain floor if its target bridge was completely erased
+      nextGrid[sw.r]![sw.c] = "floor";
+      continue;
+    }
+    cleanedSwitches.push(sw);
+  }
+
+  const solved = solveBloxorzStage({
+    size: stage.size,
+    grid: nextGrid,
+    start: nextStart,
+    goal: nextGoal,
+    bridges: cleanedBridges,
+    switches: cleanedSwitches,
+  });
+
+  return {
+    ...stage,
+    grid: nextGrid,
+    start: nextStart,
+    goal: nextGoal,
+    bridges: cleanedBridges,
+    switches: cleanedSwitches,
+    par: solved.solvable ? solved.minMoves : stage.par,
+    canonicalMoves: solved.solvable ? solved.moves : [],
+  };
+}
+
+/**
+ * `/admin` Interactive 3-Difficulty (`6×6` Easy · `8×8` Medium · `10×10` Hard) Bloxorz Studio Editor:
+ * Supports painting floating stone islands, void chasms, fragile terracotta tiles, retractable bridges (`A`/`B`),
+ * `○` soft switches & `✕` heavy switches, live 3D canvas preview, live per-difficulty BFS `Par` verification,
+ * `"Clear All"` (local form state only), and `"Revert to Default"`.
  */
 export function MoveTwoStudioTab({
   targetDate,
@@ -110,6 +273,7 @@ export function MoveTwoStudioTab({
   syncVersion = 0,
   initialPuzzle: propInitialPuzzle,
   onPublish,
+  onClearOverride,
 }: MoveTwoStudioTabProps) {
   const defaultBankPuzzle = useMemo<MoveTwoPuzzle>(
     () => getMoveTwoPuzzleForDate(targetDate),
@@ -118,7 +282,9 @@ export function MoveTwoStudioTab({
 
   const resolvedInitialPuzzle = useMemo<MoveTwoPuzzle>(() => {
     void syncVersion;
-    if (propInitialPuzzle) return propInitialPuzzle;
+    if (propInitialPuzzle && isMoveTwoPuzzle(propInitialPuzzle)) {
+      return propInitialPuzzle;
+    }
     const resolved = getDailyPuzzleForGame<MoveTwoPuzzle>(
       "move-2",
       targetDate,
@@ -129,7 +295,8 @@ export function MoveTwoStudioTab({
 
   const [draft, setDraft] = useState<MoveTwoPuzzle>(resolvedInitialPuzzle);
   const [title, setTitle] = useState<string>(resolvedInitialPuzzle.title);
-  const [editTool, setEditTool] = useState<FaceEditTool>("hazard");
+  const [activeDiff, setActiveDiff] = useState<MoveTwoDifficulty>("medium");
+  const [paintTool, setPaintTool] = useState<StudioPaintTool>("fragile");
   const [rerollCount, setRerollCount] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -142,207 +309,173 @@ export function MoveTwoStudioTab({
     setErrors([]);
   }
 
-  const faceSolves = useMemo(
-    () => draft.faces.map((face) => solveMoveTwoFace(face)),
-    [draft.faces]
-  );
   const liveSolve = useMemo(() => solveMoveTwo(draft), [draft]);
+  const activeStage = draft.stages[activeDiff];
+  const activeStageSolve = liveSolve.stages[activeDiff];
 
-  const updateFace = (
-    faceIndex: number,
-    updater: (face: MoveTwoFace) => MoveTwoFace
+  const updateStage = (
+    diff: MoveTwoDifficulty,
+    updater: (stage: MoveTwoStage) => MoveTwoStage
   ) => {
     setDraft((prev) => {
-      const nextFaces = prev.faces.map((f, idx) =>
-        idx === faceIndex ? updater(f) : f
-      ) as MoveTwoPuzzle["faces"];
-      const nextStart = {
-        face: 0,
-        posture: nextFaces[0].start.posture,
-        r: nextFaces[0].start.r,
-        c: nextFaces[0].start.c,
+      const updatedStage = updater(prev.stages[diff]);
+      const nextStages = {
+        ...prev.stages,
+        [diff]: updatedStage,
       };
-      const nextTarget = { ...nextFaces[5].hole };
-      const solved = solveMoveTwo({
-        faces: nextFaces,
-        start: nextStart,
-        target: nextTarget,
-      });
       return {
         ...prev,
-        faces: nextFaces,
-        start: nextStart,
-        target: nextTarget,
-        par: solved.solvable ? solved.minMoves : prev.par,
-        canonicalMoves: solved.solvable ? solved.moves : prev.canonicalMoves,
+        stages: nextStages,
+        par: nextStages.medium.par,
       };
     });
     setErrors([]);
   };
 
-  const handleCellClick = (faceIndex: number, r: number, c: number) => {
+  const handleCellClick = (r: number, c: number) => {
     if (!canEdit) return;
-    updateFace(faceIndex, (face) => {
-      const nextGrid = face.grid.map((row) => [...row]) as MoveTwoFace["grid"];
-      const startKeys = new Set(
-        getDominoCells(face.start).map((cell) => `${cell.r},${cell.c}`)
-      );
-      const holeKeys = new Set(
-        getDominoCells(face.hole).map((cell) => `${cell.r},${cell.c}`)
-      );
+    updateStage(activeDiff, (stage) => {
+      const nextGrid = stage.grid.map((row) => [...row]);
+      let nextStart = { ...stage.start };
+      let nextGoal = { ...stage.goal };
+      let nextBridges = stage.bridges.map((b) => ({
+        ...b,
+        cells: b.cells.map((cell) => ({ ...cell })),
+      }));
+      let nextSwitches = stage.switches.map((sw) => ({ ...sw }));
 
-      if (editTool === "hazard") {
-        const key = `${r},${c}`;
-        if (startKeys.has(key) || holeKeys.has(key)) {
-          return face;
+      const isStartCell = stage.start.r === r && stage.start.c === c;
+      const isGoalCell = stage.goal.r === r && stage.goal.c === c;
+
+      if (paintTool === "start") {
+        if (isGoalCell) return stage;
+        nextStart = { r, c };
+        if (nextGrid[r]![c] === "void" || nextGrid[r]![c] === "fragile") {
+          nextGrid[r]![c] = "floor";
         }
-        nextGrid[r]![c] = nextGrid[r]![c] === "hazard" ? "floor" : "hazard";
-        const solved = solveMoveTwoFace({ ...face, grid: nextGrid });
-        return {
-          ...face,
-          grid: nextGrid,
-          parMoves: solved.solvable ? solved.minMoves : undefined,
-        };
+        return normalizeStageAfterEdit(
+          stage,
+          nextGrid,
+          nextStart,
+          nextGoal,
+          nextBridges,
+          nextSwitches
+        );
       }
 
-      if (editTool === "start") {
-        const clamped = clampAnchorForPosture(r, c, face.start.posture);
-        const candidateStart: MoveTwoTarget = {
-          posture: face.start.posture,
-          r: clamped.r,
-          c: clamped.c,
-        };
-        if (targetsOverlap(candidateStart, face.hole)) {
-          return face;
+      if (paintTool === "goal") {
+        if (isStartCell) return stage;
+        nextGoal = { r, c };
+        nextGrid[r]![c] = "floor";
+        nextSwitches = nextSwitches.filter((sw) => sw.r !== r || sw.c !== c);
+        return normalizeStageAfterEdit(
+          stage,
+          nextGrid,
+          nextStart,
+          nextGoal,
+          nextBridges,
+          nextSwitches
+        );
+      }
+
+      // Protect Start & Goal from becoming void or fragile
+      if ((isStartCell || isGoalCell) && (paintTool === "void" || paintTool === "fragile")) {
+        return stage;
+      }
+
+      // Remove any existing switch or bridge claim on (r, c) before painting new type
+      nextSwitches = nextSwitches.filter((sw) => sw.r !== r || sw.c !== c);
+      nextBridges = nextBridges.map((b) => ({
+        ...b,
+        cells: b.cells.filter((cell) => cell.r !== r || cell.c !== c),
+      }));
+
+      if (paintTool === "void" || paintTool === "floor" || paintTool === "fragile") {
+        nextGrid[r]![c] = paintTool;
+      } else if (paintTool === "bridge_A" || paintTool === "bridge_B") {
+        const bridgeId = paintTool === "bridge_A" ? "A" : "B";
+        nextGrid[r]![c] = "bridge";
+        const existing = nextBridges.find((b) => b.id === bridgeId);
+        if (existing) {
+          existing.cells.push({ r, c });
+        } else {
+          nextBridges.push({
+            id: bridgeId,
+            cells: [{ r, c }],
+            initiallyOpen: false,
+          });
         }
-        for (const cell of getDominoCells(candidateStart)) {
-          nextGrid[cell.r]![cell.c] = "floor";
+      } else {
+        // Switch tool (soft_A, soft_B, heavy_A, heavy_B)
+        const isHeavy = paintTool.startsWith("heavy");
+        const bridgeId = paintTool.endsWith("_A") ? "A" : "B";
+        // Ensure target bridge exists so switch isn't stripped; if no bridge cells yet, no-op until bridge exists
+        if (!nextBridges.some((b) => b.id === bridgeId && b.cells.length > 0)) {
+          return stage;
         }
-        const solved = solveMoveTwoFace({
-          ...face,
-          grid: nextGrid,
-          start: candidateStart,
+        nextGrid[r]![c] = isHeavy ? "heavy_switch" : "soft_switch";
+        nextSwitches.push({
+          r,
+          c,
+          kind: isHeavy ? "heavy" : "soft",
+          bridgeId,
+          behavior: "toggle",
         });
-        return {
-          ...face,
-          grid: nextGrid,
-          start: candidateStart,
-          parMoves: solved.solvable ? solved.minMoves : undefined,
-        };
       }
 
-      // editTool === "hole"
-      const clamped = clampAnchorForPosture(r, c, face.hole.posture);
-      const candidateHole: MoveTwoTarget = {
-        posture: face.hole.posture,
-        r: clamped.r,
-        c: clamped.c,
-      };
-      if (targetsOverlap(face.start, candidateHole)) {
-        return face;
-      }
-      for (const cell of getDominoCells(candidateHole)) {
-        nextGrid[cell.r]![cell.c] = "floor";
-      }
-      const solved = solveMoveTwoFace({
-        ...face,
-        grid: nextGrid,
-        hole: candidateHole,
-      });
-      return {
-        ...face,
-        grid: nextGrid,
-        hole: candidateHole,
-        parMoves: solved.solvable ? solved.minMoves : undefined,
-      };
-    });
-  };
-
-  const handleChangeStartPosture = (
-    faceIndex: number,
-    posture: MoveTwoPosture
-  ) => {
-    if (!canEdit) return;
-    updateFace(faceIndex, (face) => {
-      const nextGrid = face.grid.map((row) => [...row]) as MoveTwoFace["grid"];
-      const clamped = clampAnchorForPosture(
-        face.start.r,
-        face.start.c,
-        posture
+      return normalizeStageAfterEdit(
+        stage,
+        nextGrid,
+        nextStart,
+        nextGoal,
+        nextBridges,
+        nextSwitches
       );
-      let candidateStart: MoveTwoTarget = {
-        posture,
-        r: clamped.r,
-        c: clamped.c,
-      };
-      if (targetsOverlap(candidateStart, face.hole)) {
-        const fallbackAnchor =
-          face.hole.r < 2 ? { r: 3, c: 0 } : { r: 0, c: 0 };
-        candidateStart = {
-          posture,
-          ...clampAnchorForPosture(fallbackAnchor.r, fallbackAnchor.c, posture),
-        };
-      }
-      for (const cell of getDominoCells(candidateStart)) {
-        nextGrid[cell.r]![cell.c] = "floor";
-      }
-      const solved = solveMoveTwoFace({
-        ...face,
-        grid: nextGrid,
-        start: candidateStart,
-      });
-      return {
-        ...face,
-        grid: nextGrid,
-        start: candidateStart,
-        parMoves: solved.solvable ? solved.minMoves : undefined,
-      };
     });
   };
 
-  const handleChangeHolePosture = (
-    faceIndex: number,
-    posture: MoveTwoPosture
-  ) => {
+  const handleToggleBridgeInitiallyOpen = (bridgeId: string) => {
     if (!canEdit) return;
-    updateFace(faceIndex, (face) => {
-      const nextGrid = face.grid.map((row) => [...row]) as MoveTwoFace["grid"];
-      const clamped = clampAnchorForPosture(face.hole.r, face.hole.c, posture);
-      let candidateHole: MoveTwoTarget = {
-        posture,
-        r: clamped.r,
-        c: clamped.c,
-      };
-      if (targetsOverlap(face.start, candidateHole)) {
-        const fallbackAnchor =
-          face.start.r < 2 ? { r: 3, c: 3 } : { r: 0, c: 3 };
-        candidateHole = {
-          posture,
-          ...clampAnchorForPosture(fallbackAnchor.r, fallbackAnchor.c, posture),
-        };
-      }
-      for (const cell of getDominoCells(candidateHole)) {
-        nextGrid[cell.r]![cell.c] = "floor";
-      }
-      const solved = solveMoveTwoFace({
-        ...face,
-        grid: nextGrid,
-        hole: candidateHole,
-      });
-      return {
-        ...face,
-        grid: nextGrid,
-        hole: candidateHole,
-        parMoves: solved.solvable ? solved.minMoves : undefined,
-      };
+    updateStage(activeDiff, (stage) => {
+      const nextBridges = stage.bridges.map((b) =>
+        b.id === bridgeId ? { ...b, initiallyOpen: !b.initiallyOpen } : b
+      );
+      return normalizeStageAfterEdit(
+        stage,
+        stage.grid.map((row) => [...row]),
+        stage.start,
+        stage.goal,
+        nextBridges,
+        stage.switches
+      );
     });
   };
 
-  const handleReroll = () => {
+  const handleCycleSwitchBehavior = (r: number, c: number) => {
+    if (!canEdit) return;
+    const order: MoveTwoSwitchBehavior[] = ["toggle", "open", "close"];
+    updateStage(activeDiff, (stage) => {
+      const nextSwitches = stage.switches.map((sw) => {
+        if (sw.r !== r || sw.c !== c) return sw;
+        const nextIdx = (order.indexOf(sw.behavior) + 1) % order.length;
+        return { ...sw, behavior: order[nextIdx]! };
+      });
+      return normalizeStageAfterEdit(
+        stage,
+        stage.grid.map((row) => [...row]),
+        stage.start,
+        stage.goal,
+        stage.bridges,
+        nextSwitches
+      );
+    });
+  };
+
+  const handleRerollAll = () => {
     const next = rerollCount + 1;
     setRerollCount(next);
     const generated = generateMoveTwoPuzzle(
-      `admin:${targetDate}:reroll-${next}`,
+      `admin:v3:${targetDate}:reroll-${next}`,
       {
         id: `m2-admin-${targetDate}`,
         puzzleNumber: getPuzzleNumberForDate(targetDate),
@@ -352,6 +485,16 @@ export function MoveTwoStudioTab({
     setDraft(generated);
     setTitle(generated.title);
     setErrors([]);
+  };
+
+  const handleRerollActiveStage = () => {
+    const next = rerollCount + 1;
+    setRerollCount(next);
+    const nextStage = generateBloxorzStage(
+      `admin:v3:${targetDate}:${activeDiff}:reroll-${next}`,
+      activeDiff
+    );
+    updateStage(activeDiff, () => nextStage);
   };
 
   const handleClearAll = () => {
@@ -365,23 +508,45 @@ export function MoveTwoStudioTab({
     setDraft(defaultBankPuzzle);
     setTitle(defaultBankPuzzle.title);
     setErrors([]);
+    onClearOverride?.();
   };
 
   const handlePublish = (playImmediately: boolean) => {
+    const syncedStages: Record<MoveTwoDifficulty, MoveTwoStage> = {
+      easy: {
+        ...draft.stages.easy,
+        par: liveSolve.stages.easy.minMoves,
+        canonicalMoves: liveSolve.stages.easy.moves,
+      },
+      medium: {
+        ...draft.stages.medium,
+        par: liveSolve.stages.medium.minMoves,
+        canonicalMoves: liveSolve.stages.medium.moves,
+      },
+      hard: {
+        ...draft.stages.hard,
+        par: liveSolve.stages.hard.minMoves,
+        canonicalMoves: liveSolve.stages.hard.moves,
+      },
+    };
+
     const candidate: MoveTwoPuzzle = {
       ...draft,
+      version: 3,
       id: `m2-admin-${targetDate}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
-      title: title.trim() || draft.title || "Six-Sided Roll",
-      par: liveSolve.minMoves,
-      canonicalMoves: liveSolve.moves,
+      title: title.trim() || draft.title || "Terracotta Span",
+      stages: syncedStages,
+      par: syncedStages.medium.par,
       customDate: targetDate,
     };
+
     const check = validateMoveTwoPuzzle(candidate);
     if (!check.valid) {
       setErrors(check.errors);
       return;
     }
+
     setErrors([]);
     onPublish({
       gameSlug: "move-2",
@@ -393,15 +558,20 @@ export function MoveTwoStudioTab({
         author: candidate.author,
         editor: candidate.editor,
       },
-      preview: `6 5×5 Cube Faces · Par ${candidate.par} moves · Goal ${candidate.target.posture}`,
+      preview: `Bloxorz 6×6 (Par ${syncedStages.easy.par}) · 8×8 (Par ${syncedStages.medium.par}) · 10×10 (Par ${syncedStages.hard.par})`,
       details: [
-        `BFS shortest path (Par): ${candidate.par} moves across 6 5×5 faces`,
-        `Final Hole on Face 6: ${candidate.target.posture} at (${candidate.target.r + 1}, ${candidate.target.c + 1})`,
-        `Canonical solution: ${candidate.canonicalMoves.join(" → ")}`,
+        `Easy (6×6): BFS Par ${syncedStages.easy.par} moves`,
+        `Medium (8×8): BFS Par ${syncedStages.medium.par} moves`,
+        `Hard (10×10): BFS Par ${syncedStages.hard.par} moves`,
       ],
       playImmediately,
     });
   };
+
+  const previewInitBlock = useMemo(
+    () => getInitialBlockState(activeStage),
+    [activeStage]
+  );
 
   return (
     <div
@@ -411,13 +581,13 @@ export function MoveTwoStudioTab({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <Badge variant="green" className="mb-1">
-            🧊 Move Two 5×5 Studio
+            🟨 Move Two Bloxorz Studio (6×6 · 8×8 · 10×10)
           </Badge>
           <h3 className="font-headline font-black text-xl">
-            Interactive 6-Face 5×5 Cube Layout &amp; Hole Editor
+            3D Floating Island, Switch &amp; Bridge Level Architect
           </h3>
           <p className="text-xs text-gray-600">
-            Pre-filled for {targetDate} with BFS-verified 5×5 faces. Click any tile to edit obstacles, start positions, or target holes.
+            Pre-filled for {targetDate} with BFS-verified Easy (6×6), Medium (8×8), and Hard (10×10) Bloxorz stages.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -425,7 +595,7 @@ export function MoveTwoStudioTab({
             type="button"
             variant="outline"
             disabled={!canEdit}
-            onClick={handleReroll}
+            onClick={handleRerollAll}
             className="border-2 border-black font-bold text-xs"
             data-testid="admin-move-two-reroll"
           >
@@ -469,42 +639,92 @@ export function MoveTwoStudioTab({
         </p>
       )}
 
+      {/* Title Input + Difficulty Tabs */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="w-full sm:max-w-xs">
           <label className="block text-xs font-bold mb-1">Puzzle Title</label>
           <Input
             value={title}
             disabled={!canEdit}
-            placeholder="e.g. Six-Sided Roll"
+            placeholder="e.g. Terracotta Span"
             onChange={(e) => setTitle(e.target.value)}
             maxLength={50}
             data-testid="admin-move-two-title-input"
           />
         </div>
 
-        {/* Click Tool Selector */}
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-bold text-neutral-600 mr-1">
-            Click Tile Mode:
+          {MOVE_TWO_DIFFICULTIES.map((diff) => {
+            const meta = MOVE_TWO_DIFFICULTY_META[diff];
+            const solved = liveSolve.stages[diff];
+            const active = activeDiff === diff;
+            return (
+              <button
+                key={diff}
+                type="button"
+                onClick={() => setActiveDiff(diff)}
+                data-testid={`admin-move-two-diff-${diff}`}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                  active
+                    ? "border-black bg-black text-white shadow-[0_2px_0_#111]"
+                    : "border-neutral-300 bg-neutral-50 text-neutral-800 hover:border-black"
+                )}
+              >
+                <span>
+                  {meta.label} ({meta.sizeLabel})
+                </span>
+                <span
+                  className={cn(
+                    "font-mono text-[10px] px-1.5 py-0.5 rounded-full",
+                    solved.solvable
+                      ? active
+                        ? "bg-[#2ECC71] text-black"
+                        : "bg-emerald-100 text-emerald-900"
+                      : "bg-red-500 text-white"
+                  )}
+                >
+                  {solved.solvable ? `Par ${solved.minMoves}` : "Unsolvable"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Paint Palette */}
+      <div className="rounded-xl border border-neutral-200 bg-[#FAF9F5] p-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-bold text-neutral-700">
+            Paint Tile Tool ({MOVE_TWO_DIFFICULTY_META[activeDiff].label}{" "}
+            {activeStage.size}×{activeStage.size}):
           </span>
-          {(
-            [
-              { id: "hazard", label: "Toggle Red Hole" },
-              { id: "start", label: "Set Start (S)" },
-              { id: "hole", label: "Set Green Hole (H)" },
-            ] as const
-          ).map((tool) => (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!canEdit}
+            onClick={handleRerollActiveStage}
+            className="h-7 text-[11px] font-bold border border-black"
+          >
+            <Shuffle className="h-3 w-3 mr-1" /> Reroll {activeStage.size}×
+            {activeStage.size} Only
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {PAINT_TOOLS.map((tool) => (
             <button
               key={tool.id}
               type="button"
               disabled={!canEdit}
-              onClick={() => setEditTool(tool.id)}
+              onClick={() => setPaintTool(tool.id)}
               data-testid={`admin-move-two-tool-${tool.id}`}
               className={cn(
-                "px-2.5 py-1 rounded-lg border-2 text-xs font-bold transition-all cursor-pointer",
-                editTool === tool.id
-                  ? "border-black bg-[#b6df52] text-black shadow-[0_2px_0_#111]"
-                  : "border-neutral-300 bg-neutral-50 text-neutral-700 hover:bg-neutral-100"
+                "px-2.5 py-1 rounded-lg border-2 text-[11px] font-bold transition-all cursor-pointer",
+                paintTool === tool.id
+                  ? "border-black ring-2 ring-black bg-[#F7DA21] text-black"
+                  : tool.swatchClass
               )}
             >
               {tool.label}
@@ -513,163 +733,178 @@ export function MoveTwoStudioTab({
         </div>
       </div>
 
-      {/* 6-Face 5×5 Interactive Grid Editor */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {draft.faces.map((face, idx) => {
-          const startCells = new Set(
-            getDominoCells(face.start).map((c) => `${c.r},${c.c}`)
-          );
-          const holeCells = new Set(
-            getDominoCells(face.hole).map((c) => `${c.r},${c.c}`)
-          );
-          const faceSolved = faceSolves[idx]!;
-          const isFinal = idx === 5;
-
-          return (
-            <div
-              key={face.index}
-              data-testid={`admin-move-two-face-${idx}`}
-              className="rounded-xl border-2 border-black bg-[#FAF9F6] p-3 space-y-2"
+      {/* Side-by-Side 2D Interactive Grid + Live 3D Bloxorz Preview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        {/* 2D Tile Painter */}
+        <div className="rounded-xl border-2 border-black bg-[#FAF9F6] p-3 space-y-3">
+          <div className="flex items-center justify-between text-xs font-black uppercase">
+            <span>
+              2D Grid Editor ({activeStage.size}×{activeStage.size})
+            </span>
+            <span
+              className={cn(
+                "px-2 py-0.5 rounded-full text-[11px] font-mono border",
+                activeStageSolve.solvable
+                  ? "bg-emerald-50 border-emerald-400 text-emerald-800"
+                  : "bg-red-50 border-red-400 text-red-700"
+              )}
             >
-              <div className="flex items-center justify-between text-xs font-black uppercase">
-                <span>
-                  Face {face.index + 1} {isFinal ? "· Final Green Goal" : `· Green Hole → ${face.index + 2}`}
-                </span>
-                <span
-                  className={cn(
-                    "px-2 py-0.5 rounded-full text-[10px] font-mono border",
-                    faceSolved.solvable
-                      ? "bg-emerald-50 border-emerald-400 text-emerald-800"
-                      : "bg-red-50 border-red-400 text-red-700"
-                  )}
+              {activeStageSolve.solvable
+                ? `✓ BFS Par: ${activeStageSolve.minMoves} moves`
+                : "Unsolvable"}
+            </span>
+          </div>
+
+          <div
+            className={cn(
+              "grid gap-1 bg-neutral-200/80 p-1.5 rounded-xl border-2 border-black aspect-square",
+              activeStage.size === 6
+                ? "grid-cols-6"
+                : activeStage.size === 8
+                ? "grid-cols-8"
+                : "grid-cols-10"
+            )}
+          >
+            {Array.from({ length: activeStage.size }, (_, r) =>
+              Array.from({ length: activeStage.size }, (_, c) => {
+                const tile = activeStage.grid[r]![c]!;
+                const isStart =
+                  activeStage.start.r === r && activeStage.start.c === c;
+                const isGoal =
+                  activeStage.goal.r === r && activeStage.goal.c === c;
+                const bridgeOwner = activeStage.bridges.find((b) =>
+                  b.cells.some((cell) => cell.r === r && cell.c === c)
+                );
+                const sw = activeStage.switches.find(
+                  (s) => s.r === r && s.c === c
+                );
+
+                return (
+                  <button
+                    key={`${r},${c}`}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => handleCellClick(r, c)}
+                    data-testid={`admin-m2-${activeDiff}-cell-${r}-${c}`}
+                    className={cn(
+                      "w-full h-full aspect-square rounded-[3px] border flex items-center justify-center text-[10px] font-mono font-black transition-colors cursor-pointer",
+                      isStart
+                        ? "bg-[#F7DA21] border-black text-black"
+                        : isGoal
+                        ? "bg-[#2ECC71] border-[#14532D] text-black"
+                        : tile === "void"
+                        ? "bg-neutral-300/45 border-dashed border-neutral-400 text-neutral-400"
+                        : tile === "fragile"
+                        ? "bg-[#FB923C] border-[#9A3412] text-black"
+                        : tile === "bridge"
+                        ? "bg-[#DBEAFE] border-blue-700 text-blue-950"
+                        : tile === "soft_switch"
+                        ? "bg-sky-100 border-sky-700 text-sky-950"
+                        : tile === "heavy_switch"
+                        ? "bg-violet-100 border-violet-700 text-violet-950"
+                        : "bg-white border-neutral-400 text-neutral-600 hover:bg-neutral-100"
+                    )}
+                  >
+                    {isStart
+                      ? "S"
+                      : isGoal
+                      ? "G"
+                      : tile === "bridge"
+                      ? bridgeOwner?.id ?? "B"
+                      : tile === "soft_switch"
+                      ? `○${sw?.bridgeId ?? ""}`
+                      : tile === "heavy_switch"
+                      ? `✕${sw?.bridgeId ?? ""}`
+                      : tile === "fragile"
+                      ? "!"
+                      : ""}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Bridge & Switch Inspector */}
+          {(activeStage.bridges.length > 0 || activeStage.switches.length > 0) && (
+            <div className="space-y-1.5 pt-1 border-t border-neutral-200 text-[11px]">
+              {activeStage.bridges.map((b) => (
+                <div
+                  key={b.id}
+                  className="flex items-center justify-between bg-white rounded-lg border border-neutral-200 px-2.5 py-1"
                 >
-                  {faceSolved.solvable
-                    ? `Par: ${faceSolved.minMoves}m`
-                    : "Unsolvable"}
-                </span>
-              </div>
-
-              {/* 5×5 Grid */}
-              <div className="grid grid-cols-5 grid-rows-5 gap-1 bg-[#EAE8E1] p-1.5 rounded-xl border-2 border-black aspect-square">
-                {GRID_INDICES.map((r) =>
-                  GRID_INDICES.map((c) => {
-                    const key = `${r},${c}`;
-                    const cell = face.grid[r]![c];
-                    const isStart = startCells.has(key);
-                    const isHole = holeCells.has(key);
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        disabled={!canEdit}
-                        onClick={() => handleCellClick(idx, r, c)}
-                        data-testid={`admin-m2-face-${idx}-cell-${r}-${c}`}
-                        className={cn(
-                          "w-full h-full aspect-square rounded-sm border-2 flex items-center justify-center text-[10px] font-mono font-black transition-colors cursor-pointer",
-                          cell === "wall"
-                            ? "bg-neutral-800 border-black text-white"
-                            : cell === "hazard"
-                            ? "bg-[#DC2626] border-[#7F1D1D] text-white shadow-[inset_0_2px_4px_rgba(0,0,0,0.45)]"
-                            : isStart
-                            ? "bg-[#F7DA21] border-black text-black"
-                            : isHole
-                            ? "bg-[#2ECC71] border-[#14532D] text-black shadow-[inset_0_2px_4px_rgba(0,0,0,0.25)]"
-                            : "bg-white border-neutral-300 text-neutral-400 hover:bg-neutral-100"
-                        )}
-                      >
-                        {cell === "wall"
-                          ? "■"
-                          : cell === "hazard"
-                          ? "●"
-                          : isStart
-                          ? "S"
-                          : isHole
-                          ? isFinal
-                            ? "G"
-                            : "H"
-                          : ""}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Per-face Start & Hole Posture selectors */}
-              <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                <div>
-                  <span className="block font-bold text-neutral-600 mb-0.5">
-                    Start (S) Posture
+                  <span className="font-bold">
+                    Bridge {b.id} ({b.cells.length} tiles)
                   </span>
-                  <select
-                    aria-label={`Face ${idx + 1} Start Posture`}
+                  <button
+                    type="button"
                     disabled={!canEdit}
-                    value={face.start.posture}
-                    onChange={(e) =>
-                      handleChangeStartPosture(
-                        idx,
-                        e.target.value as MoveTwoPosture
-                      )
-                    }
-                    className="w-full rounded border border-neutral-300 bg-white px-1.5 py-1 font-bold text-[10px]"
+                    onClick={() => handleToggleBridgeInitiallyOpen(b.id)}
+                    className="font-mono font-bold underline cursor-pointer text-blue-700"
                   >
-                    {MOVE_TWO_POSTURES.map((p) => (
-                      <option key={p} value={p}>
-                        {p === "UPRIGHT"
-                          ? "1×1 Upright"
-                          : p === "FLAT_H"
-                          ? "1×2 Flat ↔"
-                          : "2×1 Flat ↕"}
-                      </option>
-                    ))}
-                  </select>
+                    {b.initiallyOpen ? "Initially Open" : "Initially Closed"}
+                  </button>
                 </div>
-                <div>
-                  <span className="block font-bold text-neutral-600 mb-0.5">
-                    Hole ({isFinal ? "G" : "H"}) Posture
+              ))}
+              {activeStage.switches.map((sw) => (
+                <div
+                  key={`${sw.r},${sw.c}`}
+                  className="flex items-center justify-between bg-white rounded-lg border border-neutral-200 px-2.5 py-1"
+                >
+                  <span className="font-semibold">
+                    {sw.kind === "heavy" ? "✕ Heavy" : "○ Soft"} Switch (
+                    {sw.r + 1},{sw.c + 1}) → Bridge {sw.bridgeId}
                   </span>
-                  <select
-                    aria-label={`Face ${idx + 1} Hole Posture`}
+                  <button
+                    type="button"
                     disabled={!canEdit}
-                    value={face.hole.posture}
-                    onChange={(e) =>
-                      handleChangeHolePosture(
-                        idx,
-                        e.target.value as MoveTwoPosture
-                      )
-                    }
-                    className="w-full rounded border border-neutral-300 bg-white px-1.5 py-1 font-bold text-[10px]"
+                    onClick={() => handleCycleSwitchBehavior(sw.r, sw.c)}
+                    className="font-mono font-bold underline cursor-pointer text-violet-700"
                   >
-                    {MOVE_TWO_POSTURES.map((p) => (
-                      <option key={p} value={p}>
-                        {p === "UPRIGHT"
-                          ? "1×1 Upright Hole"
-                          : p === "FLAT_H"
-                          ? "1×2 Flat ↔ Hole"
-                          : "2×1 Flat ↕ Hole"}
-                      </option>
-                    ))}
-                  </select>
+                    Mode: {sw.behavior}
+                  </button>
                 </div>
-              </div>
+              ))}
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        {/* Live 3D Trimetric Bloxorz Preview */}
+        <div className="rounded-xl border-2 border-black bg-[#FAF9F6] p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs font-black uppercase">
+            <span>Live 3D Bloxorz Preview</span>
+            <span className="font-mono text-[10px] text-neutral-500">
+              Trimetric Camera
+            </span>
+          </div>
+          <MoveTwoBloxorzCanvas
+            stage={activeStage}
+            bridgeMask={previewInitBlock.bridgeMask}
+            pose={{ mode: "idle", state: previewInitBlock }}
+            interactive={false}
+            testId="admin-move-two-3d-preview"
+          />
+          {activeStageSolve.solvable && (
+            <p className="font-mono text-[11px] text-neutral-600 break-words">
+              Shortest path ({activeStageSolve.minMoves}m):{" "}
+              {activeStageSolve.moves.join(" → ")}
+            </p>
+          )}
+        </div>
       </div>
 
       {liveSolve.solvable ? (
         <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-3 text-xs space-y-1">
           <p className="font-bold text-emerald-800 flex items-center gap-1.5">
             <CheckCircle2 className="h-4 w-4" />
-            BFS Solver Verified — Par: {liveSolve.minMoves} moves across 6 5×5 faces · Final Hole:{" "}
-            {draft.target.posture}
-          </p>
-          <p className="font-mono text-[11px] text-neutral-700 break-words">
-            Shortest path: {liveSolve.moves.join(" → ")}
+            All 3 Bloxorz Stages Verified — Easy (6×6): Par{" "}
+            {liveSolve.stages.easy.minMoves} · Medium (8×8): Par{" "}
+            {liveSolve.stages.medium.minMoves} · Hard (10×10): Par{" "}
+            {liveSolve.stages.hard.minMoves}
           </p>
         </div>
       ) : (
         <p className="text-xs font-bold text-red-600">
-          One or more faces are unsolvable — adjust hazards/positions or click Reroll Seed / Revert to Default.
+          One or more difficulty boards are unsolvable — ensure Start and Goal are connected (or reachable via switches) before publishing.
         </p>
       )}
 

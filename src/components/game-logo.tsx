@@ -1187,83 +1187,129 @@ export function GameLogo({
     case "move-2": {
       return (
         <svg {...svgProps}>
-          {/* Subtle isometric cube grid lines */}
-          <path
-            d="M 8 74 H 72 M 20 74 L 38 56 M 42 74 L 60 56 M 29 65 H 67"
-            stroke={INK}
-            strokeWidth="1.4"
-            strokeLinecap="round"
-            opacity="0.2"
+          {/* Floating 3D Bloxorz Island Drop Shadow */}
+          <polygon
+            points="9,58 45,44 74,58 38,72"
+            fill={INK}
+            opacity="0.14"
           />
 
-          {/* Green Target Hole at top-right (sharp cube hole) */}
+          {/* Floating 3D Stone & Terracotta Bloxorz Tiles */}
+          {/* Back-Center Terracotta Fragile Slab */}
           <g>
-            <rect
-              x="52.5"
-              y="12.5"
-              width="22"
-              height="22"
-              fill={INK}
-            />
-            <rect
-              x="50"
-              y="10"
-              width="22"
-              height="22"
-              fill={GREEN}
+            <polygon
+              points="31,42 47,36 60,43 44,49"
+              fill="#FB923C"
               stroke={INK}
-              strokeWidth="2.5"
+              strokeWidth="2.1"
               strokeLinejoin="miter"
             />
-            {/* Recessed inner hole pit */}
-            <rect
-              x="54.5"
-              y="14.5"
-              width="13"
-              height="13"
-              fill="#064E3B"
+            <polygon
+              points="31,42 44,49 44,54 31,47"
+              fill="#EA580C"
               stroke={INK}
-              strokeWidth="1.8"
+              strokeWidth="2"
               strokeLinejoin="miter"
             />
           </g>
 
-          {/* Dynamic rolling arc toward green hole */}
-          <path
-            d="M 34 26 C 36 14 45 13 48 18"
-            fill="none"
-            stroke={INK}
-            strokeWidth="2.5"
-            strokeDasharray="3 2"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 45 13.5 L 50.5 18 L 44.5 21 Z"
-            fill={INK}
-          />
-
-          {/* Sharp 3D Stacked 2x1 Cube Block Shadow */}
-          <polygon
-            points="10,70 30,70 38,62 18,62"
-            fill={INK}
-            opacity="0.22"
-          />
-
-          {/* Sharp 3D Stacked 2x1 Block (Two sharp-edged cubes attached — zero curved corners) */}
-          {/* Bottom Cube Unit */}
+          {/* Green Target Hole at top-right (1x1 Bloxorz Goal Shaft) */}
           <g>
             <polygon
-              points="10,48 30,48 30,68 10,68"
-              fill="#EAB308"
+              points="47,36 63,30 76,37 60,43"
+              fill={GREEN}
               stroke={INK}
-              strokeWidth="2.4"
+              strokeWidth="2.2"
               strokeLinejoin="miter"
             />
             <polygon
-              points="30,48 38,40 38,60 30,68"
-              fill="#A16207"
+              points="51.5,36.2 62.2,32.2 71.2,37 60.5,41"
+              fill="#052E16"
               stroke={INK}
-              strokeWidth="2.4"
+              strokeWidth="1.6"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="60,43 76,37 76,43 60,49"
+              fill="#188344"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="47,36 60,43 60,49 47,42"
+              fill="#22A85A"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+          </g>
+
+          {/* Front-Right White Stone Slab */}
+          <g>
+            <polygon
+              points="31,55 44,49 60,43 73,50 44,62"
+              fill={WHITE}
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="31,55 44,62 44,68 31,61"
+              fill="#E5E2D9"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="44,62 73,50 73,56 44,68"
+              fill="#CFCBC0"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+          </g>
+
+          {/* Front-Left White Stone Base Slab under Standing 2x1 Block */}
+          <g>
+            <polygon
+              points="6,52 22,46 35,53 19,59"
+              fill={WHITE}
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="6,52 19,59 19,65 6,58"
+              fill="#E5E2D9"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="19,59 35,53 35,59 19,65"
+              fill="#CFCBC0"
+              stroke={INK}
+              strokeWidth="2.1"
+              strokeLinejoin="miter"
+            />
+          </g>
+
+          {/* Sharp 3D Stacked 2x1 Block (Two sharp-edged NYT Gold cubes — zero curved corners) */}
+          {/* Bottom Cube Unit */}
+          <g>
+            <polygon
+              points="9,36 20,42 20,56 9,50"
+              fill="#EAB308"
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="20,42 32,37 32,51 20,56"
+              fill="#CA8A04"
+              stroke={INK}
+              strokeWidth="2.2"
               strokeLinejoin="miter"
             />
           </g>
@@ -1271,24 +1317,24 @@ export function GameLogo({
           {/* Upper Stacked Cube Unit */}
           <g>
             <polygon
-              points="10,28 30,28 30,48 10,48"
+              points="9,22 20,28 20,42 9,36"
               fill={YELLOW}
               stroke={INK}
-              strokeWidth="2.4"
+              strokeWidth="2.2"
               strokeLinejoin="miter"
             />
             <polygon
-              points="10,28 18,20 38,20 30,28"
+              points="20,28 32,23 32,37 20,42"
+              fill="#EAB308"
+              stroke={INK}
+              strokeWidth="2.2"
+              strokeLinejoin="miter"
+            />
+            <polygon
+              points="9,22 21,17 32,23 20,28"
               fill="#FEF08A"
               stroke={INK}
-              strokeWidth="2.4"
-              strokeLinejoin="miter"
-            />
-            <polygon
-              points="30,28 38,20 38,40 30,48"
-              fill="#CA8A04"
-              stroke={INK}
-              strokeWidth="2.4"
+              strokeWidth="2.2"
               strokeLinejoin="miter"
             />
           </g>

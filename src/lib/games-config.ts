@@ -177,9 +177,9 @@ export const ALL_GAMES: GameConfig[] = [
     slug: "move-2",
     showCreate: false,
     isPlayable: true,
-    tagline: "5×5 3D cube block puzzle",
+    tagline: "3D floating block puzzle · 6×6, 8×8 & 10×10",
     description:
-      "Move the 3D 2×1 block across 6 5×5 cube faces and drop into each hole.",
+      "Roll the 3D 2×1 block across floating 6×6, 8×8, and 10×10 islands into the square green goal hole.",
   },
   {
     name: "1 Win",

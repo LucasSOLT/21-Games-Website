@@ -19,6 +19,7 @@ export interface GameSplashScreenProps {
   hasSavedProgress?: boolean;
   onPlay: () => void;
   onCreate?: () => void;
+  children?: React.ReactNode;
   className?: string;
 }
 
@@ -42,6 +43,7 @@ export function GameSplashScreen({
   hasSavedProgress = false,
   onPlay,
   onCreate,
+  children,
   className,
 }: GameSplashScreenProps) {
   const formattedDate = formatLongDate(dateKey);
@@ -114,6 +116,8 @@ export function GameSplashScreen({
             </div>
           )}
         </div>
+
+        {children && <div>{children}</div>}
 
         {/* Action Buttons */}
         <div className="pt-2 space-y-3">

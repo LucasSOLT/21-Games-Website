@@ -9,7 +9,8 @@ import {
   ArrowRight,
   ArrowUp,
   Calendar,
-  Flag,
+  Check,
+  ChevronRight,
   RotateCcw,
   Trophy,
   Undo2,
@@ -17,30 +18,34 @@ import {
   VolumeX,
 } from "lucide-react";
 import {
-  MOVE_TWO_GRID_SIZE,
+  MOVE_TWO_DIFFICULTIES,
+  MOVE_TWO_DIFFICULTY_META,
   buildMoveTwoShareText,
   computeMoveTwoStars,
-  getDominoCells,
+  getInitialBlockState,
+  isBridgeOpen,
   isMoveTwoPuzzle,
-  stepMoveTwoDomino,
+  stepBloxorzBlock,
+  type MoveTwoBlockState,
+  type MoveTwoDifficulty,
+  type MoveTwoDifficultyScoreSummary,
   type MoveTwoDirection,
-  type MoveTwoDominoState,
-  type MoveTwoPosture,
   type MoveTwoPuzzle,
-  type MoveTwoTarget,
 } from "@/data/puzzles/move-2";
 import {
   isMoveTwoMuted,
-  playMoveTwoHazardSfx,
+  playMoveTwoFallSfx,
+  playMoveTwoFragileCrackSfx,
   playMoveTwoHoleDropSfx,
-  playMoveTwoRimBumpSfx,
   playMoveTwoRollSfx,
+  playMoveTwoSwitchSfx,
   playMoveTwoVictorySfx,
   setMoveTwoMuted,
 } from "@/lib/move-two-audio";
+import type { CuboidAnimationPose } from "@/lib/move-two-renderer-3d";
+import { MoveTwoBloxorzCanvas } from "@/components/games/move-two-canvas";
 import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
 import {
-  clearGameProgress,
   fetchRemoteOverrideForGame,
   getAdminOverridesForGame,
   getGameProgress,
@@ -58,21 +63,77 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-interface MoveHistorySnapshot {
-  domino: MoveTwoDominoState;
+interface StageHistorySnapshot {
+  block: MoveTwoBlockState;
   moves: number;
-  conqueredMax: number;
-  faceEntries: Record<number, MoveTwoDominoState>;
+  falls: number;
 }
 
-interface MoveTwoSavedProgress {
+interface StageRuntimeState {
+  block: MoveTwoBlockState;
+  moves: number;
+  falls: number;
+  status: "playing" | "won";
+  bestMoves?: number;
+}
+
+interface MoveTwoSavedProgressV3 {
+  version: 3;
   puzzleId: string;
   puzzleHash: string;
-  domino: MoveTwoDominoState;
-  moves: number;
-  conqueredMax: number;
-  faceEntries: Record<number, MoveTwoDominoState>;
-  status: "playing" | "won";
+  activeDifficulty: MoveTwoDifficulty;
+  stages: Record<MoveTwoDifficulty, StageRuntimeState>;
+}
+
+function buildFreshStageStates(
+  puzzle: MoveTwoPuzzle
+): Record<MoveTwoDifficulty, StageRuntimeState> {
+  return {
+    easy: {
+      block: getInitialBlockState(puzzle.stages.easy),
+      moves: 0,
+      falls: 0,
+      status: "playing",
+    },
+    medium: {
+      block: getInitialBlockState(puzzle.stages.medium),
+      moves: 0,
+      falls: 0,
+      status: "playing",
+    },
+    hard: {
+      block: getInitialBlockState(puzzle.stages.hard),
+      moves: 0,
+      falls: 0,
+      status: "playing",
+    },
+  };
+}
+
+function isValidSavedProgressV3(
+  val: unknown,
+  expectedHash: string
+): val is MoveTwoSavedProgressV3 {
+  if (!val || typeof val !== "object") return false;
+  const v = val as Record<string, unknown>;
+  if (v.version !== 3 || v.puzzleHash !== expectedHash) return false;
+  if (!MOVE_TWO_DIFFICULTIES.includes(v.activeDifficulty as MoveTwoDifficulty)) {
+    return false;
+  }
+  const st = v.stages as Record<string, StageRuntimeState> | undefined;
+  if (!st) return false;
+  return MOVE_TWO_DIFFICULTIES.every((d) => {
+    const entry = st[d];
+    return Boolean(
+      entry &&
+        entry.block &&
+        typeof entry.block.r === "number" &&
+        typeof entry.block.c === "number" &&
+        typeof entry.block.bridgeMask === "number" &&
+        typeof entry.moves === "number" &&
+        typeof entry.falls === "number"
+    );
+  });
 }
 
 function recordMoveTwoCompletion(
@@ -82,13 +143,25 @@ function recordMoveTwoCompletion(
   stars: 1 | 2 | 3
 ): void {
   const before = getGameStats("move-2");
-  if (before.completedDates.includes(dateKey)) return;
-  const stats = recordGameWin("move-2", dateKey, 0);
   const diff = moves - par;
-  const prevBestDiff = stats.distribution.best_over_par_plus_100;
   const encodedDiff = Math.max(0, diff + 100);
+
+  if (before.completedDates.includes(dateKey)) {
+    // Already credited today's streak — still allow upgrading Best vs. Par if better!
+    const prevBest = before.distribution.best_over_par_plus_100;
+    if (prevBest === undefined || encodedDiff < prevBest) {
+      before.distribution.best_over_par_plus_100 = encodedDiff;
+      setGameStats("move-2", before);
+    }
+    return;
+  }
+
+  const stats = recordGameWin("move-2", dateKey, 0);
+  const prevBestDiff = stats.distribution.best_over_par_plus_100;
   stats.distribution.best_over_par_plus_100 =
-    prevBestDiff === undefined ? encodedDiff : Math.min(prevBestDiff, encodedDiff);
+    prevBestDiff === undefined
+      ? encodedDiff
+      : Math.min(prevBestDiff, encodedDiff);
   stats.distribution.moves_total = (stats.distribution.moves_total ?? 0) + moves;
   stats.distribution.par_total = (stats.distribution.par_total ?? 0) + par;
   if (stars === 3) {
@@ -99,131 +172,12 @@ function recordMoveTwoCompletion(
   setGameStats("move-2", stats);
 }
 
-function formatHoleBadge(posture: MoveTwoPosture, isFinalFace: boolean): string {
-  const shape =
-    posture === "UPRIGHT" ? "1×1" : posture === "FLAT_H" ? "1×2" : "2×1";
-  return isFinalFace ? `GOAL ${shape}` : `HOLE ${shape}`;
-}
-
-/**
- * Mini 3D Isometric Cube HUD (Q41):
- * Displays a crisp NYT-styled isometric 3D cube alongside all 6 face indicators (`1 → 6`),
- * highlighting completed faces and the Face 6 green final goal hole.
- */
-function IsometricCubeHud({
-  activeFace,
-  conqueredMax,
-  won,
-}: {
-  activeFace: number;
-  conqueredMax: number;
-  won: boolean;
-}) {
-  const topActive = activeFace === 0 || activeFace === 3;
-  const leftActive = activeFace === 1 || activeFace === 4;
-  const rightActive = activeFace === 2 || activeFace === 5;
-
-  return (
-    <div
-      className="inline-flex items-center gap-2 rounded-2xl border-2 border-black bg-white px-2.5 py-1.5 shadow-[0_2px_0_#111]"
-      data-testid="move-two-cube-hud"
-      aria-label={`Cube progress: Face ${activeFace + 1} of 6`}
-    >
-      <svg
-        width="36"
-        height="38"
-        viewBox="0 0 44 46"
-        className="shrink-0"
-        aria-hidden="true"
-      >
-        {/* Top isometric rhombus */}
-        <polygon
-          points="22,3 41,13 22,23 3,13"
-          fill={won ? "#2ECC71" : topActive ? "#F7DA21" : "#F7F7F5"}
-          stroke="#111111"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-        />
-        {/* 5x5 subtle grid lines on top face */}
-        <line
-          x1="15.6"
-          y1="6.3"
-          x2="34.6"
-          y2="16.3"
-          stroke="#111111"
-          strokeOpacity="0.2"
-          strokeWidth="1"
-        />
-        <line
-          x1="9.3"
-          y1="9.6"
-          x2="28.3"
-          y2="19.6"
-          stroke="#111111"
-          strokeOpacity="0.2"
-          strokeWidth="1"
-        />
-        {/* Front-left isometric rhombus */}
-        <polygon
-          points="3,13 22,23 22,43 3,33"
-          fill={won ? "#27ae60" : leftActive ? "#F7DA21" : "#EAE8E1"}
-          stroke="#111111"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-        />
-        {/* Front-right isometric rhombus */}
-        <polygon
-          points="22,23 41,13 41,33 22,43"
-          fill={
-            won
-              ? "#1e8449"
-              : activeFace === 5
-              ? "#2ECC71"
-              : rightActive
-              ? "#F7DA21"
-              : "#DCD9D0"
-          }
-          stroke="#111111"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-        />
-      </svg>
-
-      <div className="grid grid-cols-6 gap-1">
-        {[0, 1, 2, 3, 4, 5].map((idx) => {
-          const isCurrent = !won && idx === activeFace;
-          const isConquered =
-            won || idx < activeFace || (idx <= conqueredMax && idx !== activeFace);
-          return (
-            <span
-              key={idx}
-              title={`Face ${idx + 1}${idx === 5 ? " (Final Goal Hole)" : ""}`}
-              className={cn(
-                "h-5 w-5 rounded-md border text-[10px] font-mono font-black flex items-center justify-center transition-all",
-                isCurrent
-                  ? idx === 5
-                    ? "border-2 border-black bg-[#2ECC71] text-black scale-110 shadow-[0_1px_0_#111]"
-                    : "border-2 border-black bg-[#F7DA21] text-black scale-110 shadow-[0_1px_0_#111]"
-                  : isConquered
-                  ? "border-emerald-700 bg-emerald-500 text-white"
-                  : idx === 5
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                  : "border-neutral-300 bg-neutral-100 text-neutral-500"
-              )}
-            >
-              {idx + 1}
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function MoveTwoGame() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const [liveTodayKey, setLiveTodayKey] = useState<string>(() => getLocalDateKey());
+  const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
+    getLocalDateKey()
+  );
 
   useEffect(() => {
     if (dateParam) return;
@@ -243,8 +197,6 @@ export function MoveTwoGame() {
   return <MoveTwoBoard key={activeDateKey} activeDateKey={activeDateKey} />;
 }
 
-const GRID_INDICES = [0, 1, 2, 3, 4] as const;
-
 function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   const initialPuzzle = useMemo<MoveTwoPuzzle>(() => {
     const resolved = getDailyPuzzleForGame<MoveTwoPuzzle>(
@@ -262,435 +214,558 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   const puzzleHash = useMemo(() => computePuzzleContentHash(puzzle), [puzzle]);
 
   const initialSaved = useMemo(() => {
-    const saved = getGameProgress<MoveTwoSavedProgress>(
+    const raw = getGameProgress<Partial<MoveTwoSavedProgressV3>>(
       "move-2",
       activeDateKey,
       initialPuzzle.id
     );
-    if (!saved || saved.puzzleHash !== computePuzzleContentHash(initialPuzzle)) {
+    const hash = computePuzzleContentHash(initialPuzzle);
+    if (!isValidSavedProgressV3(raw, hash)) {
       return null;
     }
-    return saved;
+    return raw;
   }, [activeDateKey, initialPuzzle]);
 
   const [splashDismissed, setSplashDismissed] = useState<boolean>(false);
-  const [domino, setDomino] = useState<MoveTwoDominoState>(
-    () => initialSaved?.domino ?? initialPuzzle.start
+  const [activeDifficulty, setActiveDifficulty] = useState<MoveTwoDifficulty>(
+    () => initialSaved?.activeDifficulty ?? "easy"
   );
-  const [moves, setMoves] = useState<number>(() => initialSaved?.moves ?? 0);
-  const [conqueredMax, setConqueredMax] = useState<number>(
-    () => initialSaved?.conqueredMax ?? 0
-  );
-  const [faceEntries, setFaceEntries] = useState<Record<number, MoveTwoDominoState>>(
-    () => initialSaved?.faceEntries ?? { 0: initialPuzzle.start }
-  );
-  const [history, setHistory] = useState<MoveHistorySnapshot[]>([]);
-  const [status, setStatus] = useState<"playing" | "won">(
-    () => initialSaved?.status ?? "playing"
-  );
+  const [stageStates, setStageStates] = useState<
+    Record<MoveTwoDifficulty, StageRuntimeState>
+  >(() => initialSaved?.stages ?? buildFreshStageStates(initialPuzzle));
+  const [historyByDiff, setHistoryByDiff] = useState<
+    Record<MoveTwoDifficulty, StageHistorySnapshot[]>
+  >({
+    easy: [],
+    medium: [],
+    hard: [],
+  });
+
   const [feedback, setFeedback] = useState<{
-    kind: "bump" | "hazard" | "portal";
+    tone: "neutral" | "warn" | "info";
     message: string;
   } | null>(null);
-  const [bumpDir, setBumpDir] = useState<MoveTwoDirection | null>(null);
-  const [rollDir, setRollDir] = useState<MoveTwoDirection | null>(null);
-  const [cubeTransition, setCubeTransition] = useState<
-    "idle" | "dropping" | "rotating"
-  >("idle");
   const [muted, setMuted] = useState<boolean>(() => isMoveTwoMuted());
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);
 
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const transitionTimer1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const transitionTimer2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live 60fps animation pose & broken fragile tile indicator
+  const [animPose, setAnimPose] = useState<CuboidAnimationPose | null>(null);
+  const [brokenFragileCell, setBrokenFragileCell] = useState<{
+    r: number;
+    c: number;
+    progress: number;
+  } | null>(null);
 
-  const clearTransitionTimers = useCallback(() => {
-    if (rollTimerRef.current) {
-      clearTimeout(rollTimerRef.current);
-      rollTimerRef.current = null;
+  const rafRef = useRef<number | null>(null);
+  const animKindRef = useRef<
+    "idle" | "rolling" | "falling" | "spawning" | "winning"
+  >("idle");
+  const queuedDirRef = useRef<MoveTwoDirection | null>(null);
+  const performMoveRef = useRef<(dir: MoveTwoDirection) => void>(() => {});
+
+  const cancelActiveRaf = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-    if (transitionTimer1Ref.current) {
-      clearTimeout(transitionTimer1Ref.current);
-      transitionTimer1Ref.current = null;
-    }
-    if (transitionTimer2Ref.current) {
-      clearTimeout(transitionTimer2Ref.current);
-      transitionTimer2Ref.current = null;
-    }
+    animKindRef.current = "idle";
+    queuedDirRef.current = null;
+    setAnimPose(null);
+    setBrokenFragileCell(null);
   }, []);
 
-  const applyNewPuzzle = useCallback(
-    (next: MoveTwoPuzzle) => {
-      clearTransitionTimers();
-      clearGameProgress("move-2", activeDateKey);
-      setPuzzle(next);
-      setDomino(next.start);
-      setMoves(0);
-      setConqueredMax(0);
-      setFaceEntries({ 0: next.start });
-      setHistory([]);
-      setStatus("playing");
-      setFeedback(null);
-      setRollDir(null);
-      setCubeTransition("idle");
-    },
-    [activeDateKey, clearTransitionTimers]
-  );
-
-  // Remote override sync + live Realtime puzzle updates
-  useEffect(() => {
-    let active = true;
-    void fetchRemoteOverrideForGame("move-2", activeDateKey).then((remote) => {
-      if (!active || !isMoveTwoPuzzle(remote)) return;
-      if (computePuzzleContentHash(remote) !== puzzleHash) {
-        applyNewPuzzle(remote);
-      }
-    });
-
-    const onUpdated = (e: Event) => {
-      if (!active) return;
-      const detail = (e as CustomEvent)?.detail;
-      if (detail?.gameSlug && detail.gameSlug !== "move-2") return;
-      if (!detail?.dateKey || detail.dateKey === activeDateKey) {
-        const local = getAdminOverridesForGame("move-2")[activeDateKey];
-        if (isMoveTwoPuzzle(local) && computePuzzleContentHash(local) !== puzzleHash) {
-          applyNewPuzzle(local);
-        }
-      }
-    };
-    window.addEventListener("solgames:puzzles-updated", onUpdated);
-    return () => {
-      active = false;
-      window.removeEventListener("solgames:puzzles-updated", onUpdated);
-    };
-  }, [activeDateKey, puzzleHash, applyNewPuzzle]);
-
   useEffect(() => {
     return () => {
-      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      clearTransitionTimers();
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
     };
-  }, [clearTransitionTimers]);
+  }, []);
 
-  const showTransientFeedback = useCallback(
-    (kind: "bump" | "hazard" | "portal", message: string) => {
-      setFeedback({ kind, message });
-      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-      feedbackTimerRef.current = setTimeout(() => {
+  // Remote override check (Supabase published puzzles)
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRemoteOverrideForGame("move-2", activeDateKey).then(
+      (remote) => {
+        if (cancelled || !remote || !isMoveTwoPuzzle(remote)) return;
+        const nextHash = computePuzzleContentHash(remote);
+        if (nextHash === computePuzzleContentHash(puzzle)) return;
+        cancelActiveRaf();
+        setPuzzle(remote);
+        setStageStates(buildFreshStageStates(remote));
+        setHistoryByDiff({ easy: [], medium: [], hard: [] });
         setFeedback(null);
-      }, 2200);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDateKey, puzzle, cancelActiveRaf]);
+
+  // Persist v3 progress to localStorage whenever state changes
+  useEffect(() => {
+    const hasAnyActivity = MOVE_TWO_DIFFICULTIES.some(
+      (d) => stageStates[d].moves > 0 || stageStates[d].status === "won"
+    );
+    if (!hasAnyActivity) return;
+
+    const payload: MoveTwoSavedProgressV3 = {
+      version: 3,
+      puzzleId: puzzle.id,
+      puzzleHash,
+      activeDifficulty,
+      stages: stageStates,
+    };
+    saveGameProgress("move-2", activeDateKey, payload);
+  }, [activeDateKey, puzzle.id, puzzleHash, activeDifficulty, stageStates]);
+
+  const currentStage = puzzle.stages[activeDifficulty];
+  const currentState = stageStates[activeDifficulty];
+
+  const runSpawnDropAnimation = useCallback(
+    (spawnBlock: MoveTwoBlockState) => {
+      animKindRef.current = "spawning";
+      const startTs = performance.now();
+      const duration = 165;
+
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - startTs) / duration);
+        const dropZ = (1 - t) * (1 - t) * 0.95;
+        setAnimPose({
+          mode: "idle",
+          state: spawnBlock,
+          dropZ,
+        });
+        if (t < 1) {
+          rafRef.current = requestAnimationFrame(tick);
+        } else {
+          rafRef.current = null;
+          animKindRef.current = "idle";
+          setAnimPose(null);
+        }
+      };
+      rafRef.current = requestAnimationFrame(tick);
     },
     []
   );
 
-  const persist = useCallback(
-    (
-      nextDomino: MoveTwoDominoState,
-      nextMoves: number,
-      nextConquered: number,
-      nextEntries: Record<number, MoveTwoDominoState>,
-      nextStatus: "playing" | "won"
-    ) => {
-      saveGameProgress<MoveTwoSavedProgress>("move-2", activeDateKey, {
-        puzzleId: puzzle.id,
-        puzzleHash,
-        domino: nextDomino,
-        moves: nextMoves,
-        conqueredMax: nextConquered,
-        faceEntries: nextEntries,
-        status: nextStatus,
-      });
-    },
-    [activeDateKey, puzzle.id, puzzleHash]
-  );
-
-  const handleToggleMute = useCallback(() => {
-    const next = !muted;
-    setMuted(next);
-    setMoveTwoMuted(next);
-  }, [muted]);
-
-  const triggerRollAnimation = useCallback((dir: MoveTwoDirection) => {
-    if (rollTimerRef.current) clearTimeout(rollTimerRef.current);
-    setRollDir(dir);
-    rollTimerRef.current = setTimeout(() => {
-      setRollDir(null);
-    }, 320);
-  }, []);
-
-  const handleMove = useCallback(
+  const performMove = useCallback(
     (dir: MoveTwoDirection) => {
-      if (status !== "playing") return;
+      const diff = activeDifficulty;
+      const stage = puzzle.stages[diff];
+      const runtime = stageStates[diff];
+      if (runtime.status === "won") return;
 
-      const outcome = stepMoveTwoDomino(puzzle, domino, dir);
-      if (outcome.kind === "bump") {
-        playMoveTwoRimBumpSfx();
-        setBumpDir(dir);
-        setTimeout(() => setBumpDir(null), 260);
-        showTransientFeedback("bump", "Blocked by a wall.");
+      // 1-deep input buffer while a normal 230ms roll is mid-flight
+      if (animKindRef.current === "rolling") {
+        queuedDirRef.current = dir;
+        return;
+      }
+      if (animKindRef.current !== "idle") {
         return;
       }
 
-      const snapshot: MoveHistorySnapshot = {
-        domino,
-        moves,
-        conqueredMax,
-        faceEntries: { ...faceEntries },
-      };
-      setHistory((prev) => [...prev, snapshot]);
+      const outcome = stepBloxorzBlock(stage, runtime.block, dir);
 
-      const nextMoves = moves + 1;
-      setMoves(nextMoves);
+      // Push snapshot for Undo
+      setHistoryByDiff((prev) => ({
+        ...prev,
+        [diff]: [
+          ...prev[diff],
+          {
+            block: runtime.block,
+            moves: runtime.moves,
+            falls: runtime.falls,
+          },
+        ],
+      }));
 
-      if (outcome.kind === "hazard") {
-        playMoveTwoHazardSfx();
-        const faceStart = puzzle.faces[domino.face]?.start;
-        const entryState: MoveTwoDominoState =
-          faceEntries[domino.face] ??
-          (faceStart
-            ? {
-                face: domino.face,
-                posture: faceStart.posture,
-                r: faceStart.r,
-                c: faceStart.c,
-              }
-            : puzzle.start);
-        setBumpDir(dir);
-        setTimeout(() => setBumpDir(null), 280);
-        setDomino(entryState);
-        showTransientFeedback(
-          "hazard",
-          "You hit an obstacle! Resetting position."
-        );
-        persist(entryState, nextMoves, conqueredMax, faceEntries, "playing");
-        return;
-      }
+      if (outcome.kind === "moved") {
+        playMoveTwoRollSfx(outcome.next.posture);
+        if (outcome.triggeredSwitch) {
+          const bridgeOpenNow = isBridgeOpen(
+            stage,
+            outcome.next.bridgeMask,
+            outcome.triggeredSwitch.bridgeId
+          );
+          playMoveTwoSwitchSfx(outcome.triggeredSwitch.kind, bridgeOpenNow);
+          setFeedback({
+            tone: "info",
+            message: `Bridge ${outcome.triggeredSwitch.bridgeId} ${
+              bridgeOpenNow ? "extended!" : "retracted."
+            }`,
+          });
+        } else {
+          setFeedback(null);
+        }
 
-      if (outcome.kind === "portal") {
-        playMoveTwoHoleDropSfx();
-        clearTransitionTimers();
-        triggerRollAnimation(dir);
-        setCubeTransition("dropping");
-        transitionTimer1Ref.current = setTimeout(() => {
-          setCubeTransition("rotating");
-        }, 320);
-        transitionTimer2Ref.current = setTimeout(() => {
-          setCubeTransition("idle");
-        }, 840);
+        animKindRef.current = "rolling";
+        const fromBlock = runtime.block;
+        const startTs = performance.now();
+        const duration = 225;
 
-        const nextConquered = Math.max(conqueredMax, outcome.toFace);
-        const nextEntries = {
-          ...faceEntries,
-          [outcome.toFace]: faceEntries[outcome.toFace] ?? outcome.next,
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - startTs) / duration);
+          setAnimPose({
+            mode: "rolling",
+            from: fromBlock,
+            dir,
+            progress: t,
+          });
+          if (t < 1) {
+            rafRef.current = requestAnimationFrame(tick);
+          } else {
+            rafRef.current = null;
+            animKindRef.current = "idle";
+            setAnimPose(null);
+            setStageStates((prev) => ({
+              ...prev,
+              [diff]: {
+                ...prev[diff],
+                block: outcome.next,
+                moves: prev[diff].moves + 1,
+              },
+            }));
+
+            const queued = queuedDirRef.current;
+            queuedDirRef.current = null;
+            if (queued) {
+              requestAnimationFrame(() => performMoveRef.current(queued));
+            }
+          }
         };
-        setDomino(outcome.next);
-        setConqueredMax(nextConquered);
-        setFaceEntries(nextEntries);
-        showTransientFeedback(
-          "portal",
-          `Nice! Moving to Face ${outcome.toFace + 1} of 6.`
-        );
-        persist(outcome.next, nextMoves, nextConquered, nextEntries, "playing");
+
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      if (outcome.kind === "won") {
-        playMoveTwoVictorySfx();
-        clearTransitionTimers();
-        triggerRollAnimation(dir);
-        setCubeTransition("dropping");
-        transitionTimer1Ref.current = setTimeout(() => {
-          setCubeTransition("idle");
-        }, 360);
+      if (outcome.kind === "fall_void" || outcome.kind === "fall_bridge") {
+        playMoveTwoRollSfx(outcome.attempted.posture);
+        playMoveTwoFallSfx();
+        setFeedback({
+          tone: "warn",
+          message:
+            outcome.kind === "fall_bridge"
+              ? `Bridge ${outcome.bridgeId} is closed! Trigger its switch first.`
+              : "Tipped off the island edge! Resetting to Start.",
+        });
 
-        const stars = computeMoveTwoStars(nextMoves, puzzle.par);
-        setDomino(outcome.next);
-        setConqueredMax(5);
-        setStatus("won");
-        setFeedback(null);
-        persist(outcome.next, nextMoves, 5, faceEntries, "won");
-        recordMoveTwoCompletion(activeDateKey, nextMoves, puzzle.par, stars);
+        animKindRef.current = "falling";
+        queuedDirRef.current = null;
+        const fromBlock = runtime.block;
+        const startTs = performance.now();
+        const duration = 480;
+
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - startTs) / duration);
+          setAnimPose({
+            mode: "falling_edge",
+            from: fromBlock,
+            dir,
+            progress: t,
+            overhangDir: dir,
+          });
+          if (t < 1) {
+            rafRef.current = requestAnimationFrame(tick);
+          } else {
+            const resetBlock = getInitialBlockState(stage);
+            setStageStates((prev) => ({
+              ...prev,
+              [diff]: {
+                ...prev[diff],
+                block: resetBlock,
+                moves: prev[diff].moves + 1,
+                falls: prev[diff].falls + 1,
+              },
+            }));
+            runSpawnDropAnimation(resetBlock);
+          }
+        };
+
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
 
-      // Standard roll within the active 5×5 face with slower 320ms physics animation
-      playMoveTwoRollSfx(outcome.next.posture);
-      triggerRollAnimation(dir);
-      setDomino(outcome.next);
-      persist(outcome.next, nextMoves, conqueredMax, faceEntries, "playing");
+      if (outcome.kind === "fall_fragile") {
+        playMoveTwoFragileCrackSfx();
+        setFeedback({
+          tone: "warn",
+          message:
+            "Fragile orange tile broke! Roll flat across orange tiles instead of standing upright.",
+        });
+
+        animKindRef.current = "falling";
+        queuedDirRef.current = null;
+        const fromBlock = runtime.block;
+        const startTs = performance.now();
+        const duration = 490;
+
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - startTs) / duration);
+          setAnimPose({
+            mode: "breaking_fragile",
+            from: fromBlock,
+            dir,
+            progress: t,
+            landed: outcome.attempted,
+          });
+          if (t > 0.42) {
+            setBrokenFragileCell({
+              r: outcome.brokenCell.r,
+              c: outcome.brokenCell.c,
+              progress: (t - 0.42) / 0.58,
+            });
+          }
+          if (t < 1) {
+            rafRef.current = requestAnimationFrame(tick);
+          } else {
+            setBrokenFragileCell(null);
+            const resetBlock = getInitialBlockState(stage);
+            setStageStates((prev) => ({
+              ...prev,
+              [diff]: {
+                ...prev[diff],
+                block: resetBlock,
+                moves: prev[diff].moves + 1,
+                falls: prev[diff].falls + 1,
+              },
+            }));
+            runSpawnDropAnimation(resetBlock);
+          }
+        };
+
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
+      // outcome.kind === "won"
+      playMoveTwoRollSfx("UPRIGHT");
+      playMoveTwoHoleDropSfx();
+      setFeedback(null);
+
+      animKindRef.current = "winning";
+      queuedDirRef.current = null;
+      const fromBlock = runtime.block;
+      const finalMoves = runtime.moves + 1;
+      const stars = computeMoveTwoStars(finalMoves, stage.par);
+      const startTs = performance.now();
+      const duration = 460;
+
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - startTs) / duration);
+        setAnimPose({
+          mode: "dropping_goal",
+          from: fromBlock,
+          dir,
+          progress: t,
+          goal: stage.goal,
+        });
+        if (t < 1) {
+          rafRef.current = requestAnimationFrame(tick);
+        } else {
+          rafRef.current = null;
+          animKindRef.current = "idle";
+          setAnimPose(null);
+          playMoveTwoVictorySfx();
+          recordMoveTwoCompletion(activeDateKey, finalMoves, stage.par, stars);
+          setStageStates((prev) => {
+            const prevBest = prev[diff].bestMoves;
+            const nextBest =
+              prevBest === undefined ? finalMoves : Math.min(prevBest, finalMoves);
+            return {
+              ...prev,
+              [diff]: {
+                ...prev[diff],
+                block: outcome.next,
+                moves: finalMoves,
+                status: "won",
+                bestMoves: nextBest,
+              },
+            };
+          });
+        }
+      };
+
+      rafRef.current = requestAnimationFrame(tick);
     },
-    [
-      status,
-      puzzle,
-      domino,
-      moves,
-      conqueredMax,
-      faceEntries,
-      persist,
-      activeDateKey,
-      showTransientFeedback,
-      clearTransitionTimers,
-      triggerRollAnimation,
-    ]
+    [activeDifficulty, puzzle.stages, stageStates, activeDateKey, runSpawnDropAnimation]
   );
 
-  const handleUndo = useCallback(() => {
-    if (status !== "playing" || history.length === 0) return;
-    clearTransitionTimers();
-    setRollDir(null);
-    setCubeTransition("idle");
-    const prev = history[history.length - 1]!;
-    setHistory((h) => h.slice(0, -1));
-    setDomino(prev.domino);
-    setMoves(prev.moves);
-    setConqueredMax(prev.conqueredMax);
-    setFaceEntries(prev.faceEntries);
-    setFeedback(null);
-    persist(
-      prev.domino,
-      prev.moves,
-      prev.conqueredMax,
-      prev.faceEntries,
-      "playing"
-    );
-  }, [status, history, persist, clearTransitionTimers]);
-
-  const handleResetFace = useCallback(() => {
-    if (status !== "playing") return;
-    const faceStart = puzzle.faces[domino.face]?.start;
-    const entry: MoveTwoDominoState =
-      faceEntries[domino.face] ??
-      (faceStart
-        ? {
-            face: domino.face,
-            posture: faceStart.posture,
-            r: faceStart.r,
-            c: faceStart.c,
-          }
-        : puzzle.start);
-    if (
-      entry.face === domino.face &&
-      entry.posture === domino.posture &&
-      entry.r === domino.r &&
-      entry.c === domino.c
-    ) {
-      return;
-    }
-    setHistory((prev) => [
-      ...prev,
-      { domino, moves, conqueredMax, faceEntries: { ...faceEntries } },
-    ]);
-    setRollDir(null);
-    setDomino(entry);
-    showTransientFeedback("portal", "Position reset.");
-    persist(entry, moves, conqueredMax, faceEntries, "playing");
-  }, [
-    status,
-    faceEntries,
-    domino,
-    puzzle.faces,
-    puzzle.start,
-    moves,
-    conqueredMax,
-    persist,
-    showTransientFeedback,
-  ]);
-
-  const handleRestartFull = useCallback(() => {
-    clearTransitionTimers();
-    clearGameProgress("move-2", activeDateKey);
-    setDomino(puzzle.start);
-    setMoves(0);
-    setConqueredMax(0);
-    setFaceEntries({ 0: puzzle.start });
-    setHistory([]);
-    setStatus("playing");
-    setFeedback(null);
-    setRollDir(null);
-    setCubeTransition("idle");
-  }, [activeDateKey, puzzle.start, clearTransitionTimers]);
-
-  // Desktop Arrow / WASD + Z undo controls (strictly after splash screen dismiss)
   useEffect(() => {
-    if (!splashDismissed || status !== "playing") return;
+    performMoveRef.current = performMove;
+  }, [performMove]);
+
+  // Keyboard controls (Arrow keys + WASD)
+  useEffect(() => {
+    if (!splashDismissed || currentState.status === "won") return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (document.querySelector('[role="dialog"]')) return;
-      const key = e.key;
-      if (key === "ArrowUp" || key === "w" || key === "W") {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      let dir: MoveTwoDirection | null = null;
+      switch (e.key) {
+        case "ArrowUp":
+        case "w":
+        case "W":
+          dir = "up";
+          break;
+        case "ArrowDown":
+        case "s":
+        case "S":
+          dir = "down";
+          break;
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          dir = "left";
+          break;
+        case "ArrowRight":
+        case "d":
+        case "D":
+          dir = "right";
+          break;
+      }
+      if (dir) {
         e.preventDefault();
-        handleMove("up");
-      } else if (key === "ArrowDown" || key === "s" || key === "S") {
-        e.preventDefault();
-        handleMove("down");
-      } else if (key === "ArrowLeft" || key === "a" || key === "A") {
-        e.preventDefault();
-        handleMove("left");
-      } else if (key === "ArrowRight" || key === "d" || key === "D") {
-        e.preventDefault();
-        handleMove("right");
-      } else if (key === "z" || key === "Z" || key === "Backspace") {
-        e.preventDefault();
-        handleUndo();
+        performMoveRef.current(dir);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splashDismissed, status, handleMove, handleUndo]);
+  }, [splashDismissed, currentState.status]);
 
-  const activeFace = puzzle.faces[domino.face]!;
-  const faceHole = useMemo<MoveTwoTarget>(
-    () =>
-      activeFace.hole ??
-      (domino.face === 5
-        ? puzzle.target
-        : {
-            posture: "UPRIGHT",
-            r: MOVE_TWO_GRID_SIZE - 1,
-            c: MOVE_TWO_GRID_SIZE - 1,
-          }),
-    [activeFace.hole, domino.face, puzzle.target]
-  );
-  const faceStart = useMemo<MoveTwoTarget>(
-    () =>
-      activeFace.start ?? {
-        posture: puzzle.start.posture,
-        r: puzzle.start.r,
-        c: puzzle.start.c,
+  const handleSelectDifficulty = (diff: MoveTwoDifficulty) => {
+    if (diff === activeDifficulty) return;
+    cancelActiveRaf();
+    setFeedback(null);
+    setActiveDifficulty(diff);
+  };
+
+  const handleUndo = () => {
+    if (currentState.status === "won") return;
+    const stack = historyByDiff[activeDifficulty];
+    if (stack.length === 0) return;
+    cancelActiveRaf();
+    const last = stack[stack.length - 1]!;
+    setHistoryByDiff((prev) => ({
+      ...prev,
+      [activeDifficulty]: prev[activeDifficulty].slice(0, -1),
+    }));
+    setStageStates((prev) => ({
+      ...prev,
+      [activeDifficulty]: {
+        ...prev[activeDifficulty],
+        block: last.block,
+        moves: last.moves,
+        falls: last.falls,
+        status: "playing",
       },
-    [activeFace.start, puzzle.start.posture, puzzle.start.r, puzzle.start.c]
+    }));
+    setFeedback(null);
+  };
+
+  const handleResetStage = () => {
+    cancelActiveRaf();
+    const resetBlock = getInitialBlockState(currentStage);
+    if (currentState.status !== "won") {
+      setHistoryByDiff((prev) => ({
+        ...prev,
+        [activeDifficulty]: [
+          ...prev[activeDifficulty],
+          {
+            block: currentState.block,
+            moves: currentState.moves,
+            falls: currentState.falls,
+          },
+        ],
+      }));
+    } else {
+      setHistoryByDiff((prev) => ({ ...prev, [activeDifficulty]: [] }));
+    }
+    setStageStates((prev) => ({
+      ...prev,
+      [activeDifficulty]: {
+        ...prev[activeDifficulty],
+        block: resetBlock,
+        moves: prev[activeDifficulty].status === "won" ? 0 : prev[activeDifficulty].moves,
+        falls: prev[activeDifficulty].status === "won" ? 0 : prev[activeDifficulty].falls,
+        status: "playing",
+      },
+    }));
+    setFeedback(null);
+    runSpawnDropAnimation(resetBlock);
+  };
+
+  const handleToggleMute = () => {
+    const next = !muted;
+    setMoveTwoMuted(next);
+    setMuted(next);
+  };
+
+  const effectivePose: CuboidAnimationPose = animPose ?? {
+    mode: "idle",
+    state: currentState.block,
+  };
+
+  const anyWonToday =
+    MOVE_TWO_DIFFICULTIES.some((d) => stageStates[d].status === "won") ||
+    isDateCompleted("move-2", activeDateKey);
+
+  const hasSavedMoves = MOVE_TWO_DIFFICULTIES.some(
+    (d) => stageStates[d].moves > 0
   );
 
-  const occupiedCells = useMemo(() => getDominoCells(domino), [domino]);
-  const occupiedKeys = useMemo(
-    () => new Set(occupiedCells.map((c) => `${c.r},${c.c}`)),
-    [occupiedCells]
-  );
-  const holeCells = useMemo(() => getDominoCells(faceHole), [faceHole]);
-  const holeKeys = useMemo(
-    () => new Set(holeCells.map((c) => `${c.r},${c.c}`)),
-    [holeCells]
-  );
-  const startKeys = useMemo(
-    () => new Set(getDominoCells(faceStart).map((c) => `${c.r},${c.c}`)),
-    [faceStart]
-  );
+  const solvedResultsMap = useMemo(() => {
+    const map: Partial<Record<MoveTwoDifficulty, MoveTwoDifficultyScoreSummary>> =
+      {};
+    for (const d of MOVE_TWO_DIFFICULTIES) {
+      const st = stageStates[d];
+      const movesUsed =
+        st.status === "won" ? st.moves : st.bestMoves;
+      if (movesUsed !== undefined) {
+        const par = puzzle.stages[d].par;
+        map[d] = {
+          moves: movesUsed,
+          par,
+          stars: computeMoveTwoStars(movesUsed, par),
+        };
+      }
+    }
+    return map;
+  }, [stageStates, puzzle.stages]);
 
-  const stars = computeMoveTwoStars(moves, puzzle.par);
   const shareText = useMemo(
     () =>
       buildMoveTwoShareText({
         puzzleNumber: puzzle.puzzleNumber,
         title: puzzle.title,
-        moves,
-        par: puzzle.par,
-        stars,
+        moves: currentState.moves,
+        par: currentStage.par,
+        stars: computeMoveTwoStars(currentState.moves, currentStage.par),
+        results: solvedResultsMap,
       }),
-    [puzzle.puzzleNumber, puzzle.title, moves, puzzle.par, stars]
+    [
+      puzzle.puzzleNumber,
+      puzzle.title,
+      currentState.moves,
+      currentStage.par,
+      solvedResultsMap,
+    ]
   );
+
+  const nextUnsolvedDifficulty = useMemo<MoveTwoDifficulty | null>(() => {
+    const orderedAfterCurrent: MoveTwoDifficulty[] =
+      activeDifficulty === "easy"
+        ? ["medium", "hard"]
+        : activeDifficulty === "medium"
+        ? ["hard", "easy"]
+        : ["easy", "medium"];
+    for (const d of orderedAfterCurrent) {
+      if (stageStates[d].status !== "won" && stageStates[d].bestMoves === undefined) {
+        return d;
+      }
+    }
+    return null;
+  }, [activeDifficulty, stageStates]);
 
   if (!splashDismissed) {
     return (
@@ -704,56 +779,77 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         <GameSplashScreen
           gameSlug="move-2"
           gameTitle="Move Two"
-          tagline="Move the 3D 2×1 block across 6 cube faces and drop into each hole."
-          theme={`${puzzle.title} · Par ${puzzle.par}`}
+          tagline="Roll the 3D 2×1 block across floating islands and drop upright into the green square hole."
+          theme={puzzle.title}
           author={puzzle.author}
           puzzleNumber={puzzle.puzzleNumber}
           dateKey={activeDateKey}
-          showCreate={false}
           isCompletedToday={
-            status === "won" || isDateCompleted("move-2", activeDateKey)
+            stageStates[activeDifficulty].status === "won" ||
+            (anyWonToday && !hasSavedMoves)
           }
-          hasSavedProgress={moves > 0 && status !== "won"}
+          hasSavedProgress={hasSavedMoves}
           onPlay={() => setSplashDismissed(true)}
-        />
+        >
+          <div
+            className="space-y-2 text-left"
+            data-testid="move-two-splash-difficulty"
+          >
+            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 text-center">
+              Choose Board Size
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {MOVE_TWO_DIFFICULTIES.map((diff) => {
+                const meta = MOVE_TWO_DIFFICULTY_META[diff];
+                const st = stageStates[diff];
+                const solved = st.status === "won" || st.bestMoves !== undefined;
+                const selected = activeDifficulty === diff;
+                return (
+                  <button
+                    key={diff}
+                    type="button"
+                    onClick={() => setActiveDifficulty(diff)}
+                    className={cn(
+                      "relative rounded-2xl border-2 p-2.5 text-center transition-all cursor-pointer",
+                      selected
+                        ? "border-black bg-[#F7DA21] text-black shadow-[0_2px_0_#171717]"
+                        : "border-neutral-200 bg-neutral-50 text-neutral-700 hover:border-black"
+                    )}
+                  >
+                    {solved && (
+                      <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-[#2ECC71] border border-black flex items-center justify-center text-black">
+                        <Check className="h-2.5 w-2.5 stroke-[3]" />
+                      </span>
+                    )}
+                    <div className="font-headline font-black text-xs sm:text-sm">
+                      {meta.label}
+                    </div>
+                    <div className="font-mono text-[11px] font-bold opacity-80">
+                      {meta.sizeLabel}
+                    </div>
+                    <div className="text-[10px] font-medium opacity-75 mt-0.5">
+                      Par {puzzle.stages[diff].par}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </GameSplashScreen>
       </GameShell>
     );
   }
 
+  const currentStars = computeMoveTwoStars(
+    currentState.moves,
+    currentStage.par
+  );
   const postureLabel =
-    domino.posture === "UPRIGHT"
-      ? "Standing 1×1 (2 Stacked)"
-      : domino.posture === "FLAT_H"
+    currentState.block.posture === "UPRIGHT"
+      ? "Standing 1×1"
+      : currentState.block.posture === "FLAT_H"
       ? "Flat 1×2 ↔"
       : "Flat 2×1 ↕";
-
-  const holeRequirementLabel =
-    faceHole.posture === "UPRIGHT"
-      ? "Drop Standing (1×1) into Hole"
-      : faceHole.posture === "FLAT_H"
-      ? "Drop Flat (1×2 ↔) into Hole"
-      : "Drop Flat (2×1 ↕) into Hole";
-
-  const stageTransform =
-    cubeTransition === "rotating"
-      ? "rotateX(33deg) rotateY(-16deg) scale(0.95)"
-      : cubeTransition === "dropping"
-      ? "rotateX(28deg) scale(0.98)"
-      : "rotateX(25deg)";
-
-  // 3D rolling physics transform on the 2x1 block actor (320ms smooth roll)
-  const blockRollTransform =
-    cubeTransition === "dropping"
-      ? "translateY(8px) scale(0.78)"
-      : rollDir === "right"
-      ? "translateY(-5px) rotateZ(5deg) scale(1.03)"
-      : rollDir === "left"
-      ? "translateY(-5px) rotateZ(-5deg) scale(1.03)"
-      : rollDir === "up"
-      ? "translateY(-7px) scale(1.04)"
-      : rollDir === "down"
-      ? "translateY(-3px) scale(1.03)"
-      : "translateY(0px) scale(1)";
 
   return (
     <GameShell
@@ -762,543 +858,330 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       puzzleNumber={puzzle.puzzleNumber}
       dateKey={activeDateKey}
       author={puzzle.author}
-      subtitle="Move the 3D 2×1 block into the hole on all 6 faces of the cube."
-      helpOpen={helpOpen}
-      onHelpOpenChange={setHelpOpen}
-      statsOpen={statsOpen}
-      onStatsOpenChange={setStatsOpen}
     >
-      <div
-        className="mx-auto max-w-lg space-y-3.5 select-none"
-        data-testid="move-two-board"
-      >
-        {/* Top Status + Mini 3D Isometric Cube HUD + Mute Button */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Badge variant="green" className="font-mono text-xs font-black">
-                Face {domino.face + 1} / 6
-              </Badge>
-              <span
-                className="font-mono text-xs sm:text-sm font-black text-black"
-                data-testid="move-two-score-pill"
+      <div className="mx-auto max-w-xl w-full px-3 py-3 sm:py-5 space-y-3">
+        {/* NYT Sudoku-Style Difficulty Switcher Tabs */}
+        <div
+          className="grid grid-cols-3 gap-1.5 rounded-2xl border-2 border-black bg-white p-1 shadow-[0_2px_0_#171717]"
+          data-testid="move-two-difficulty-tabs"
+          role="tablist"
+          aria-label="Move Two board difficulty"
+        >
+          {MOVE_TWO_DIFFICULTIES.map((diff) => {
+            const meta = MOVE_TWO_DIFFICULTY_META[diff];
+            const st = stageStates[diff];
+            const solved = st.status === "won" || st.bestMoves !== undefined;
+            const active = activeDifficulty === diff;
+            return (
+              <button
+                key={diff}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`move-two-diff-${diff}`}
+                onClick={() => handleSelectDifficulty(diff)}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                  active
+                    ? "bg-black text-white shadow-sm"
+                    : "bg-transparent text-neutral-700 hover:bg-neutral-100"
+                )}
               >
-                Moves: {moves} · Par: {puzzle.par}
-              </span>
-            </div>
-            <p className="text-[11px] font-semibold text-neutral-600">
-              Block: <span className="font-bold text-black">{postureLabel}</span>
-              <span className="ml-2 font-bold text-emerald-700">
-                · {holeRequirementLabel}
-              </span>
-            </p>
+                <span>{meta.label}</span>
+                <span
+                  className={cn(
+                    "font-mono text-[11px]",
+                    active ? "text-[#F7DA21]" : "text-neutral-500"
+                  )}
+                >
+                  {meta.sizeLabel}
+                </span>
+                {solved && (
+                  <span
+                    className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#2ECC71] text-black border border-black"
+                    title={`${meta.label} solved`}
+                  >
+                    <Check className="h-2.5 w-2.5 stroke-[3]" />
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Compact Status & Audio Strip */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-black bg-white px-3 py-2 shadow-[0_2px_0_#171717]">
+          <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
+            <span className="font-mono font-black text-black">
+              Moves: {currentState.moves}
+            </span>
+            <span className="text-neutral-300">·</span>
+            <span className="font-mono font-bold text-neutral-600">
+              Par: {currentStage.par}
+            </span>
+            {currentState.falls > 0 && (
+              <>
+                <span className="text-neutral-300">·</span>
+                <span className="font-mono font-semibold text-orange-700">
+                  Falls: {currentState.falls}
+                </span>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className="border-black bg-[#FEF9C3] text-black font-mono text-[11px] font-bold px-2 py-0.5"
+            >
+              {postureLabel}
+            </Badge>
             <button
               type="button"
               onClick={handleToggleMute}
               data-testid="move-two-mute-toggle"
               aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
-              title={muted ? "Sound Muted (Tap to Unmute)" : "Sound On (Tap to Mute)"}
-              className="h-9 w-9 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 flex items-center justify-center shadow-[0_2px_0_#111] cursor-pointer transition-colors"
+              title={muted ? "Unmute SFX" : "Mute SFX"}
+              className="h-7 w-7 rounded-full border border-neutral-300 hover:border-black bg-neutral-50 flex items-center justify-center text-neutral-700 cursor-pointer"
             >
               {muted ? (
-                <VolumeX className="h-4 w-4 text-neutral-500" />
+                <VolumeX className="h-3.5 w-3.5" />
               ) : (
-                <Volume2 className="h-4 w-4 text-black" />
+                <Volume2 className="h-3.5 w-3.5" />
               )}
             </button>
-            <IsometricCubeHud
-              activeFace={domino.face}
-              conqueredMax={conqueredMax}
-              won={status === "won"}
-            />
           </div>
         </div>
 
-        {/* Transient feedback banner */}
-        <div className="min-h-6 flex items-center justify-center">
-          {feedback ? (
-            <p
-              className={cn(
-                "px-3 py-0.5 rounded-full text-xs font-bold border",
-                feedback.kind === "portal"
-                  ? "bg-emerald-50 border-emerald-300 text-emerald-900"
-                  : feedback.kind === "hazard"
-                  ? "bg-red-50 border-red-300 text-red-900"
-                  : "bg-neutral-100 border-neutral-300 text-neutral-800"
-              )}
-            >
-              {feedback.message}
-            </p>
-          ) : domino.face < 5 ? (
-            <p className="text-xs font-semibold text-neutral-600">
-              Move the 2×1 block to{" "}
-              <span className="font-black text-emerald-700">
-                {holeRequirementLabel}
-              </span>{" "}
-              to advance to Face {domino.face + 2}.
-            </p>
-          ) : (
-            <p className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-              <Flag className="h-3.5 w-3.5" /> Final Face 6! {holeRequirementLabel}
-            </p>
-          )}
-        </div>
-
-        {/* NYT-Styled 2.5D Tilted (~25°) 5×5 Cube Face & Sharp 3D Two-Cube 2×1 Block */}
-        <div
-          onTouchStart={(e) => {
-            const t = e.touches[0];
-            if (t) touchStartRef.current = { x: t.clientX, y: t.clientY };
-          }}
-          onTouchEnd={(e) => {
-            const start = touchStartRef.current;
-            touchStartRef.current = null;
-            const end = e.changedTouches[0];
-            if (!start || !end) return;
-            const dx = end.clientX - start.x;
-            const dy = end.clientY - start.y;
-            if (Math.max(Math.abs(dx), Math.abs(dy)) < 26) return;
-            if (Math.abs(dx) > Math.abs(dy)) {
-              handleMove(dx > 0 ? "right" : "left");
-            } else {
-              handleMove(dy > 0 ? "down" : "up");
-            }
-          }}
-          style={{ perspective: "920px" }}
-          className={cn(
-            "relative mx-auto w-full max-w-[360px] py-2 flex flex-col items-center transition-transform duration-200",
-            bumpDir === "left" && "-translate-x-1.5",
-            bumpDir === "right" && "translate-x-1.5",
-            bumpDir === "up" && "-translate-y-1.5",
-            bumpDir === "down" && "translate-y-1.5"
-          )}
-          data-testid="move-two-25d-stage"
-        >
-          {/* Tilted 3D Cube Slab */}
+        {/* Feedback Banner */}
+        {feedback && (
           <div
-            style={{
-              transform: stageTransform,
-              transformStyle: "preserve-3d",
-            }}
-            className="w-full transition-transform duration-500 ease-out"
+            role="status"
+            className={cn(
+              "rounded-xl border-2 px-3 py-1.5 text-xs font-bold text-center transition-all",
+              feedback.tone === "warn"
+                ? "border-orange-500 bg-orange-50 text-orange-950"
+                : feedback.tone === "info"
+                ? "border-blue-500 bg-blue-50 text-blue-950"
+                : "border-neutral-300 bg-neutral-50 text-neutral-800"
+            )}
           >
-            {/* NYT Games Editorial Cube Frame */}
-            <div className="rounded-2xl bg-[#F7F7F5] p-3 border-[3px] border-[#111111] shadow-[0_12px_0_#111111,0_20px_28px_rgba(0,0,0,0.14)]">
-              <div className="flex items-center justify-between px-1 pb-1 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-600">
-                <span>Face {domino.face + 1} of 6 · 5×5 Cube</span>
-                <span className="px-2 py-0.5 rounded-full border border-emerald-700/35 bg-emerald-100 text-emerald-900">
-                  {domino.face === 5 ? "Final Green Goal" : "Green Hole"}
-                </span>
-              </div>
-
-              {/* Headroom mt-4 so a tall UPRIGHT 2-cube stack at row 0 rises cleanly inside the cube frame */}
-              <div className="mt-4 p-2 rounded-lg bg-[#E5E3DC] border-2 border-[#111111] shadow-inner aspect-square">
-                {/* Strictly Uniform 5×5 Cube Surface Grid (grid-cols-5 + grid-rows-5) */}
-                <div
-                  key={`face-${domino.face}`}
-                  className="relative w-full h-full grid grid-cols-5 grid-rows-5 gap-1.5"
-                >
-                  {GRID_INDICES.map((r) =>
-                    GRID_INDICES.map((c) => {
-                      const key = `${r},${c}`;
-                      const cellType = activeFace.grid[r]?.[c] ?? "floor";
-                      const hasDomino = occupiedKeys.has(key);
-                      const isHole = holeKeys.has(key);
-                      const isStart = startKeys.has(key);
-                      const isFinalFace = domino.face === 5;
-                      const isPrimaryHoleAnchor =
-                        r === faceHole.r && c === faceHole.c;
-
-                      return (
-                        <div
-                          key={key}
-                          data-testid={`m2-cell-${r}-${c}`}
-                          className={cn(
-                            "relative w-full h-full min-w-0 min-h-0 aspect-square rounded-[3px] border-2 overflow-hidden transition-colors",
-                            cellType === "wall"
-                              ? "bg-[#171717] border-[#111111]"
-                              : cellType === "hazard"
-                              ? "bg-[#1F0202] border-[#991B1B]"
-                              : isHole
-                              ? "bg-[#031D0E] border-[#15803D]"
-                              : isStart
-                              ? "bg-[#FFFBE6] border-amber-500/80 shadow-[inset_0_-2px_0_#fde68a]"
-                              : "bg-white border-neutral-300 shadow-[inset_0_-2px_0_#e5e5e5]"
-                          )}
-                        >
-                          {/* Start Tile subtle marker (absolute so zero intrinsic track stretch) */}
-                          {isStart && !hasDomino && !isHole && cellType === "floor" && (
-                            <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-mono font-black uppercase tracking-tighter text-amber-800/80">
-                              START
-                            </span>
-                          )}
-
-                          {/* Solid Wall Block */}
-                          {cellType === "wall" && (
-                            <span
-                              className="pointer-events-none absolute inset-1.5 bg-neutral-700 border border-neutral-500 shadow-[0_2px_0_#000]"
-                              aria-label="Wall"
-                            />
-                          )}
-
-                          {/* Obstacle Tile = Recessed 3D RED Hole */}
-                          {cellType === "hazard" && (
-                            <div
-                              className="pointer-events-none absolute inset-0"
-                              aria-label="Red obstacle hole"
-                            >
-                              {/* Visible top inner vertical red pit wall */}
-                              <span className="absolute inset-x-0 top-0 h-2.5 bg-[#EF4444] border-b border-[#7F1D1D]" />
-                              {/* Left & right inner vertical red pit walls */}
-                              <span className="absolute top-2.5 bottom-0 left-0 w-1.5 bg-[#DC2626]" />
-                              <span className="absolute top-2.5 bottom-0 right-0 w-1.5 bg-[#991B1B]" />
-                              {/* Bottom inner rim */}
-                              <span className="absolute inset-x-1.5 bottom-0 h-1 bg-[#7F1D1D]" />
-                              {/* Sunken dark crimson pit floor */}
-                              <span className="absolute top-2.5 bottom-1 left-1.5 right-1.5 bg-gradient-to-b from-[#450A0A] via-[#220303] to-[#0A0101] shadow-[inset_0_5px_9px_rgba(0,0,0,0.9)] border border-[#EF4444]/30" />
-                            </div>
-                          )}
-
-                          {/* Target Hole Cavity = Recessed 3D GREEN Hole on ALL 6 Faces */}
-                          {isHole && (
-                            <div
-                              className="pointer-events-none absolute inset-0"
-                              aria-label={isFinalFace ? "Green goal hole" : "Green target hole"}
-                            >
-                              {/* Visible top inner vertical green pit wall */}
-                              <span className="absolute inset-x-0 top-0 h-2.5 bg-[#2ECC71] border-b border-[#14532D]" />
-                              {/* Left & right inner vertical green pit walls */}
-                              <span className="absolute top-2.5 bottom-0 left-0 w-1.5 bg-[#22C55E]" />
-                              <span className="absolute top-2.5 bottom-0 right-0 w-1.5 bg-[#15803D]" />
-                              {/* Bottom inner rim */}
-                              <span className="absolute inset-x-1.5 bottom-0 h-1 bg-[#14532D]" />
-                              {/* Sunken emerald pit floor */}
-                              <div className="absolute top-2.5 bottom-1 left-1.5 right-1.5 bg-gradient-to-b from-[#064E3B] via-[#042F1E] to-[#02140A] shadow-[inset_0_5px_9px_rgba(0,0,0,0.88)] border border-[#2ECC71]/60 flex flex-col items-center justify-center text-center overflow-hidden">
-                                {!hasDomino && isPrimaryHoleAnchor && (
-                                  <span className="text-[7px] font-mono font-black uppercase leading-none text-[#4ADE80] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
-                                    {formatHoleBadge(faceHole.posture, isFinalFace)}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Occupied cell test-id marker (preserves m2-domino-${r}-${c} for automated checks) */}
-                          {hasDomino && (
-                            <span
-                              data-testid={`m2-domino-${r}-${c}`}
-                              className="sr-only"
-                            >
-                              2×1 Block at ({r}, {c})
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-
-                  {/* Sharp-Edged 3D Two-Cube 2×1 Block Actor (Zero Curved Corners; Tall 2-Cube Tower when UPRIGHT; 320ms Physics Roll) */}
-                  <div
-                    data-testid="move-two-3d-block"
-                    data-posture={domino.posture}
-                    style={{
-                      left: `${domino.c * 20}%`,
-                      top: `${domino.r * 20}%`,
-                      width: domino.posture === "FLAT_H" ? "40%" : "20%",
-                      height: domino.posture === "FLAT_V" ? "40%" : "20%",
-                      transform: blockRollTransform,
-                      transition:
-                        "left 320ms cubic-bezier(0.22, 1, 0.36, 1), top 320ms cubic-bezier(0.22, 1, 0.36, 1), width 320ms cubic-bezier(0.22, 1, 0.36, 1), height 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
-                    }}
-                    className="pointer-events-none absolute z-20"
-                  >
-                    {domino.posture === "UPRIGHT" ? (
-                      /* UPRIGHT (1×1 footprint): Two sharp 3D cubes visibly stacked vertically into a tall tower */
-                      <svg
-                        viewBox="0 0 100 100"
-                        className="w-full h-full overflow-visible"
-                        aria-hidden="true"
-                      >
-                        {/* Sharp parallelogram ground shadow on tile (r, c) */}
-                        <polygon
-                          points="10,95 84,95 96,75 22,75"
-                          fill="rgba(0,0,0,0.24)"
-                        />
-                        {/* Bottom Cube (Cube 1 of 2 — resting on tile) */}
-                        <polygon
-                          points="8,36 80,36 80,92 8,92"
-                          fill={status === "won" ? "#22C55E" : "#EAB308"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="80,36 94,16 94,72 80,92"
-                          fill={status === "won" ? "#166534" : "#A16207"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        {/* Upper Cube (Cube 2 of 2 — stacked vertically on top of Bottom Cube) */}
-                        <polygon
-                          points="8,-20 80,-20 80,36 8,36"
-                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="80,-20 94,-40 94,16 80,36"
-                          fill={status === "won" ? "#15803D" : "#CA8A04"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="8,-20 22,-40 94,-40 80,-20"
-                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                      </svg>
-                    ) : domino.posture === "FLAT_H" ? (
-                      /* FLAT_H (1×2 horizontal): Two sharp 1-unit-tall 3D cubes attached left-to-right */
-                      <svg
-                        viewBox="0 0 200 100"
-                        className="w-full h-full overflow-visible"
-                        aria-hidden="true"
-                      >
-                        {/* Ground shadow across both horizontal tiles */}
-                        <polygon
-                          points="10,94 184,94 194,78 20,78"
-                          fill="rgba(0,0,0,0.2)"
-                        />
-                        {/* Left Cube (Cube 1) */}
-                        <polygon
-                          points="6,64 18,16 100,16 88,64"
-                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="6,64 88,64 88,90 6,90"
-                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        {/* Right Cube (Cube 2 — attached along x = 88..100 seam) */}
-                        <polygon
-                          points="88,64 100,16 182,16 170,64"
-                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="88,64 170,64 170,90 88,90"
-                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="170,64 182,16 182,42 170,90"
-                          fill={status === "won" ? "#15803D" : "#CA8A04"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                      </svg>
-                    ) : (
-                      /* FLAT_V (2×1 vertical): Two sharp 1-unit-tall 3D cubes attached back-to-front */
-                      <svg
-                        viewBox="0 0 100 200"
-                        className="w-full h-full overflow-visible"
-                        aria-hidden="true"
-                      >
-                        {/* Ground shadow across both vertical tiles */}
-                        <polygon
-                          points="8,194 82,194 96,42 22,42"
-                          fill="rgba(0,0,0,0.2)"
-                        />
-                        {/* Back Cube (Cube 1) */}
-                        <polygon
-                          points="13,89 20,14 92,14 85,89"
-                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="85,89 92,14 92,40 85,115"
-                          fill={status === "won" ? "#15803D" : "#CA8A04"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        {/* Front Cube (Cube 2 — attached along y = 89 seam) */}
-                        <polygon
-                          points="6,164 13,89 85,89 78,164"
-                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="6,164 78,164 78,190 6,190"
-                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                        <polygon
-                          points="78,164 85,89 85,115 78,190"
-                          fill={status === "won" ? "#15803D" : "#CA8A04"}
-                          stroke="#111111"
-                          strokeWidth="3.5"
-                          strokeLinejoin="miter"
-                          strokeLinecap="square"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+            {feedback.message}
           </div>
-        </div>
+        )}
 
-        {/* Victory Card or Controls (Undo / Reset Face + Mobile D-Pad) */}
-        {status === "won" ? (
+        {/* Main 3D Floating Bloxorz Island Canvas */}
+        <MoveTwoBloxorzCanvas
+          stage={currentStage}
+          bridgeMask={currentState.block.bridgeMask}
+          pose={effectivePose}
+          brokenFragileCell={brokenFragileCell}
+          interactive={currentState.status !== "won"}
+          onSwipeDirection={performMove}
+        />
+
+        {/* Victory Card OR Controls + D-Pad */}
+        {currentState.status === "won" ? (
           <div
-            className="rounded-2xl border-2 border-black bg-[#fffbe6] p-5 text-center space-y-3 shadow-[0_4px_0_#111]"
-            data-testid="move-two-victory"
+            className="rounded-3xl border-2 border-black bg-white p-5 space-y-4 shadow-[0_5px_0_#171717] text-center animate-in fade-in zoom-in-95 duration-200"
+            data-testid="move-two-victory-card"
           >
-            <div className="inline-flex items-center gap-2 font-headline font-black text-xl text-black">
-              <Trophy className="h-5 w-5 text-emerald-600" />
+            <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-[#2ECC71] px-3 py-1 text-xs font-black text-black">
+              <Trophy className="h-3.5 w-3.5" />
               <span>
-                Solved in {moves} moves · Par: {puzzle.par} · {"⭐".repeat(stars)}
+                {MOVE_TWO_DIFFICULTY_META[activeDifficulty].label} (
+                {MOVE_TWO_DIFFICULTY_META[activeDifficulty].sizeLabel}) Cleared!
               </span>
             </div>
-            <p className="text-xs font-medium text-neutral-600">
-              All 6 5×5 cube faces completed on Move Two #{puzzle.puzzleNumber} (&ldquo;
-              {puzzle.title}&rdquo;).
-            </p>
-            <ResultShareButtons
-              title={`Move Two #${puzzle.puzzleNumber} — "${puzzle.title}"`}
-              text={shareText}
-              url="https://21games.ai/games/move-2"
-            />
-            <div className="flex flex-wrap justify-center gap-4 pt-1 text-xs font-bold">
+
+            <div className="space-y-1">
+              <h2 className="font-headline font-black text-2xl text-black">
+                {puzzle.title}
+              </h2>
+              <p className="text-sm font-semibold text-neutral-700">
+                Solved in{" "}
+                <span className="font-mono font-black text-black">
+                  {currentState.moves}
+                </span>{" "}
+                moves · Par{" "}
+                <span className="font-mono font-bold">{currentStage.par}</span>{" "}
+                · {"⭐".repeat(currentStars)}
+              </p>
+            </div>
+
+            {/* 3-Difficulty Progress Summary */}
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              {MOVE_TWO_DIFFICULTIES.map((diff) => {
+                const meta = MOVE_TWO_DIFFICULTY_META[diff];
+                const summary = solvedResultsMap[diff];
+                return (
+                  <button
+                    key={diff}
+                    type="button"
+                    onClick={() => handleSelectDifficulty(diff)}
+                    className={cn(
+                      "rounded-xl border-2 p-2 text-center transition-all cursor-pointer",
+                      summary
+                        ? "border-emerald-600 bg-emerald-50/80 text-emerald-950"
+                        : "border-neutral-200 bg-neutral-50 text-neutral-600 hover:border-black"
+                    )}
+                  >
+                    <div className="text-xs font-black">
+                      {meta.label} ({meta.sizeLabel})
+                    </div>
+                    <div className="text-[11px] font-mono font-bold mt-0.5">
+                      {summary
+                        ? `${summary.moves}m · ${"⭐".repeat(summary.stars)}`
+                        : `Par ${puzzle.stages[diff].par}`}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              {nextUnsolvedDifficulty && (
+                <Button
+                  type="button"
+                  onClick={() => handleSelectDifficulty(nextUnsolvedDifficulty)}
+                  className="rounded-full border-2 border-black bg-[#F7DA21] hover:bg-[#eab308] text-black font-bold shadow-[0_2px_0_#171717]"
+                  data-testid="move-two-next-difficulty"
+                >
+                  Next: Play{" "}
+                  {MOVE_TWO_DIFFICULTY_META[nextUnsolvedDifficulty].label} (
+                  {MOVE_TWO_DIFFICULTY_META[nextUnsolvedDifficulty].sizeLabel})
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleResetStage}
+                className="rounded-full border-2 border-black font-bold"
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                Replay {MOVE_TWO_DIFFICULTY_META[activeDifficulty].sizeLabel}
+              </Button>
+            </div>
+
+            <div className="pt-1 border-t border-neutral-200">
+              <ResultShareButtons
+                title={`Move Two #${puzzle.puzzleNumber}`}
+                text={shareText}
+              />
+            </div>
+
+            <div className="pt-1">
               <Link
                 href="/games/move-2/archive"
-                className="inline-flex items-center gap-1 underline"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-600 hover:text-black underline underline-offset-4"
               >
-                <Calendar className="h-3.5 w-3.5" /> Playable Archive
+                <Calendar className="h-3.5 w-3.5" />
+                Browse Move Two Archive
               </Link>
-              <button
-                type="button"
-                onClick={handleRestartFull}
-                className="underline cursor-pointer"
-              >
-                Replay Puzzle
-              </button>
             </div>
           </div>
         ) : (
-          <div className="space-y-3 pt-1">
-            {/* Undo Move & Reset Face */}
-            <div className="flex items-center justify-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={history.length === 0}
-                onClick={handleUndo}
-                className="border-2 border-black font-bold text-xs h-9 px-3.5"
-                data-testid="move-two-undo"
+          <div className="space-y-3">
+            {/* Tactile D-Pad + Undo / Reset Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-black bg-white p-3 shadow-[0_2px_0_#171717]">
+              {/* D-Pad */}
+              <div
+                className="grid grid-cols-3 gap-1.5 mx-auto sm:mx-0"
+                aria-label="Directional roll controls"
               >
-                <Undo2 className="h-3.5 w-3.5 mr-1.5" />
-                Undo Move
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleResetFace}
-                className="border-2 border-black font-bold text-xs h-9 px-3.5"
-                data-testid="move-two-reset-face"
-              >
-                <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                Reset Face
-              </Button>
+                <div />
+                <button
+                  type="button"
+                  onClick={() => performMove("up")}
+                  data-testid="move-two-btn-up"
+                  aria-label="Roll Up"
+                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+                >
+                  <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+                </button>
+                <div />
+                <button
+                  type="button"
+                  onClick={() => performMove("left")}
+                  data-testid="move-two-btn-left"
+                  aria-label="Roll Left"
+                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+                >
+                  <ArrowLeft className="h-4 w-4 stroke-[2.5]" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => performMove("down")}
+                  data-testid="move-two-btn-down"
+                  aria-label="Roll Down"
+                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+                >
+                  <ArrowDown className="h-4 w-4 stroke-[2.5]" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => performMove("right")}
+                  data-testid="move-two-btn-right"
+                  aria-label="Roll Right"
+                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+                >
+                  <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                </button>
+              </div>
+
+              {/* Undo / Reset / Archive */}
+              <div className="flex flex-wrap items-center justify-center gap-2 mx-auto sm:mx-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={historyByDiff[activeDifficulty].length === 0}
+                  onClick={handleUndo}
+                  data-testid="move-two-undo"
+                  className="rounded-xl border-2 border-black font-bold text-xs"
+                >
+                  <Undo2 className="h-3.5 w-3.5 mr-1" />
+                  Undo Move
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetStage}
+                  data-testid="move-two-reset"
+                  className="rounded-xl border-2 border-black font-bold text-xs"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  Reset Board
+                </Button>
+              </div>
             </div>
 
-            {/* Minimalist Mobile / Desktop On-Screen D-Pad */}
-            <div
-              className="mx-auto grid grid-cols-3 gap-1.5 w-40"
-              aria-label="Directional move controls"
-              data-testid="move-two-dpad"
-            >
-              <div />
-              <button
-                type="button"
-                aria-label="Move Up"
-                onClick={() => handleMove("up")}
-                className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
-              >
-                <ArrowUp className="h-5 w-5" />
-              </button>
-              <div />
-              <button
-                type="button"
-                aria-label="Move Left"
-                onClick={() => handleMove("left")}
-                className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                aria-label="Move Down"
-                onClick={() => handleMove("down")}
-                className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
-              >
-                <ArrowDown className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                aria-label="Move Right"
-                onClick={() => handleMove("right")}
-                className="h-11 rounded-xl border-2 border-black bg-white hover:bg-neutral-100 active:translate-y-0.5 shadow-[0_2px_0_#111] flex items-center justify-center cursor-pointer"
-              >
-                <ArrowRight className="h-5 w-5" />
-              </button>
+            {/* Compact NYT Bloxorz Tile Legend */}
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] font-semibold text-neutral-700">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-3 border border-black bg-[#FB923C] inline-block" />
+                <span>Orange: Flat Only</span>
+              </span>
+              {currentStage.switches.some((s) => s.kind === "soft") && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-3 w-3 rounded-full border border-black bg-[#2563EB] inline-block" />
+                  <span>○ Switch: Any Touch</span>
+                </span>
+              )}
+              {currentStage.switches.some((s) => s.kind === "heavy") && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="font-mono font-black text-[#6D28D9]">✕</span>
+                  <span>Heavy Switch: Upright Only</span>
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-3 border border-black bg-[#2ECC71] inline-block" />
+                <span>Green Hole: Stand 1×1</span>
+              </span>
             </div>
-
-            <p className="text-center text-[11px] text-neutral-500 font-medium">
-              Arrow keys / WASD, swipe, or tap D-Pad · Walls block · Red holes reset position · Drop into the green hole
-            </p>
           </div>
         )}
       </div>

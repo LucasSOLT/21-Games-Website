@@ -235,42 +235,34 @@
   - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
   - **100% Auto-Generated Monthly Batches**: Built-in deterministic generator + backtracking Math Solver (`src/lib/generators/four-score-generator.ts`) guarantees every generated puzzle has a verified whole-number full-board solution to `80`.
 
-### Game #2 — `Move Two` (`Move 2` — NYT-Styled 5×5 2.5D Tilted Cube & Sharp 3D Two-Cube `2×1` Block Game) — Q41 to Q45
+### Game #2 — `Move Two` (`Move 2` — NYT-Styled 3D Floating Bloxorz Puzzle · `6×6` Easy, `8×8` Medium & `10×10` Hard) — Q41 to Q45
 - **Route**: `/games/move-2` | **Archive**: `/games/move-2/archive`
-- **NYT Games Editorial Aesthetic + Uniform `5×5` Grid + Sharp-Edged 3D Two-Cube `2×1` Block (Q41)**:
-  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside an **NYT Games-styled 2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a crisp warm off-white cube rim (`#F7F7F5` with `#111111` ink borders and 3D depth lip). The game board is a **cube** (never a die/dice).
-  - **Strictly Equal Tile Sizes (`grid-cols-5 grid-rows-5`)**: All 25 tiles use `grid-cols-5 grid-rows-5` with `aspect-square`, uniform `border-2` (zero outer `ring-*`), and `absolute` inner layers so every tile on the `5×5` board has the exact same width and height regardless of whether it is an empty floor tile, start tile, wall, red obstacle hole, or green target hole.
-  - **Sharp-Edged 3D Two-Cube `2×1` Block (Zero Curved Edges, Zero Domino Pips)**:
-    - The moving piece is rendered with **razor-sharp `90°` mitered cube corners (`strokeLinejoin="miter"`, zero rounded corners)** so it looks purely like **two sharp 3D cubes attached to each other** (never a rounded eraser or domino):
-      - **When standing (`UPRIGHT`, `1×1` footprint)**: rendered as **two sharp 3D cubes visibly stacked vertically into a tall 2-cube tower** rising dramatically above the occupied tile (`#FEF08A` top cube roof, `#F7DA21` upper cube front, `#EAB308` lower cube front, `#CA8A04` right depth walls, and a bold `#111111` horizontal cube seam).
-      - **When lying flat (`FLAT_H` `1×2` or `FLAT_V` `2×1`)**: rendered as **two sharp 3D cubes (`1` cube tall) attached side-by-side** across the two occupied tiles (`FLAT_H` left-to-right, `FLAT_V` back-to-front), showing two wide `#FEF08A` top cube squares separated by a crisp `#111111` seam and a `1`-cube-tall `#F7DA21` front wall + `#CA8A04` right wall.
-  - **Deliberate, Visible 3D Rolling Physics Animation (`~320ms`)**:
-    - Every move animates the `2×1` block tipping/rolling smoothly across the `5×5` grid over **`~320ms` (`cubic-bezier(0.22, 1, 0.36, 1)`)** with a mid-roll 3D tilt/arc so players clearly see how standing (`1×1`) tips into flat (`2×1`) and flat rolls or stands up. Hole drops (`320ms`) and cube face rotations (`520ms`) are similarly paced.
-  - Top-right HUD renders a clean **mini 3D isometric cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered, paired with a `localStorage`-persisted **Web Audio SFX mute toggle**.
-- **3D `2×1` Block Rolling Physics (Q42)**:
-  - The `2×1` block occupies either:
-    - **`UPRIGHT` (`1×1` footprint on `(r, c)`)**: Moving in direction `(dr, dc)` tips it over into a `FLAT` (`2×1`) state covering `(r + dr, c + dc)` and `(r + 2*dr, c + 2*dc)`.
-    - **`FLAT_H` (`1×2` horizontal footprint on `(r, c)` and `(r, c+1)`)**:
-      - Moving Left (`←`) stands it `UPRIGHT` on `(r, c-1)`; moving Right (`→`) stands it `UPRIGHT` on `(r, c+2)`.
-      - Moving Up (`↑`) or Down (`↓`) rolls it sideways staying `FLAT_H` on `(r-1, c..c+1)` or `(r+1, c..c+1)`.
-    - **`FLAT_V` (`2×1` vertical footprint on `(r, c)` and `(r+1, c)`)**:
-      - Moving Up (`↑`) stands it `UPRIGHT` on `(r-1, c)`; moving Down (`↓`) stands it `UPRIGHT` on `(r+2, c)`.
-      - Moving Left (`←`) or Right (`→`) rolls it sideways staying `FLAT_V` on `(r..r+1, c-1)` or `(r..r+1, c+1)`.
-- **Recessed GREEN Target Holes (`Faces 1–6`), Recessed RED Obstacle Holes & Generic Copy (Q43 & Q44)**:
-  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Start State** (`face.start`) and a **Recessed Green Target Hole** (`face.hole`: either a `1×1 UPRIGHT` hole or a `2×1 FLAT_H` / `FLAT_V` hole).
-  - **Hole Color Coding — GREEN Target Holes vs. RED Obstacle Holes**:
-    - **Target Hole (`face.hole` on ALL 6 Faces `1–6`) = GREEN (`#2ECC71` / `#16A34A`)**: Every target hole the player is trying to enter is rendered as a 3D recessed **emerald green hole** (`HOLE` on Faces `1–5`, `GOAL` on Face `6` — never blue).
-    - **Obstacle Tiles (`cellType === "hazard"`) = Recessed RED Holes (`#DC2626` / `#EF4444`)**: Every obstacle tile the player must avoid is rendered as a 3D recessed **crimson red hole** cut into the cube board (visible inner red vertical walls stepping down into a dark sunken pit).
-  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The `2×1` block only drops into `face.hole` when its posture and footprint **exactly match** the green hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile hole; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the surface). Dropping into the green hole on `Faces 1–5` animates the block sinking into the hole, rotates the cube to `Face k+1`, and places the block at that face's coded `start`. Dropping into the green goal hole on `Face 6` wins the game!
-  - **Clean, Generic Player-Facing Copy (How to Play & Toasts)**:
-    - Outer border or wall block collision (`{ kind: "bump" }`): shows **`"Blocked by a wall."`** with a gentle bump shake and zero move penalty.
-    - Red obstacle hole collision (`{ kind: "hazard" }`): increments moves by `+1`, resets the block to the current face's start tile, and shows **`"You hit an obstacle! Resetting position."`**
-    - Face hole transition: shows **`"Nice! Moving to Face X of 6."`**
-    - Reset Face button: shows **`"Position reset."`**
-- **100% Pre-Generated 2026–2027 Daily Bank, Interactive 5×5 `/admin` Studio & Web Audio SFX (Q44 & Q45)**:
-  - `src/lib/generators/move-two-generator.ts` uses per-face (`solveMoveTwoFace`) and 6-face (`solveMoveTwo`) **Breadth-First Search (BFS) solvers** to generate `5×5` layouts (`~5–8` moves/face, `~30–42` total Par across 6 faces) and pre-populate unique daily puzzles across all of 2026 and 2027.
-  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle red obstacle holes, move/change per-face `start` and green `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
-  - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, touch swipe gestures, and an on-screen D-Pad on mobile, with synthesized Web Audio API sound effects (`src/lib/move-two-audio.ts`: roll clack, wall bump thud, hole drop + cube rotation whoosh, obstacle reset buzz, and Face 6 victory chord). Final score compares **Total Moves vs. Par** (`Solved in 34 moves · Par: 34 · ⭐⭐⭐`).
+- **NYT Games Editorial Palette + 3D Trimetric Floating Island Environment (Q41)**:
+  - Each stage is a **standalone floating 3D Bloxorz island** (no 6-face cube switching) rendered on a High-DPI (`devicePixelRatio`) HTML5 `<canvas>` (`src/components/games/move-two-canvas.tsx` + `src/lib/move-two-renderer-3d.ts`) using Bloxorz's diagonal trimetric projection ($\vec{e}_c = (0.92, -0.24)$, $\vec{e}_r = (0.35, 0.68)$, $\vec{e}_z = (0, -0.92)$) over a warm minimalist NYT cream backdrop (`#FAF9F5`) with soft floating ground shadows.
+  - **Floating 3D Stone Slabs**: Solid floor tiles (`#FFFFFF` top, `#E5E3DC` left extruded slab lip, `#CFCBC0` right extruded slab lip, crisp `#171717` ink wireframe) hang in open space; void cells (`"void"`) are genuine open air.
+  - **Sharp-Edged NYT Gold `1×1×2` Cuboid Block (`#F7DA21`)**: Rendered as two fused sharp-edged 3D unit cubes with a subtle midpoint seam ring (zero domino/dice pips). On every move, the cuboid **physically hinges `0° → 90°` around its bottom contact edge in 3D space (`240ms`)** with live directional face shading (`#FEF08A` sunlit roof ↔ `#F7DA21` mid gold ↔ `#CA8A04` shaded side).
+- **NYT Sudoku-Style 3-Difficulty System (`Easy 6×6` · `Medium 8×8` · `Hard 10×10`)**:
+  - Every daily puzzle (`MoveTwoPuzzle`, `version: 3`) bundles **3 independent Bloxorz stages**:
+    - **Easy (`6×6`)** — sculpted floating island path (`Par ~7–14` moves).
+    - **Medium (`8×8`)** — multi-wing floating island with Fragile Terracotta Tiles & Switch Bridges (`Par ~13–24` moves).
+    - **Hard (`10×10`)** — multi-island chasms, Heavy `✕` Upright-Only Switches, retractable bridges, and Fragile Terracotta corridors (`Par ~20–38` moves).
+  - Players can switch freely between **Easy (`6×6`)**, **Medium (`8×8`)**, and **Hard (`10×10`)** tabs on both the splash screen and the in-game header; each difficulty preserves its own independent position, bridge state, move/fall counters, and Undo stack.
+  - **Daily Streak Rule**: Solving **any ONE** of the 3 difficulties (`easy`, `medium`, or `hard`) marks `Move Two` completed for that calendar date (`recordGameWin("move-2", dateKey)`), while players can complete 1, 2, or all 3 boards and share individual or combined results.
+- **Full Classic Bloxorz Kinematics & Tile Mechanics (Q42–Q44)**:
+  - **Rolling Kinematics**:
+    - **`UPRIGHT` (`1×1` footprint on `(r, c)`)**: Rolling in `(dr, dc)` tips into `FLAT_H` or `FLAT_V` across `(r + dr, c + dc)` and `(r + 2*dr, c + 2*dc)`.
+    - **`FLAT_H` (`1×2` on `(r, c)..(r, c+1)`)**: Left/Right stands `UPRIGHT` on `(r, c-1)` or `(r, c+2)`; Up/Down rolls broadside staying `FLAT_H`.
+    - **`FLAT_V` (`2×1` on `(r, c)..(r+1, c)`)**: Up/Down stands `UPRIGHT` on `(r-1, c)` or `(r+2, c)`; Left/Right rolls broadside staying `FLAT_V`.
+  - **Open Void / Cliff-Edge Tumble**: Stepping *any* cell of the `2×1` block onto `"void"`, outside `0..size-1`, or onto a **retracted (closed) bridge** tips the block over the cliff edge into open space (`480ms` 3D tumble animation), adds `+1` Move and `+1` Fall, resets bridges to `initiallyOpen`, and drops the block vertically back onto `Start`.
+  - **Fragile Terracotta Tiles (`"fragile"`, `#F97316` / `#EA580C`)**: Safe when the `2×1` block rolls **flat (`FLAT_H` or `FLAT_V`)** across two tiles, **but standing `UPRIGHT` (`1×1`) concentrates all weight on one tile—shattering the terracotta slab and plunging the block into the abyss!**
+  - **Switches & Retractable Bridges (`○` Soft Switch & `✕` Heavy Switch)**:
+    - **Soft Switch (`"soft_switch"`, circular `○` press plate)**: Triggered whenever **any** cell of the block (`UPRIGHT` or `FLAT`) lands on it, toggling/opening/closing its linked retractable bridge (`A`, `B`, `C`).
+    - **Heavy Switch (`"heavy_switch"`, X-shaped `✕` press plate)**: Triggered **only** when the block lands **`UPRIGHT` (`1×1`)** directly on it; rolling flat over `✕` passes safely without triggering it.
+  - **Classic `1×1` Emerald Goal Shaft (`UPRIGHT` Only, `#2ECC71`)**: The goal (`goal: { r, c }`) is always a single `1×1` recessed emerald square shaft cut right through the floating stone platform. Rolling flat across `goal` safely bridges over the hole; standing **`UPRIGHT` (`1×1`)** directly on `(goal.r, goal.c)` drops the block straight down through the shaft (`460ms`) to win!
+- **State-Space BFS Solver, 2026–2027 Bank, `/admin` 3-Difficulty Studio & Web Audio SFX (Q44 & Q45)**:
+  - `src/lib/generators/move-two-generator.ts` implements `solveBloxorzStage` (Breadth-First Search over `(posture, r, c, bridgeMask)`) + `verifySwitchNecessity` to guarantee solvability and exact `par` across all **426 days (`2026-11-01`..`2027-12-31`) × 3 difficulties = `1,278` unique stages**.
+  - **Interactive `/admin` 3-Difficulty Bloxorz Studio (`move-two-studio-tab.tsx`)**: Provides `[Easy 6×6]`, `[Medium 8×8]`, and `[Hard 10×10]` sub-tabs with click-to-paint tools (`Void`, `Stone`, `Fragile`, `Bridge A/B`, `○ Soft Switch`, `✕ Heavy Switch`, `Start`, `Goal`), live 3D island preview, live BFS Par verification, `"Reroll Seed"`, `"Clear All"` (local React state only), and `"Revert to Default"`.
+  - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD`, touch swipe gestures, and an on-screen D-Pad with synthesized Web Audio SFX (`src/lib/move-two-audio.ts`: cuboid roll clack, `○`/`✕` switch latch, terracotta fragile crack, void edge fall whoosh, and goal drop victory chord). Stars compare Moves vs. Par (`3★`: `≤ Par + 2`, `2★`: `≤ Par + 6`, `1★`: solved).
 
 ### Game #1 — `1 Win` (Real-Time Community Gratitude Leaderboard) — Q46 to Q48
 - **Route**: `/games/1-win` | **Archive**: `/games/1-win/archive`

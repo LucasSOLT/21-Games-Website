@@ -1,9 +1,15 @@
 /**
- * Checkpoint 8 — Move Two: 6-face 5×5 2.5D tilted cube Bloxorz domino rolling kinematics,
- * per-face (`solveMoveTwoFace`) & 6-face (`solveMoveTwo`) BFS shortest-path solvers,
- * recessed 1-tile (`UPRIGHT`) & 2-tile (`FLAT_H`/`FLAT_V`) hole drops, raised outer cube rim bumps,
- * interior dark void hazards, 66-day bank, 2026–2027 zero-duplicate daily coverage,
- * SSR-safe Web Audio API SFX, and 2.5D UI + 5×5 `/admin` Studio wiring.
+ * Checkpoint 8 — Move Two (Bloxorz 3D Overhaul: `6×6` Easy · `8×8` Medium · `10×10` Hard):
+ * - 3-difficulty floating 3D island stages (`easy: 6×6`, `medium: 8×8`, `hard: 10×10`)
+ * - Classic Bloxorz 1×1×2 cuboid rolling kinematics, open void cliff-tumbles (`fall_void`),
+ *   terracotta fragile flat-safe vs upright-shatter (`fall_fragile`), ○ soft switch (any touch)
+ *   vs ✕ heavy switch (upright-only), retractable bridges (`fall_bridge` when closed), and
+ *   1×1 emerald goal shaft (`UPRIGHT` only)
+ * - State-Space BFS shortest-path solver (`solveBloxorzStage`) + switch necessity (`verifySwitchNecessity`)
+ * - Pure 3D trimetric projection & 90° bottom-edge hinge rigid-body physics (`move-two-renderer-3d.ts`)
+ * - 66-day static bank + 426-day (`2026-11-01..2027-12-31` = `1,278` stages) zero-duplicate solver gate
+ * - SSR-safe Web Audio API SFX + multi-difficulty UI + `/admin` 3-difficulty Bloxorz Studio
+ *
  * Run: node --experimental-strip-types scripts/test-cp08-move-two.ts
  */
 import fs from "node:fs";
@@ -11,452 +17,413 @@ import { register } from "node:module";
 import { createKit } from "./test-kit.mjs";
 
 register("./test-resolver.mjs", import.meta.url);
-const kit = createKit("CP8: Move Two (5×5 2.5D Overhaul)");
+const kit = createKit("CP8: Move Two (Bloxorz 6×6 / 8×8 / 10×10 3D Overhaul)");
 
 const m2 = await import("@/data/puzzles/move-2");
+const r3d = await import("@/lib/move-two-renderer-3d");
 const sfx = await import("@/lib/move-two-audio");
 const daily = await import("@/lib/daily-engine");
 const cfg = await import("@/lib/games-config");
-const seeded = await import("@/lib/seeded-random");
 
-// ---- 1. 5×5 Grid Constants & Bounds Helpers ----------------------------------
-kit.eq(m2.MOVE_TWO_GRID_SIZE, 5, "MOVE_TWO_GRID_SIZE is 5 (5×5 per face)");
-kit.assert(
-  m2.isInBounds5x5(0, 0) &&
-    m2.isInBounds5x5(4, 4) &&
-    !m2.isInBounds5x5(-1, 0) &&
-    !m2.isInBounds5x5(0, 5) &&
-    !m2.isInBounds5x5(5, 2),
-  "isInBounds5x5 enforces 0..4 row/col bounds"
+// ---- 1. Board Sizes & Difficulty Metadata -----------------------------------
+kit.eq(
+  m2.MOVE_TWO_DIFFICULTIES,
+  ["easy", "medium", "hard"],
+  "MOVE_TWO_DIFFICULTIES defines easy, medium, hard"
+);
+kit.eq(
+  m2.MOVE_TWO_BOARD_SIZES,
+  { easy: 6, medium: 8, hard: 10 },
+  "MOVE_TWO_BOARD_SIZES maps easy=6×6, medium=8×8, hard=10×10"
 );
 
-// ---- 2. 66-day 5×5 puzzle bank + per-face & 6-face BFS solver invariants -----
-kit.eq(m2.MOVE_TWO_PUZZLES.length, 66, "bank has 66 puzzles");
+// ---- 2. 66-Day 3-Difficulty Bank (`198` Stages) + Canonical Replay ----------
+kit.eq(m2.MOVE_TWO_PUZZLES.length, 66, "bank has 66 daily Bloxorz bundles");
+
 let allBankValid = true;
-const holePosturesSeen = new Set<string>();
-const finalTargetPosturesSeen = new Set<string>();
+let mediumHeavyCount = 0;
+let hardHeavyCount = 0;
 
 for (const p of m2.MOVE_TWO_PUZZLES) {
   const v = m2.validateMoveTwoPuzzle(p);
-  if (!v.valid) {
+  if (!v.valid || p.version !== 3) {
     allBankValid = false;
     console.error("Invalid Move Two puzzle:", p.id, v.errors);
-  }
-  if (p.faces.length !== 6) {
-    allBankValid = false;
-  }
-  for (const face of p.faces) {
-    if (face.grid.length !== 5 || face.grid.some((row) => row.length !== 5)) {
-      allBankValid = false;
-    }
-    const faceSolved = m2.solveMoveTwoFace(face);
-    if (!faceSolved.solvable || faceSolved.minMoves < 4) {
-      allBankValid = false;
-    }
-    holePosturesSeen.add(face.hole.posture);
+    continue;
   }
 
-  const solved = m2.solveMoveTwo(p);
-  if (
-    !solved.solvable ||
-    solved.minMoves !== p.par ||
-    p.canonicalMoves.length !== p.par ||
-    p.par < 24 ||
-    p.par > 52
-  ) {
-    allBankValid = false;
-  }
-  finalTargetPosturesSeen.add(p.target.posture);
+  for (const diff of m2.MOVE_TWO_DIFFICULTIES) {
+    const stage = p.stages[diff];
+    const expectedSize = m2.MOVE_TWO_BOARD_SIZES[diff];
+    if (
+      stage.size !== expectedSize ||
+      stage.grid.length !== expectedSize ||
+      stage.grid.some((row) => row.length !== expectedSize)
+    ) {
+      allBankValid = false;
+    }
 
-  // Replay canonicalMoves from start -> must drop into 5 holes (`portal`) and end in `won` on Face 6
-  let state = p.start;
-  let wonOnFinal = false;
-  let portalsCrossed = 0;
-  for (let i = 0; i < p.canonicalMoves.length; i++) {
-    const step = m2.stepMoveTwoDomino(p, state, p.canonicalMoves[i]!);
-    if (i < p.canonicalMoves.length - 1) {
-      if (step.kind === "portal") {
-        portalsCrossed++;
-        const expectedHole = p.faces[step.fromFace]!.hole;
-        const expectedNextStart = p.faces[step.toFace]!.start;
-        if (
-          !m2.matchesFaceHole(step.enteredHole, expectedHole) ||
-          step.next.face !== step.toFace ||
-          step.next.posture !== expectedNextStart.posture ||
-          step.next.r !== expectedNextStart.r ||
-          step.next.c !== expectedNextStart.c
-        ) {
+    // Must have real void sculpting (floating island, not a solid square)
+    const voidCount = stage.grid
+      .flat()
+      .filter((t) => t === "void").length;
+    if (voidCount < 4) {
+      allBankValid = false;
+    }
+
+    if (diff === "medium") {
+      if (stage.bridges.length < 1 || !m2.verifySwitchNecessity(stage)) {
+        allBankValid = false;
+      }
+      if (stage.switches.some((sw) => sw.kind === "heavy")) {
+        mediumHeavyCount++;
+      }
+    }
+    if (diff === "hard") {
+      if (stage.bridges.length < 2 || !m2.verifySwitchNecessity(stage)) {
+        allBankValid = false;
+      }
+      if (stage.switches.some((sw) => sw.kind === "heavy")) {
+        hardHeavyCount++;
+      }
+    }
+
+    // Replay canonicalMoves from initial state -> must end in `won` on exact last move
+    let state = m2.getInitialBlockState(stage);
+    let wonExactly = false;
+    for (let i = 0; i < stage.canonicalMoves.length; i++) {
+      const step = m2.stepBloxorzBlock(stage, state, stage.canonicalMoves[i]!);
+      if (i < stage.canonicalMoves.length - 1) {
+        if (step.kind !== "moved") {
           allBankValid = false;
+          break;
         }
         state = step.next;
-      } else if (step.kind === "moved") {
-        state = step.next;
       } else {
-        allBankValid = false;
-      }
-    } else {
-      if (step.kind === "won") {
-        wonOnFinal = true;
-      } else {
-        allBankValid = false;
+        if (
+          step.kind === "won" &&
+          step.next.posture === "UPRIGHT" &&
+          step.next.r === stage.goal.r &&
+          step.next.c === stage.goal.c
+        ) {
+          wonExactly = true;
+        }
       }
     }
-  }
-  if (!wonOnFinal || portalsCrossed !== 5) {
-    allBankValid = false;
+    if (!wonExactly || stage.canonicalMoves.length !== stage.par) {
+      allBankValid = false;
+    }
   }
 }
 
 kit.assert(
   allBankValid,
-  "all 66 5×5 bank puzzles pass validateMoveTwoPuzzle, match per-face & 6-face BFS Par, drop into 5 sequential holes, and win on Face 6"
+  "all 66 bank bundles (198 Easy/Medium/Hard floating islands) validate, require switches across chasms, and win on canonicalMoves replay"
 );
 kit.assert(
-  holePosturesSeen.has("UPRIGHT") &&
-    holePosturesSeen.has("FLAT_H") &&
-    holePosturesSeen.has("FLAT_V"),
-  "bank faces exercise all 3 recessed hole postures (1×1 UPRIGHT, 1×2 FLAT_H, 2×1 FLAT_V)"
-);
-kit.assert(
-  finalTargetPosturesSeen.has("UPRIGHT") &&
-    (finalTargetPosturesSeen.has("FLAT_H") || finalTargetPosturesSeen.has("FLAT_V")),
-  "bank exercises both 1-tile UPRIGHT and 2-tile FLAT final goal holes on Face 6"
+  mediumHeavyCount > 0 && hardHeavyCount === 66,
+  "Medium mixes ○ soft & ✕ heavy switches, and all 66 Hard (10×10) stages feature ✕ upright-only heavy switches"
 );
 
-// ---- 3. Bloxorz rolling kinematics, Raised Cube Rim & Recessed Hole Drops ----
-const upCenter = { face: 0, posture: "UPRIGHT" as const, r: 2, c: 2 };
-const tipRight = m2.computeRawRoll(upCenter, "right");
-kit.assert(
-  tipRight.posture === "FLAT_H" && tipRight.r === 2 && tipRight.c === 3,
-  "UPRIGHT at (2,2) rolling right tips to FLAT_H at (2,3)-(2,4)"
-);
-const tipLeft = m2.computeRawRoll(upCenter, "left");
-kit.assert(
-  tipLeft.posture === "FLAT_H" && tipLeft.r === 2 && tipLeft.c === 0,
-  "UPRIGHT at (2,2) rolling left tips to FLAT_H at (2,0)-(2,1)"
-);
-const standRight = m2.computeRawRoll(tipLeft, "right");
-kit.assert(
-  standRight.posture === "UPRIGHT" && standRight.r === 2 && standRight.c === 2,
-  "FLAT_H at (2,0)-(2,1) rolling right stands UPRIGHT at (2,2)"
-);
-const rollBroadsideDown = m2.computeRawRoll(tipLeft, "down");
-kit.assert(
-  rollBroadsideDown.posture === "FLAT_H" &&
-    rollBroadsideDown.r === 3 &&
-    rollBroadsideDown.c === 0,
-  "FLAT_H at (2,0)-(2,1) rolling down stays FLAT_H at (3,0)-(3,1)"
-);
+// ---- 3. Synthetic Bloxorz Physics: Void, Fragile, ○ Soft, ✕ Heavy, Bridge & 1×1 Goal ----
+const synthGrid = m2.createMoveTwoGrid(8, "floor");
+synthGrid[0]![4] = "void"; // Interior void hole
+synthGrid[2]![2] = "fragile"; // Terracotta fragile tile
+synthGrid[3]![4] = "bridge"; // Retractable Bridge A
+synthGrid[1]![1] = "soft_switch"; // ○ Soft Switch -> toggles A
+synthGrid[4]![1] = "heavy_switch"; // ✕ Heavy Switch -> toggles A
 
-// Synthetic 5×5 fixture testing:
-// - Raised outer rim bumps on all 4 borders (top, bottom, left, right)
-// - Interior wall bump & dark void hazard fall
-// - Partial overlap with 1-tile and 2-tile holes (`moved`, not dropping)
-// - Exact posture hole drop on Face 0 (`portal` -> Face 1 coded start) and Face 5 (`won`)
-const face0Grid = m2.emptyMoveTwoFloorGrid();
-face0Grid[0][1] = "wall";
-face0Grid[1][0] = "hazard";
-
-const face1Grid = m2.emptyMoveTwoFloorGrid();
-const synthPuzzle = {
-  faces: [
-    {
-      index: 0,
-      grid: face0Grid,
-      start: { posture: "UPRIGHT" as const, r: 0, c: 0 },
-      hole: { posture: "UPRIGHT" as const, r: 2, c: 2 },
-      exitEdge: null,
-    },
-    {
-      index: 1,
-      grid: face1Grid,
-      start: { posture: "FLAT_V" as const, r: 0, c: 4 },
-      hole: { posture: "FLAT_H" as const, r: 3, c: 1 },
-      exitEdge: null,
-    },
-    {
-      index: 2,
-      grid: m2.emptyMoveTwoFloorGrid(),
-      start: { posture: "UPRIGHT" as const, r: 0, c: 0 },
-      hole: { posture: "UPRIGHT" as const, r: 4, c: 4 },
-      exitEdge: null,
-    },
-    {
-      index: 3,
-      grid: m2.emptyMoveTwoFloorGrid(),
-      start: { posture: "UPRIGHT" as const, r: 0, c: 0 },
-      hole: { posture: "UPRIGHT" as const, r: 4, c: 4 },
-      exitEdge: null,
-    },
-    {
-      index: 4,
-      grid: m2.emptyMoveTwoFloorGrid(),
-      start: { posture: "UPRIGHT" as const, r: 0, c: 0 },
-      hole: { posture: "UPRIGHT" as const, r: 4, c: 4 },
-      exitEdge: null,
-    },
-    {
-      index: 5,
-      grid: m2.emptyMoveTwoFloorGrid(),
-      start: { posture: "UPRIGHT" as const, r: 0, c: 0 },
-      hole: { posture: "FLAT_H" as const, r: 2, c: 2 },
-      exitEdge: null,
-    },
-  ] as typeof m2.MOVE_TWO_PUZZLES[number]["faces"],
-  target: { posture: "FLAT_H" as const, r: 2, c: 2 },
+const synthStage: import("@/data/puzzles/move-2").MoveTwoStage = {
+  difficulty: "medium",
+  size: 8,
+  grid: synthGrid,
+  start: { r: 0, c: 0 },
+  goal: { r: 5, c: 5 },
+  bridges: [{ id: "A", cells: [{ r: 3, c: 4 }], initiallyOpen: false }],
+  switches: [
+    { r: 1, c: 1, kind: "soft", bridgeId: "A", behavior: "toggle" },
+    { r: 4, c: 1, kind: "heavy", bridgeId: "A", behavior: "toggle" },
+  ],
+  par: 10,
+  canonicalMoves: [],
 };
 
-// Raised outer rim bumps on all 4 borders
+// 3a. Open void cliff falls on all 4 borders + partial overhang onto interior void
 kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 0, c: 2 }, "up").kind,
-  "bump",
-  "Raised outer rim blocks top border roll (r=0 -> up)"
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 0, c: 2, bridgeMask: 0 }, "up").kind,
+  "fall_void",
+  "Stepping off top island border tips into void (fall_void)"
 );
 kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 4, c: 2 }, "down").kind,
-  "bump",
-  "Raised outer rim blocks bottom border roll (r=4 -> down)"
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 7, c: 2, bridgeMask: 0 }, "down").kind,
+  "fall_void",
+  "Stepping off bottom island border tips into void (fall_void)"
 );
 kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 2, c: 0 }, "left").kind,
-  "bump",
-  "Raised outer rim blocks left border roll (c=0 -> left)"
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 2, c: 0, bridgeMask: 0 }, "left").kind,
+  "fall_void",
+  "Stepping off left island border tips into void (fall_void)"
 );
 kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 2, c: 4 }, "right").kind,
-  "bump",
-  "Raised outer rim blocks right border roll (c=4 -> right)"
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 2, c: 7, bridgeMask: 0 }, "right").kind,
+  "fall_void",
+  "Stepping off right island border tips into void (fall_void)"
 );
-
-// Wall bump and interior dark void hazard
+// Partial overhang: UPRIGHT at (0,2) rolling right -> FLAT_H on (0,3)-(0,4), where (0,4) is void!
 kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 0, c: 0 }, "right").kind,
-  "bump",
-  "Wall block at (0,1) blocks tipping right from (0,0)"
-);
-kit.eq(
-  m2.stepMoveTwoDomino(synthPuzzle, { face: 0, posture: "UPRIGHT", r: 0, c: 0 }, "down").kind,
-  "hazard",
-  "Interior hazard at (1,0) triggers hazard outcome when tipping down from (0,0)"
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 0, c: 2, bridgeMask: 0 }, "right").kind,
+  "fall_void",
+  "Partial 1-cell overhang onto interior void cell triggers cliff tumble (fall_void)"
 );
 
-// Partial / non-matching posture over a 1-tile UPRIGHT hole at (2,2) on Face 0:
-// Rolling from UPRIGHT at (2,0) right -> lands FLAT_H on (2,1)-(2,2). Should be "moved", NOT "portal"!
-const flatOver1TileHole = m2.stepMoveTwoDomino(
-  synthPuzzle,
-  { face: 0, posture: "UPRIGHT", r: 2, c: 0 },
-  "right"
+// 3b. Fragile Terracotta Tile: SAFE when FLAT, BREAKS when UPRIGHT!
+const flatOnFragile = m2.stepBloxorzBlock(
+  synthStage,
+  { posture: "UPRIGHT", r: 2, c: 0, bridgeMask: 0 },
+  "right" // lands FLAT_H on (2,1)-(2,2), covering fragile (2,2)
 );
 kit.eq(
-  flatOver1TileHole.kind,
+  flatOnFragile.kind,
   "moved",
-  "Rolling FLAT_H across a 1-tile UPRIGHT hole rests on rim as 'moved' without dropping"
+  "Fragile terracotta tile safely supports FLAT_H block"
 );
-
-// Exact posture match over 1-tile UPRIGHT hole at (2,2) on Face 0:
-// Rolling from FLAT_H at (2,0)-(2,1) right -> stands UPRIGHT on (2,2) -> drops into hole (`portal`) and spawns at Face 1 coded start!
-const exactDropFace0 = m2.stepMoveTwoDomino(
-  synthPuzzle,
-  { face: 0, posture: "FLAT_H", r: 2, c: 0 },
-  "right"
-);
-kit.assert(
-  exactDropFace0.kind === "portal" &&
-    exactDropFace0.fromFace === 0 &&
-    exactDropFace0.toFace === 1 &&
-    exactDropFace0.enteredHole.posture === "UPRIGHT" &&
-    exactDropFace0.enteredHole.r === 2 &&
-    exactDropFace0.enteredHole.c === 2 &&
-    exactDropFace0.next.face === 1 &&
-    exactDropFace0.next.posture === "FLAT_V" &&
-    exactDropFace0.next.r === 0 &&
-    exactDropFace0.next.c === 4,
-  "Standing UPRIGHT onto Face 1's 1×1 hole triggers 'portal' and spawns die at Face 2's coded start (FLAT_V at 0,4)"
-);
-
-// Partial / non-matching posture over a 2-tile FLAT_H hole at (3,1)-(3,2) on Face 1:
-// Standing UPRIGHT on (3,1) from FLAT_V at (1,1)-(2,1) rolling down -> lands UPRIGHT on (3,1). Should be "moved", NOT "portal"!
-const uprightOn2TileHole = m2.stepMoveTwoDomino(
-  synthPuzzle,
-  { face: 1, posture: "FLAT_V", r: 1, c: 1 },
-  "down"
+const uprightOnFragile = m2.stepBloxorzBlock(
+  synthStage,
+  { posture: "FLAT_H", r: 2, c: 0, bridgeMask: 0 },
+  "right" // stands UPRIGHT on fragile (2,2)
 );
 kit.eq(
-  uprightOn2TileHole.kind,
+  uprightOnFragile.kind,
+  "fall_fragile",
+  "Fragile terracotta tile shatters when block stands UPRIGHT on it (fall_fragile)"
+);
+
+// 3c. Soft Switch (○) vs Heavy Switch (✕) + Closed vs Open Bridge
+// Flat roll across ○ soft switch at (1,1): UPRIGHT at (1,3) -> left -> FLAT_H on (1,1)-(1,2)
+const flatSoftSwitch = m2.stepBloxorzBlock(
+  synthStage,
+  { posture: "UPRIGHT", r: 1, c: 3, bridgeMask: 0 },
+  "left"
+);
+kit.assert(
+  flatSoftSwitch.kind === "moved" && flatSoftSwitch.next.bridgeMask === 1,
+  "○ Soft Switch triggers when touched FLAT, opening Bridge A (bridgeMask 0 -> 1)"
+);
+
+// Flat roll across ✕ heavy switch at (4,1): UPRIGHT at (4,3) -> left -> FLAT_H on (4,1)-(4,2)
+const flatHeavySwitch = m2.stepBloxorzBlock(
+  synthStage,
+  { posture: "UPRIGHT", r: 4, c: 3, bridgeMask: 0 },
+  "left"
+);
+kit.assert(
+  flatHeavySwitch.kind === "moved" && flatHeavySwitch.next.bridgeMask === 0,
+  "✕ Heavy Switch does NOT trigger when touched FLAT (bridgeMask stays 0)"
+);
+
+// Upright landing on ✕ heavy switch at (4,1): FLAT_H at (4,2)-(4,3) -> left -> UPRIGHT at (4,1)
+const uprightHeavySwitch = m2.stepBloxorzBlock(
+  synthStage,
+  { posture: "FLAT_H", r: 4, c: 2, bridgeMask: 0 },
+  "left"
+);
+kit.assert(
+  uprightHeavySwitch.kind === "moved" && uprightHeavySwitch.next.bridgeMask === 1,
+  "✕ Heavy Switch triggers when standing UPRIGHT (1×1), opening Bridge A (bridgeMask 0 -> 1)"
+);
+
+// Closed Bridge A at (3,4) vs Open Bridge A
+kit.eq(
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 3, c: 2, bridgeMask: 0 }, "right").kind,
+  "fall_bridge",
+  "Stepping onto retracted Bridge A (bridgeMask=0) triggers fall_bridge"
+);
+kit.eq(
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 3, c: 2, bridgeMask: 1 }, "right").kind,
   "moved",
-  "Standing UPRIGHT on 1 cell of a 2-tile FLAT_H hole rests as 'moved' without dropping"
+  "Stepping onto extended Bridge A (bridgeMask=1) safely crosses"
 );
 
-// Exact 2-tile FLAT_H drop on Face 5 (Final Face 6):
-// Rolling FLAT_H from (1,2)-(1,3) down onto (2,2)-(2,3) -> matches Face 6 hole -> "won"!
-const finalHoleWin = m2.stepMoveTwoDomino(
-  synthPuzzle,
-  { face: 5, posture: "FLAT_H", r: 1, c: 2 },
-  "down"
+// 3d. Classic 1×1 Emerald Goal Shaft: flat bridges across, upright drops in to win!
+kit.eq(
+  m2.stepBloxorzBlock(synthStage, { posture: "UPRIGHT", r: 5, c: 3, bridgeMask: 0 }, "right").kind,
+  "moved",
+  "Rolling FLAT_H across 1×1 goal hole at (5,5) bridges safely without winning"
 );
-kit.assert(
-  finalHoleWin.kind === "won" &&
-    finalHoleWin.next.posture === "FLAT_H" &&
-    finalHoleWin.next.r === 2 &&
-    finalHoleWin.next.c === 2,
-  "Dropping FLAT_H into Face 6's 1×2 hole triggers 'won'"
+kit.eq(
+  m2.stepBloxorzBlock(synthStage, { posture: "FLAT_H", r: 5, c: 3, bridgeMask: 0 }, "right").kind,
+  "won",
+  "Standing UPRIGHT (1×1) directly on goal hole at (5,5) drops through to win"
 );
 
-// ---- 4. Star rating formula (Q45) --------------------------------------------
-kit.eq(m2.computeMoveTwoStars(34, 34), 3, "Par -> 3 stars");
-kit.eq(m2.computeMoveTwoStars(36, 34), 3, "Par + 2 -> 3 stars");
-kit.eq(m2.computeMoveTwoStars(39, 34), 2, "Par + 5 -> 2 stars");
-kit.eq(m2.computeMoveTwoStars(44, 34), 1, "Par + 10 -> 1 star");
-
-// ---- 5. Monthly batch generator & 2026–2027 Zero-Duplicate Coverage ----------
-const batch = m2.generateMoveTwoMonthlyBatch(2027, 3);
-const batchKeys = Object.keys(batch);
-kit.eq(batchKeys.length, 31, "March 2027 batch has 31 daily puzzles");
-kit.assert(
-  batchKeys.every((k) => m2.validateMoveTwoPuzzle(batch[k]).valid),
-  "every generated March 2027 5×5 puzzle passes BFS solver & validator"
-);
-
-// Verify every date from 2026-11-01 through 2027-12-31 (426 days) via getMoveTwoPuzzleForDate
-const seenHashes = new Set<string>();
-let all2026To2027Valid = true;
-const startMs = Date.UTC(2026, 10, 1); // 2026-11-01
-const endMs = Date.UTC(2027, 11, 31); // 2027-12-31
-let totalDaysChecked = 0;
-for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
-  const dateKey = new Date(ms).toISOString().slice(0, 10);
-  const p = m2.getMoveTwoPuzzleForDate(dateKey);
-  if (!m2.isMoveTwoPuzzle(p)) {
-    all2026To2027Valid = false;
+// ---- 4. 3D Trimetric Projection & Rigid-Body Edge-Hinge Math ----------------
+for (const size of [6, 8, 10] as const) {
+  for (const [w, h] of [
+    [320, 260],
+    [560, 440],
+  ] as const) {
+    const fit = r3d.computeBoardViewportFit(size, w, h);
+    const unitsMidRoll = r3d.computeHingedCuboidUnits(
+      {
+        mode: "rolling",
+        from: { posture: "UPRIGHT", r: 2, c: 2 },
+        dir: "right",
+        progress: 0.5,
+      },
+      fit
+    );
+    const allFinite = unitsMidRoll.every(
+      (u) =>
+        u.faces.length >= 2 &&
+        u.faces.every((f) =>
+          f.vertices2D.every(
+            (pt) =>
+              Number.isFinite(pt.x) &&
+              Number.isFinite(pt.y) &&
+              pt.x >= 0 &&
+              pt.x <= w &&
+              pt.y >= 0 &&
+              pt.y <= h
+          )
+        )
+    );
+    kit.assert(
+      allFinite,
+      `3D trimetric projection & 45° mid-roll cuboid faces stay finite & bounded for ${size}×${size} @ ${w}×${h}`
+    );
   }
-  const boardSignature = JSON.stringify({
-    faces: p.faces.map((f) => ({
-      grid: f.grid,
-      start: f.start,
-      hole: f.hole,
-    })),
-  });
-  seenHashes.add(seeded.computePuzzleContentHash(boardSignature));
-  totalDaysChecked++;
 }
-kit.eq(totalDaysChecked, 426, "checked all 426 days from 2026-11-01 through 2027-12-31");
-kit.assert(all2026To2027Valid, "all 426 daily puzzles across 2026–2027 pass 5×5 BFS validation");
-kit.eq(
-  seenHashes.size,
-  totalDaysChecked,
-  "100% unique 5×5 Move Two puzzles across all 426 days of 2026–2027 (zero duplicate cycling)"
-);
 
-// ---- 6. SSR-safe Web Audio API SFX module ------------------------------------
-sfx.setMoveTwoMuted(true);
-kit.eq(sfx.isMoveTwoMuted(), true, "setMoveTwoMuted(true) persists mute state");
-sfx.setMoveTwoMuted(false);
-kit.eq(sfx.isMoveTwoMuted(), false, "setMoveTwoMuted(false) clears mute state");
-sfx.playMoveTwoRollSfx("UPRIGHT");
-sfx.playMoveTwoRimBumpSfx();
-sfx.playMoveTwoHoleDropSfx();
-sfx.playMoveTwoHazardSfx();
-sfx.playMoveTwoVictorySfx();
-kit.assert(true, "Web Audio SFX helpers execute cleanly in SSR/Node environment");
-
-// ---- 7. Daily engine + config wiring -----------------------------------------
-kit.assert(cfg.isPlayableGameSlug("move-2"), "move-2 is playable");
-const m2Meta = cfg.getGameBySlug("move-2");
-kit.eq(m2Meta?.showCreate, false, "move-2 has showCreate: false (no user creator mode)");
 kit.assert(
-  Boolean(m2Meta?.tagline.includes("5×5")),
-  "games-config tagline references 5×5 3D cube domino puzzle"
+  r3d.resolveTrimetricSwipeDirection(60, 0) === "right" &&
+    r3d.resolveTrimetricSwipeDirection(-60, 0) === "left" &&
+    r3d.resolveTrimetricSwipeDirection(0, 60) === "down" &&
+    r3d.resolveTrimetricSwipeDirection(0, -60) === "up" &&
+    r3d.resolveTrimetricSwipeDirection(5, 5) === null,
+  "resolveTrimetricSwipeDirection maps 4-way swipes cleanly and ignores micro-taps"
 );
 
-const resolved = daily.getDailyPuzzleForGame("move-2", "2026-11-15");
+// ---- 5. 426-Day × 3-Difficulty (`1,278` Stages) Zero-Duplicate & Solver Gate -
+function buildDateRange(startIso: string, endIso: string): string[] {
+  const out: string[] = [];
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  const cur = new Date(Date.UTC(sy!, sm! - 1, sd!));
+  const end = new Date(Date.UTC(ey!, em! - 1, ed!));
+  while (cur <= end) {
+    out.push(
+      `${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(
+        2,
+        "0"
+      )}-${String(cur.getUTCDate()).padStart(2, "0")}`
+    );
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
+const ALL_DATES = buildDateRange("2026-11-01", "2027-12-31");
+const seenEasy = new Set<string>();
+const seenMedium = new Set<string>();
+const seenHard = new Set<string>();
+let all426Valid = true;
+
+for (const d of ALL_DATES) {
+  const res = daily.getDailyPuzzleForGame<import("@/data/puzzles/move-2").MoveTwoPuzzle>(
+    "move-2",
+    d
+  );
+  if (!res || res.origin !== "bank" || !m2.isMoveTwoPuzzle(res.puzzle)) {
+    all426Valid = false;
+    break;
+  }
+  const { easy, medium, hard } = res.puzzle.stages;
+  seenEasy.add(JSON.stringify({ g: easy.grid, s: easy.start, e: easy.goal }));
+  seenMedium.add(JSON.stringify({ g: medium.grid, s: medium.start, e: medium.goal }));
+  seenHard.add(JSON.stringify({ g: hard.grid, s: hard.start, e: hard.goal }));
+}
+
 kit.assert(
-  Boolean(resolved && m2.isMoveTwoPuzzle(resolved.puzzle)),
-  "daily engine resolves valid 5×5 Move Two puzzle"
-);
-const badOverride = daily.getDailyPuzzleForGame("move-2", "2026-11-15", {
-  "2026-11-15": { broken: true },
-});
-kit.assert(
-  Boolean(
-    badOverride &&
-      m2.isMoveTwoPuzzle(badOverride.puzzle) &&
-      badOverride.origin !== "override"
-  ),
-  "invalid override rejected in favor of BFS-verified 5×5 puzzle"
+  all426Valid &&
+    seenEasy.size === 426 &&
+    seenMedium.size === 426 &&
+    seenHard.size === 426,
+  `All 1,278 stages across 426 days (2026-11-01..2027-12-31) are valid & 100% unique (Easy=${seenEasy.size}, Medium=${seenMedium.size}, Hard=${seenHard.size})`
 );
 
-// ---- 8. Share text + 2.5D UI & 5×5 Studio wiring checks ----------------------
-const receipt = m2.buildMoveTwoShareText({
+// ---- 6. Stale Legacy 3×3 / 5×5 Override Rejection & Self-Healing -------------
+const stale5x5 = {
+  id: "legacy-5x5",
   puzzleNumber: 12,
-  title: "Six-Sided Roll",
-  moves: 35,
-  par: 34,
-  stars: 3,
-});
+  title: "Old Cube",
+  faces: Array.from({ length: 6 }, () => ({ grid: [] })),
+  par: 30,
+};
+const healed = daily.getDailyPuzzleForGame<import("@/data/puzzles/move-2").MoveTwoPuzzle>(
+  "move-2",
+  "2027-03-10",
+  { "2027-03-10": stale5x5 }
+);
 kit.assert(
-  receipt.includes("Move Two #12") &&
-    receipt.includes("Solved in 35 moves · Par: 34 · ⭐⭐⭐"),
-  "Move Two share receipt includes moves, Par, and star rating"
+  Boolean(healed && healed.origin === "bank" && healed.puzzle.version === 3),
+  "getDailyPuzzleForGame rejects stale 5×5 override and self-heals to v3 Bloxorz bundle"
+);
+
+// ---- 7. Web Audio API SFX & UI / Studio Wiring -------------------------------
+let audioSafe = true;
+try {
+  sfx.setMoveTwoMuted(false);
+  sfx.playMoveTwoRollSfx("UPRIGHT");
+  sfx.playMoveTwoSwitchSfx("soft", true);
+  sfx.playMoveTwoSwitchSfx("heavy", false);
+  sfx.playMoveTwoFragileCrackSfx();
+  sfx.playMoveTwoFallSfx();
+  sfx.playMoveTwoHoleDropSfx();
+  sfx.playMoveTwoVictorySfx();
+  sfx.setMoveTwoMuted(true);
+  kit.eq(sfx.isMoveTwoMuted(), true, "mute state persists true");
+  sfx.setMoveTwoMuted(false);
+  kit.eq(sfx.isMoveTwoMuted(), false, "mute state resets false");
+} catch {
+  audioSafe = false;
+}
+kit.assert(audioSafe, "all Bloxorz Web Audio SFX execute safely in headless Node");
+
+kit.assert(cfg.isPlayableGameSlug("move-2"), "move-2 is playable");
+kit.eq(
+  cfg.getGameBySlug("move-2")?.showCreate,
+  false,
+  "move-2 has showCreate: false"
 );
 
 const gameSrc = fs.readFileSync(
   new URL("../src/components/games/move-two.tsx", import.meta.url),
   "utf8"
 );
-kit.assert(gameSrc.includes("GameSplashScreen"), "Move Two mounts GameSplashScreen");
-kit.assert(gameSrc.includes("showCreate={false}"), "Move Two hides Create button on splash");
-kit.assert(gameSrc.includes("IsometricCubeHud"), "Move Two renders mini 3D isometric cube HUD");
-kit.assert(gameSrc.includes("ResultShareButtons"), "Move Two mounts decoupled Share + Copy buttons");
-kit.assert(
-  gameSrc.includes("Undo Move") && gameSrc.includes("Reset Face"),
-  "Move Two renders Undo Move and Reset Face controls"
+const canvasSrc = fs.readFileSync(
+  new URL("../src/components/games/move-two-canvas.tsx", import.meta.url),
+  "utf8"
 );
-kit.assert(
-  gameSrc.includes("perspective") &&
-    gameSrc.includes("rotateX(25deg)") &&
-    gameSrc.includes("grid-cols-5") &&
-    gameSrc.includes("grid-rows-5") &&
-    !gameSrc.includes("ring-2") &&
-    gameSrc.includes("move-two-mute-toggle") &&
-    gameSrc.includes("move-two-3d-block") &&
-    gameSrc.includes('strokeLinejoin="miter"') &&
-    gameSrc.includes("320ms") &&
-    gameSrc.includes("Blocked by a wall.") &&
-    gameSrc.includes("You hit an obstacle! Resetting position.") &&
-    gameSrc.includes("Red obstacle hole") &&
-    gameSrc.includes("#EF4444") &&
-    gameSrc.includes("#2ECC71") &&
-    !gameSrc.includes("border-sky-500") &&
-    !gameSrc.includes("text-sky-800"),
-  "Move Two renders uniform grid-cols-5 grid-rows-5 tiles, sharp-edged 3D two-cube SVG block, green target holes on all 6 faces, recessed red obstacle holes, and generic copy"
-);
-
 const studioSrc = fs.readFileSync(
   new URL("../src/components/admin/move-two-studio-tab.tsx", import.meta.url),
   "utf8"
 );
+
 kit.assert(
-  studioSrc.includes("grid-cols-5") &&
-    studioSrc.includes("grid-rows-5") &&
-    studioSrc.includes("#DC2626") &&
-    studioSrc.includes("#2ECC71") &&
-    !studioSrc.includes("bg-sky-600") &&
-    studioSrc.includes("admin-move-two-clear-all") &&
+  gameSrc.includes('data-testid="move-two-difficulty-tabs"') &&
+    gameSrc.includes("move-two-diff-") &&
+    gameSrc.includes('data-testid="move-two-mute-toggle"') &&
+    gameSrc.includes("ResultShareButtons") &&
+    canvasSrc.includes('data-testid="move-two-3d-block"'),
+  "move-two.tsx & move-two-canvas.tsx wire difficulty tabs, 3D Bloxorz canvas, mute toggle, and ResultShareButtons"
+);
+
+kit.assert(
+  studioSrc.includes("admin-move-two-clear-all") &&
     studioSrc.includes("admin-move-two-revert-default") &&
-    studioSrc.includes("solveMoveTwoFace"),
-  "MoveTwoStudioTab renders interactive 5×5 face grids with green target holes, red obstacle holes, per-face BFS solver, Clear All, and Revert to Default"
+    studioSrc.includes("admin-move-two-reroll") &&
+    studioSrc.includes("MoveTwoBloxorzCanvas"),
+  "move-two-studio-tab.tsx wires Clear All, Revert to Default, Reroll Seed, and live 3D Bloxorz preview"
 );
-
-const pageSrc = fs.readFileSync(
-  new URL("../src/app/games/move-2/page.tsx", import.meta.url),
-  "utf8"
-);
-kit.assert(pageSrc.includes("GameErrorBoundary"), "Move Two page wrapped in GameErrorBoundary");
-
-const adminSrc = fs.readFileSync(
-  new URL("../src/app/admin/page.tsx", import.meta.url),
-  "utf8"
-);
-kit.assert(adminSrc.includes("MoveTwoStudioTab"), "/admin mounts MoveTwoStudioTab");
 
 kit.finish();

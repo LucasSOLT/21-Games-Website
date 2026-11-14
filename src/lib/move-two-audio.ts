@@ -181,7 +181,7 @@ export function playMoveTwoHazardSfx(): void {
   }
 }
 
-/** Bright ascending chord when dropping into the final hole on Face 6. */
+/** Bright ascending chord when dropping into the final hole. */
 export function playMoveTwoVictorySfx(): void {
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -204,6 +204,95 @@ export function playMoveTwoVictorySfx(): void {
       osc.start(startAt);
       osc.stop(startAt + 0.38);
     });
+  } catch {
+    // No-op
+  }
+}
+
+/** Mechanical plate click + bridge latch chime for ○ Soft Switch and ✕ Heavy Switch. */
+export function playMoveTwoSwitchSfx(
+  kind: "soft" | "heavy" = "soft",
+  opened: boolean = true
+): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const clickOsc = ctx.createOscillator();
+    const clickGain = ctx.createGain();
+    clickOsc.type = kind === "heavy" ? "square" : "triangle";
+    clickOsc.frequency.setValueAtTime(kind === "heavy" ? 240 : 360, now);
+    clickOsc.frequency.exponentialRampToValueAtTime(
+      opened ? 540 : 190,
+      now + 0.11
+    );
+
+    clickGain.gain.setValueAtTime(0.12, now);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    clickOsc.connect(clickGain);
+    clickGain.connect(ctx.destination);
+    clickOsc.start(now);
+    clickOsc.stop(now + 0.13);
+  } catch {
+    // No-op
+  }
+}
+
+/** Brittle terracotta snap + descending plunge when standing UPRIGHT on a fragile orange tile. */
+export function playMoveTwoFragileCrackSfx(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const snap = ctx.createOscillator();
+    const snapGain = ctx.createGain();
+    snap.type = "sawtooth";
+    snap.frequency.setValueAtTime(420, now);
+    snap.frequency.exponentialRampToValueAtTime(88, now + 0.16);
+    snapGain.gain.setValueAtTime(0.14, now);
+    snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.17);
+    snap.connect(snapGain);
+    snapGain.connect(ctx.destination);
+    snap.start(now);
+    snap.stop(now + 0.18);
+
+    const fall = ctx.createOscillator();
+    const fallGain = ctx.createGain();
+    fall.type = "sine";
+    fall.frequency.setValueAtTime(280, now + 0.08);
+    fall.frequency.exponentialRampToValueAtTime(68, now + 0.36);
+    fallGain.gain.setValueAtTime(0.11, now + 0.08);
+    fallGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+    fall.connect(fallGain);
+    fallGain.connect(ctx.destination);
+    fall.start(now + 0.08);
+    fall.stop(now + 0.39);
+  } catch {
+    // No-op
+  }
+}
+
+/** Descending cliff-overhang whoosh when tipping off an open void edge or closed bridge. */
+export function playMoveTwoFallSfx(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(340, now + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(62, now + 0.38);
+
+    gain.gain.setValueAtTime(0.13, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + 0.06);
+    osc.stop(now + 0.41);
   } catch {
     // No-op
   }

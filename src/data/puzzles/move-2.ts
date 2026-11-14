@@ -1,5 +1,6 @@
 /**
- * Move Two (`move-2`) — 66-day 5×5 BFS-solver-verified puzzle bank + 2026–2027 date-keyed daily resolution.
+ * Move Two (`move-2`) — 66-day 3-Difficulty Bloxorz (`6×6` Easy · `8×8` Medium · `10×10` Hard)
+ * BFS-solver-verified puzzle bank + 2026–2027 zero-duplicate daily resolution.
  */
 
 import {
@@ -8,80 +9,153 @@ import {
   getPuzzleNumberForDate,
 } from "@/lib/date-keys";
 import {
+  MOVE_TWO_BOARD_SIZES,
+  MOVE_TWO_DIFFICULTIES,
+  MOVE_TWO_DIFFICULTY_META,
   MOVE_TWO_DIRECTIONS,
-  MOVE_TWO_GRID_SIZE,
   MOVE_TWO_POSTURES,
+  MOVE_TWO_TILE_TYPES,
   computeMoveTwoStars,
   computeRawRoll,
-  emptyMoveTwoFloorGrid,
+  createMoveTwoGrid,
+  generateBloxorzStage,
   generateMoveTwoMonthlyBatch,
   generateMoveTwoPuzzle,
+  getBridgeForCell,
   getDominoCells,
-  isInBounds3x3,
-  isInBounds5x5,
+  getInitialBlockState,
+  getInitialBridgeMask,
+  getSwitchAtCell,
+  isBridgeOpen,
+  isInBoundsStage,
   isMoveTwoPuzzle,
-  isStateFootprintInBounds,
-  matchesFaceHole,
-  matchesMoveTwoTarget,
+  solveBloxorzStage,
   solveMoveTwo,
-  solveMoveTwoFace,
-  stepMoveTwoDomino,
+  stepBloxorzBlock,
   validateMoveTwoPuzzle,
-  type MoveTwoCellType,
+  validateMoveTwoStage,
+  verifySwitchNecessity,
+  type MoveTwoBlockState,
+  type MoveTwoBridgeDef,
   type MoveTwoCoord,
+  type MoveTwoDifficulty,
   type MoveTwoDirection,
-  type MoveTwoDominoState,
-  type MoveTwoFace,
-  type MoveTwoGrid,
-  type MoveTwoGridRow,
   type MoveTwoPosture,
   type MoveTwoPuzzle,
   type MoveTwoSolveResult,
+  type MoveTwoStage,
+  type MoveTwoStageSolveResult,
   type MoveTwoStepOutcome,
-  type MoveTwoTarget,
+  type MoveTwoSwitchBehavior,
+  type MoveTwoSwitchDef,
+  type MoveTwoTileType,
 } from "@/lib/generators/move-two-generator";
 
 export {
+  MOVE_TWO_BOARD_SIZES,
+  MOVE_TWO_DIFFICULTIES,
+  MOVE_TWO_DIFFICULTY_META,
   MOVE_TWO_DIRECTIONS,
-  MOVE_TWO_GRID_SIZE,
   MOVE_TWO_POSTURES,
+  MOVE_TWO_TILE_TYPES,
   computeMoveTwoStars,
   computeRawRoll,
-  emptyMoveTwoFloorGrid,
+  createMoveTwoGrid,
+  generateBloxorzStage,
   generateMoveTwoMonthlyBatch,
   generateMoveTwoPuzzle,
+  getBridgeForCell,
   getDominoCells,
-  isInBounds3x3,
-  isInBounds5x5,
+  getInitialBlockState,
+  getInitialBridgeMask,
+  getSwitchAtCell,
+  isBridgeOpen,
+  isInBoundsStage,
   isMoveTwoPuzzle,
-  isStateFootprintInBounds,
-  matchesFaceHole,
-  matchesMoveTwoTarget,
+  solveBloxorzStage,
   solveMoveTwo,
-  solveMoveTwoFace,
-  stepMoveTwoDomino,
+  stepBloxorzBlock,
   validateMoveTwoPuzzle,
-  type MoveTwoCellType,
+  validateMoveTwoStage,
+  verifySwitchNecessity,
+  type MoveTwoBlockState,
+  type MoveTwoBridgeDef,
   type MoveTwoCoord,
+  type MoveTwoDifficulty,
   type MoveTwoDirection,
-  type MoveTwoDominoState,
-  type MoveTwoFace,
-  type MoveTwoGrid,
-  type MoveTwoGridRow,
   type MoveTwoPosture,
   type MoveTwoPuzzle,
   type MoveTwoSolveResult,
+  type MoveTwoStage,
+  type MoveTwoStageSolveResult,
   type MoveTwoStepOutcome,
-  type MoveTwoTarget,
+  type MoveTwoSwitchBehavior,
+  type MoveTwoSwitchDef,
+  type MoveTwoTileType,
 };
 
 export const MOVE_TWO_BANK_SIZE = 66;
+
+function computeStageSignature(stage: MoveTwoStage): string {
+  return JSON.stringify({
+    grid: stage.grid,
+    start: stage.start,
+    goal: stage.goal,
+    bridges: stage.bridges,
+    switches: stage.switches,
+  });
+}
+
+const SEEN_STAGE_SIGNATURES: Record<MoveTwoDifficulty, Set<string>> = {
+  easy: new Set<string>(),
+  medium: new Set<string>(),
+  hard: new Set<string>(),
+};
+
+function generateUniqueStageForPool(
+  baseSeed: string,
+  difficulty: MoveTwoDifficulty
+): MoveTwoStage {
+  const seen = SEEN_STAGE_SIGNATURES[difficulty];
+  let firstCandidate: MoveTwoStage | null = null;
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const seed =
+      attempt === 0 ? `${baseSeed}:${difficulty}` : `${baseSeed}:${difficulty}:u${attempt}`;
+    const candidate = generateBloxorzStage(seed, difficulty);
+    if (!firstCandidate) firstCandidate = candidate;
+    const sig = computeStageSignature(candidate);
+    if (!seen.has(sig)) {
+      seen.add(sig);
+      return candidate;
+    }
+  }
+  return firstCandidate!;
+}
+
+function generateUniqueBundleForPool(
+  baseSeed: string,
+  meta: {
+    id: string;
+    puzzleNumber: number;
+    customDate?: string;
+  }
+): MoveTwoPuzzle {
+  const baseMeta = generateMoveTwoPuzzle(baseSeed, meta);
+  const easy = generateUniqueStageForPool(baseSeed, "easy");
+  const medium = generateUniqueStageForPool(baseSeed, "medium");
+  const hard = generateUniqueStageForPool(baseSeed, "hard");
+  return {
+    ...baseMeta,
+    stages: { easy, medium, hard },
+    par: medium.par,
+  };
+}
 
 function buildMoveTwoBank(): MoveTwoPuzzle[] {
   const bank: MoveTwoPuzzle[] = [];
   for (let i = 0; i < MOVE_TWO_BANK_SIZE; i++) {
     bank.push(
-      generateMoveTwoPuzzle(`bank:v2:${i}`, {
+      generateUniqueBundleForPool(`bank:v3:${i}`, {
         id: `m2-bank-${String(i + 1).padStart(2, "0")}`,
         puzzleNumber: i + 1,
       })
@@ -90,7 +164,7 @@ function buildMoveTwoBank(): MoveTwoPuzzle[] {
   return bank;
 }
 
-/** 66-day BFS-verified 5×5 Move Two puzzle bank. */
+/** 66-day BFS-verified 3-difficulty (`6×6` / `8×8` / `10×10`) Bloxorz puzzle bank. */
 export const MOVE_TWO_PUZZLES: MoveTwoPuzzle[] = buildMoveTwoBank();
 
 const DATE_PUZZLE_CACHE = new Map<string, MoveTwoPuzzle>();
@@ -100,7 +174,7 @@ export function generateSeededMoveTwoPuzzle(
   dateKey: string,
   puzzleNumber: number = getPuzzleNumberForDate(dateKey)
 ): MoveTwoPuzzle {
-  return generateMoveTwoPuzzle(`seed:${dateKey}`, {
+  return generateMoveTwoPuzzle(`seed:v3:${dateKey}`, {
     id: `m2-seed-${dateKey}`,
     puzzleNumber,
     customDate: dateKey,
@@ -108,8 +182,8 @@ export function generateSeededMoveTwoPuzzle(
 }
 
 /**
- * Resolves a deterministic, BFS-verified 5×5 Move Two puzzle for any date across 2026–2027 (and beyond)
- * with zero duplicate modulo cycling.
+ * Resolves a deterministic, BFS-verified 3-difficulty Bloxorz puzzle for any date
+ * across 2026–2027 (and beyond) with zero duplicate stages across all difficulties.
  */
 export function getMoveTwoPuzzleForDate(
   dateKey: string,
@@ -120,46 +194,76 @@ export function getMoveTwoPuzzleForDate(
     return override;
   }
 
-  const cached = DATE_PUZZLE_CACHE.get(dateKey);
-  if (cached) {
-    return cached;
-  }
-
   const puzzleNumber = getPuzzleNumberForDate(dateKey);
   const diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey);
-  let resolved: MoveTwoPuzzle;
-
   if (diff >= 0 && diff < MOVE_TWO_PUZZLES.length) {
     const base = MOVE_TWO_PUZZLES[diff]!;
-    resolved = {
+    return {
       ...base,
       puzzleNumber,
       customDate: dateKey,
     };
-  } else {
-    resolved = generateMoveTwoPuzzle(`bank:date:${dateKey}`, {
-      id: `m2-bank-${dateKey}`,
+  }
+
+  const cached = DATE_PUZZLE_CACHE.get(dateKey);
+  if (cached) {
+    return {
+      ...cached,
       puzzleNumber,
       customDate: dateKey,
-    });
+    };
   }
+
+  const resolved = generateUniqueBundleForPool(`bank:date:v3:${dateKey}`, {
+    id: `m2-bank-${dateKey}`,
+    puzzleNumber,
+    customDate: dateKey,
+  });
 
   DATE_PUZZLE_CACHE.set(dateKey, resolved);
   return resolved;
 }
 
-/** Formats the share receipt for Move Two (`Solved in X moves · Par: Y · ⭐⭐⭐`). */
-export function buildMoveTwoShareText(opts: {
-  puzzleNumber: number;
-  title: string;
+export interface MoveTwoDifficultyScoreSummary {
   moves: number;
   par: number;
   stars: 1 | 2 | 3;
+}
+
+/**
+ * Formats the share receipt for Move Two:
+ * - Supports multi-difficulty daily completions (`Easy 6×6`, `Medium 8×8`, `Hard 10×10`)
+ * - Also supports single-difficulty `{ moves, par, stars }` payloads
+ */
+export function buildMoveTwoShareText(opts: {
+  puzzleNumber: number;
+  title: string;
+  moves?: number;
+  par?: number;
+  stars?: 1 | 2 | 3;
+  results?: Partial<Record<MoveTwoDifficulty, MoveTwoDifficultyScoreSummary>>;
 }): string {
-  const starRow = "⭐".repeat(opts.stars);
-  return [
-    `🎲 Move Two #${opts.puzzleNumber} — "${opts.title}"`,
-    `Solved in ${opts.moves} moves · Par: ${opts.par} · ${starRow}`,
-    `🟩🟩🟩🟩🟩🎯`,
-  ].join("\n");
+  const lines = [`🟨 Move Two #${opts.puzzleNumber} — "${opts.title}"`];
+
+  const solvedDiffs = opts.results
+    ? MOVE_TWO_DIFFICULTIES.filter((d) => Boolean(opts.results?.[d]))
+    : [];
+
+  if (solvedDiffs.length > 0 && opts.results) {
+    for (const diff of solvedDiffs) {
+      const entry = opts.results[diff]!;
+      const meta = MOVE_TWO_DIFFICULTY_META[diff];
+      const starRow = "⭐".repeat(entry.stars);
+      lines.push(
+        `${meta.label} (${meta.sizeLabel}): ${entry.moves} moves · Par: ${entry.par} · ${starRow}`
+      );
+    }
+  } else {
+    const moves = opts.moves ?? 0;
+    const par = opts.par ?? 0;
+    const stars = opts.stars ?? 3;
+    lines.push(`Solved in ${moves} moves · Par: ${par} · ${"⭐".repeat(stars)}`);
+  }
+
+  return lines.join("\n");
 }
