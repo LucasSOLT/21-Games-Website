@@ -489,9 +489,9 @@ export function MoveTwoStudioTab({
           </span>
           {(
             [
-              { id: "hazard", label: "Toggle Obstacle (✕)" },
+              { id: "hazard", label: "Toggle Red Hole" },
               { id: "start", label: "Set Start (S)" },
-              { id: "hole", label: "Set Hole (H)" },
+              { id: "hole", label: "Set Green Hole (H)" },
             ] as const
           ).map((tool) => (
             <button
@@ -533,7 +533,7 @@ export function MoveTwoStudioTab({
             >
               <div className="flex items-center justify-between text-xs font-black uppercase">
                 <span>
-                  Face {face.index + 1} {isFinal ? "· Green Goal" : `→ Face ${face.index + 2}`}
+                  Face {face.index + 1} {isFinal ? "· Final Green Goal" : `· Green Hole → ${face.index + 2}`}
                 </span>
                 <span
                   className={cn(
@@ -550,7 +550,7 @@ export function MoveTwoStudioTab({
               </div>
 
               {/* 5×5 Grid */}
-              <div className="grid grid-cols-5 gap-1 bg-[#EAE8E1] p-1.5 rounded-xl border-2 border-black">
+              <div className="grid grid-cols-5 grid-rows-5 gap-1 bg-[#EAE8E1] p-1.5 rounded-xl border-2 border-black aspect-square">
                 {GRID_INDICES.map((r) =>
                   GRID_INDICES.map((c) => {
                     const key = `${r},${c}`;
@@ -565,24 +565,22 @@ export function MoveTwoStudioTab({
                         onClick={() => handleCellClick(idx, r, c)}
                         data-testid={`admin-m2-face-${idx}-cell-${r}-${c}`}
                         className={cn(
-                          "h-7 rounded border flex items-center justify-center text-[10px] font-mono font-black transition-colors cursor-pointer",
+                          "w-full h-full aspect-square rounded-sm border-2 flex items-center justify-center text-[10px] font-mono font-black transition-colors cursor-pointer",
                           cell === "wall"
                             ? "bg-neutral-800 border-black text-white"
                             : cell === "hazard"
-                            ? "bg-amber-50 border-neutral-800 text-neutral-900"
+                            ? "bg-[#DC2626] border-[#7F1D1D] text-white shadow-[inset_0_2px_4px_rgba(0,0,0,0.45)]"
                             : isStart
                             ? "bg-[#F7DA21] border-black text-black"
                             : isHole
-                            ? isFinal
-                              ? "bg-[#2ECC71] border-black text-black"
-                              : "bg-sky-600 border-black text-white"
+                            ? "bg-[#2ECC71] border-[#14532D] text-black shadow-[inset_0_2px_4px_rgba(0,0,0,0.25)]"
                             : "bg-white border-neutral-300 text-neutral-400 hover:bg-neutral-100"
                         )}
                       >
                         {cell === "wall"
                           ? "■"
                           : cell === "hazard"
-                          ? "✕"
+                          ? "●"
                           : isStart
                           ? "S"
                           : isHole

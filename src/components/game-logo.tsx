@@ -1196,14 +1196,13 @@ export function GameLogo({
             opacity="0.2"
           />
 
-          {/* Green Final Goal Hole at top-right */}
+          {/* Green Target Hole at top-right (sharp cube hole) */}
           <g>
             <rect
               x="52.5"
               y="12.5"
               width="22"
               height="22"
-              rx="4"
               fill={INK}
             />
             <rect
@@ -1211,25 +1210,25 @@ export function GameLogo({
               y="10"
               width="22"
               height="22"
-              rx="4"
               fill={GREEN}
               stroke={INK}
               strokeWidth="2.5"
+              strokeLinejoin="miter"
             />
-            {/* Recessed inner hole frame */}
+            {/* Recessed inner hole pit */}
             <rect
               x="54.5"
               y="14.5"
               width="13"
               height="13"
-              rx="2.5"
-              fill="#15803D"
+              fill="#064E3B"
               stroke={INK}
               strokeWidth="1.8"
+              strokeLinejoin="miter"
             />
           </g>
 
-          {/* Dynamic rolling arc toward green goal hole */}
+          {/* Dynamic rolling arc toward green hole */}
           <path
             d="M 34 26 C 36 14 45 13 48 18"
             fill="none"
@@ -1243,65 +1242,54 @@ export function GameLogo({
             fill={INK}
           />
 
-          {/* 3D Stacked 2x1 Block Shadow */}
-          <path
-            d="M 10 70 L 28 70 L 36 62 L 18 62 Z"
+          {/* Sharp 3D Stacked 2x1 Cube Block Shadow */}
+          <polygon
+            points="10,70 30,70 38,62 18,62"
             fill={INK}
             opacity="0.22"
           />
 
-          {/* 3D Stacked 2x1 Block (Two unit cubes stacked vertically — zero pips) */}
+          {/* Sharp 3D Stacked 2x1 Block (Two sharp-edged cubes attached — zero curved corners) */}
           {/* Bottom Cube Unit */}
           <g>
-            {/* Front Face */}
-            <rect
-              x="10"
-              y="48"
-              width="20"
-              height="20"
-              rx="2"
-              fill={YELLOW}
+            <polygon
+              points="10,48 30,48 30,68 10,68"
+              fill="#EAB308"
               stroke={INK}
               strokeWidth="2.4"
+              strokeLinejoin="miter"
             />
-            {/* Right Extruded Wall */}
-            <path
-              d="M 30 48 L 38 40 V 60 L 30 68 Z"
-              fill="#CA8A04"
+            <polygon
+              points="30,48 38,40 38,60 30,68"
+              fill="#A16207"
               stroke={INK}
               strokeWidth="2.4"
-              strokeLinejoin="round"
+              strokeLinejoin="miter"
             />
           </g>
 
           {/* Upper Stacked Cube Unit */}
           <g>
-            {/* Front Face */}
-            <rect
-              x="10"
-              y="28"
-              width="20"
-              height="20"
-              rx="2"
+            <polygon
+              points="10,28 30,28 30,48 10,48"
               fill={YELLOW}
               stroke={INK}
               strokeWidth="2.4"
+              strokeLinejoin="miter"
             />
-            {/* Top Bevel Face */}
-            <path
-              d="M 10 28 L 18 20 H 38 L 30 28 Z"
+            <polygon
+              points="10,28 18,20 38,20 30,28"
               fill="#FEF08A"
               stroke={INK}
               strokeWidth="2.4"
-              strokeLinejoin="round"
+              strokeLinejoin="miter"
             />
-            {/* Right Extruded Wall */}
-            <path
-              d="M 30 28 L 38 20 V 40 L 30 48 Z"
+            <polygon
+              points="30,28 38,20 38,40 30,48"
               fill="#CA8A04"
               stroke={INK}
               strokeWidth="2.4"
-              strokeLinejoin="round"
+              strokeLinejoin="miter"
             />
           </g>
         </svg>

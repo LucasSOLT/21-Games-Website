@@ -15,7 +15,6 @@ import {
   Undo2,
   Volume2,
   VolumeX,
-  X,
 } from "lucide-react";
 import {
   MOVE_TWO_GRID_SIZE,
@@ -789,12 +788,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             </div>
             <p className="text-[11px] font-semibold text-neutral-600">
               Block: <span className="font-bold text-black">{postureLabel}</span>
-              <span
-                className={cn(
-                  "ml-2 font-bold",
-                  domino.face === 5 ? "text-emerald-700" : "text-sky-800"
-                )}
-              >
+              <span className="ml-2 font-bold text-emerald-700">
                 · {holeRequirementLabel}
               </span>
             </p>
@@ -832,7 +826,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                 feedback.kind === "portal"
                   ? "bg-emerald-50 border-emerald-300 text-emerald-900"
                   : feedback.kind === "hazard"
-                  ? "bg-amber-50 border-amber-400 text-amber-950"
+                  ? "bg-red-50 border-red-300 text-red-900"
                   : "bg-neutral-100 border-neutral-300 text-neutral-800"
               )}
             >
@@ -841,7 +835,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           ) : domino.face < 5 ? (
             <p className="text-xs font-semibold text-neutral-600">
               Move the 2×1 block to{" "}
-              <span className="font-black text-sky-800">
+              <span className="font-black text-emerald-700">
                 {holeRequirementLabel}
               </span>{" "}
               to advance to Face {domino.face + 2}.
@@ -853,7 +847,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           )}
         </div>
 
-        {/* NYT-Styled 2.5D Tilted (~25°) 5×5 Cube Face & 3D Stacked 2×1 Block */}
+        {/* NYT-Styled 2.5D Tilted (~25°) 5×5 Cube Face & Sharp 3D Two-Cube 2×1 Block */}
         <div
           onTouchStart={(e) => {
             const t = e.touches[0];
@@ -892,277 +886,302 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             className="w-full transition-transform duration-500 ease-out"
           >
             {/* NYT Games Editorial Cube Frame */}
-            <div className="rounded-3xl bg-[#F7F7F5] p-3 border-[3px] border-[#111111] shadow-[0_12px_0_#111111,0_20px_28px_rgba(0,0,0,0.14)]">
-              <div className="flex items-center justify-between px-1.5 pb-2 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-600">
+            <div className="rounded-2xl bg-[#F7F7F5] p-3 border-[3px] border-[#111111] shadow-[0_12px_0_#111111,0_20px_28px_rgba(0,0,0,0.14)]">
+              <div className="flex items-center justify-between px-1 pb-1 text-[10px] font-mono font-black tracking-wider uppercase text-neutral-600">
                 <span>Face {domino.face + 1} of 6 · 5×5 Cube</span>
-                <span
-                  className={cn(
-                    "px-2 py-0.5 rounded-full border border-black/20",
-                    domino.face === 5
-                      ? "bg-emerald-100 text-emerald-900"
-                      : "bg-[#FFFBE6] text-neutral-900"
-                  )}
-                >
-                  {domino.face === 5 ? "Green Goal Hole" : "2×1 Block"}
+                <span className="px-2 py-0.5 rounded-full border border-emerald-700/35 bg-emerald-100 text-emerald-900">
+                  {domino.face === 5 ? "Final Green Goal" : "Green Hole"}
                 </span>
               </div>
 
-              {/* 5×5 Cube Surface Grid + Animated 3D 2×1 Block Actor */}
-              <div
-                key={`face-${domino.face}`}
-                className="relative grid grid-cols-5 gap-1.5 p-2 rounded-2xl bg-[#EAE8E1] border-2 border-[#111111] shadow-inner aspect-square"
-              >
-                {GRID_INDICES.map((r) =>
-                  GRID_INDICES.map((c) => {
-                    const key = `${r},${c}`;
-                    const cellType = activeFace.grid[r]?.[c] ?? "floor";
-                    const hasDomino = occupiedKeys.has(key);
-                    const isHole = holeKeys.has(key);
-                    const isStart = startKeys.has(key);
-                    const isFinalFace = domino.face === 5;
-                    const isPrimaryHoleAnchor =
-                      r === faceHole.r && c === faceHole.c;
-
-                    return (
-                      <div
-                        key={key}
-                        data-testid={`m2-cell-${r}-${c}`}
-                        className={cn(
-                          "relative rounded-xl border-2 flex items-center justify-center transition-colors",
-                          cellType === "wall"
-                            ? "bg-[#171717] border-[#111111] text-white shadow-[0_3px_0_#000]"
-                            : cellType === "hazard"
-                            ? "bg-amber-50/95 border-neutral-800 text-neutral-900 shadow-[inset_0_2px_4px_rgba(0,0,0,0.12)]"
-                            : isHole
-                            ? isFinalFace
-                              ? "bg-emerald-950 border-[#2ECC71] text-emerald-200 shadow-[inset_0_5px_10px_rgba(0,0,0,0.85)] ring-2 ring-[#2ECC71]/60"
-                              : "bg-neutral-900 border-sky-500 text-sky-200 shadow-[inset_0_5px_10px_rgba(0,0,0,0.85)] ring-2 ring-sky-400/40"
-                            : isStart
-                            ? "bg-[#FFFBE6] border-amber-500/70 shadow-[0_2px_0_#d4d4d8]"
-                            : "bg-white border-neutral-300 shadow-[0_2px_0_#d4d4d8]"
-                        )}
-                      >
-                        {/* Start Tile subtle marker */}
-                        {isStart && !hasDomino && !isHole && cellType === "floor" && (
-                          <span className="text-[8px] font-mono font-black uppercase tracking-tighter text-amber-800/80">
-                            START
-                          </span>
-                        )}
-
-                        {/* Solid Wall Block */}
-                        {cellType === "wall" && (
-                          <span
-                            className="h-5 w-5 rounded-sm bg-neutral-700 border border-neutral-500 shadow-[0_2px_0_#000]"
-                            aria-label="Wall"
-                          />
-                        )}
-
-                        {/* Obstacle Tile */}
-                        {cellType === "hazard" && (
-                          <div
-                            className="flex flex-col items-center justify-center"
-                            aria-label="Obstacle"
-                          >
-                            <X className="h-5 w-5 stroke-[2.75] text-neutral-800" />
-                          </div>
-                        )}
-
-                        {/* Recessed Target Hole Cavity (Green on Face 6, Sky on Faces 1–5) */}
-                        {isHole && !hasDomino && (
-                          <div
-                            className={cn(
-                              "inset-1 absolute rounded-lg border border-dashed flex flex-col items-center justify-center text-center overflow-hidden",
-                              isFinalFace
-                                ? "border-[#2ECC71] bg-gradient-to-b from-emerald-950 via-emerald-900 to-emerald-950"
-                                : "border-sky-400/70 bg-gradient-to-b from-neutral-950 via-neutral-900 to-neutral-950"
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "h-2.5 w-2.5 rounded-sm border",
-                                isFinalFace
-                                  ? "bg-[#2ECC71] border-white/80 shadow-[0_0_8px_rgba(46,204,113,0.7)]"
-                                  : "bg-sky-400/40 border-sky-300"
-                              )}
-                            />
-                            {isPrimaryHoleAnchor && (
-                              <span
-                                className={cn(
-                                  "text-[7px] font-mono font-black uppercase leading-none mt-0.5",
-                                  isFinalFace ? "text-[#2ECC71]" : "text-sky-300"
-                                )}
-                              >
-                                {formatHoleBadge(faceHole.posture, isFinalFace)}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Occupied cell test-id marker (preserves m2-domino-${r}-${c} for automated checks) */}
-                        {hasDomino && (
-                          <span
-                            data-testid={`m2-domino-${r}-${c}`}
-                            className="sr-only"
-                          >
-                            2×1 Block at ({r}, {c})
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-
-                {/* Animated 3D Stacked 2×1 Block Actor (No Domino Pips; 2 Stacked Cubes when UPRIGHT; 320ms Physics Roll) */}
+              {/* Headroom mt-4 so a tall UPRIGHT 2-cube stack at row 0 rises cleanly inside the cube frame */}
+              <div className="mt-4 p-2 rounded-lg bg-[#E5E3DC] border-2 border-[#111111] shadow-inner aspect-square">
+                {/* Strictly Uniform 5×5 Cube Surface Grid (grid-cols-5 + grid-rows-5) */}
                 <div
-                  data-testid="move-two-3d-block"
-                  data-posture={domino.posture}
-                  style={{
-                    left: `${domino.c * 20}%`,
-                    top: `${domino.r * 20}%`,
-                    width: domino.posture === "FLAT_H" ? "40%" : "20%",
-                    height: domino.posture === "FLAT_V" ? "40%" : "20%",
-                    transform: blockRollTransform,
-                    transition:
-                      "left 320ms cubic-bezier(0.22, 1, 0.36, 1), top 320ms cubic-bezier(0.22, 1, 0.36, 1), width 320ms cubic-bezier(0.22, 1, 0.36, 1), height 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
-                  }}
-                  className="pointer-events-none absolute z-20 p-1.5"
+                  key={`face-${domino.face}`}
+                  className="relative w-full h-full grid grid-cols-5 grid-rows-5 gap-1.5"
                 >
-                  {domino.posture === "UPRIGHT" ? (
-                    /* UPRIGHT (1×1 footprint): Two 3D unit blocks visibly stacked on top of each other */
-                    <div className="relative w-full h-full">
-                      {/* Stacked Tower rising in 2.5D space */}
-                      <div
-                        className={cn(
-                          "absolute inset-x-0 -top-5 bottom-0 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
-                          status === "won"
-                            ? "shadow-[4px_7px_0_#14532d,0_12px_18px_rgba(0,0,0,0.28)]"
-                            : "shadow-[4px_7px_0_#111111,0_12px_18px_rgba(0,0,0,0.26)]"
-                        )}
-                      >
-                        {/* Top Bevel Roof of Upper Cube */}
-                        <div
-                          className={cn(
-                            "h-2.5 w-full border-b-2 border-[#111111] shrink-0",
-                            status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
-                          )}
-                        />
+                  {GRID_INDICES.map((r) =>
+                    GRID_INDICES.map((c) => {
+                      const key = `${r},${c}`;
+                      const cellType = activeFace.grid[r]?.[c] ?? "floor";
+                      const hasDomino = occupiedKeys.has(key);
+                      const isHole = holeKeys.has(key);
+                      const isStart = startKeys.has(key);
+                      const isFinalFace = domino.face === 5;
+                      const isPrimaryHoleAnchor =
+                        r === faceHole.r && c === faceHole.c;
 
-                        {/* Upper Cube (Block 2 of 2) */}
+                      return (
                         <div
+                          key={key}
+                          data-testid={`m2-cell-${r}-${c}`}
                           className={cn(
-                            "flex-1 w-full border-b-2 border-[#111111] relative flex items-center justify-center",
-                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+                            "relative w-full h-full min-w-0 min-h-0 aspect-square rounded-[3px] border-2 overflow-hidden transition-colors",
+                            cellType === "wall"
+                              ? "bg-[#171717] border-[#111111]"
+                              : cellType === "hazard"
+                              ? "bg-[#1F0202] border-[#991B1B]"
+                              : isHole
+                              ? "bg-[#031D0E] border-[#15803D]"
+                              : isStart
+                              ? "bg-[#FFFBE6] border-amber-500/80 shadow-[inset_0_-2px_0_#fde68a]"
+                              : "bg-white border-neutral-300 shadow-[inset_0_-2px_0_#e5e5e5]"
                           )}
                         >
-                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
-                        </div>
+                          {/* Start Tile subtle marker (absolute so zero intrinsic track stretch) */}
+                          {isStart && !hasDomino && !isHole && cellType === "floor" && (
+                            <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[8px] font-mono font-black uppercase tracking-tighter text-amber-800/80">
+                              START
+                            </span>
+                          )}
 
-                        {/* Bottom Cube (Block 1 of 2 — stacked beneath Upper Cube) */}
-                        <div
-                          className={cn(
-                            "flex-1 w-full relative flex items-center justify-center",
-                            status === "won" ? "bg-[#27ae60]" : "bg-[#EAB308]"
+                          {/* Solid Wall Block */}
+                          {cellType === "wall" && (
+                            <span
+                              className="pointer-events-none absolute inset-1.5 bg-neutral-700 border border-neutral-500 shadow-[0_2px_0_#000]"
+                              aria-label="Wall"
+                            />
                           )}
-                        >
-                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/20" />
-                        </div>
 
-                        {/* 3D Front Base Extrusion Lip */}
-                        <div
-                          className={cn(
-                            "h-2 w-full border-t-2 border-[#111111] shrink-0",
-                            status === "won" ? "bg-[#15803d]" : "bg-[#A16207]"
+                          {/* Obstacle Tile = Recessed 3D RED Hole */}
+                          {cellType === "hazard" && (
+                            <div
+                              className="pointer-events-none absolute inset-0"
+                              aria-label="Red obstacle hole"
+                            >
+                              {/* Visible top inner vertical red pit wall */}
+                              <span className="absolute inset-x-0 top-0 h-2.5 bg-[#EF4444] border-b border-[#7F1D1D]" />
+                              {/* Left & right inner vertical red pit walls */}
+                              <span className="absolute top-2.5 bottom-0 left-0 w-1.5 bg-[#DC2626]" />
+                              <span className="absolute top-2.5 bottom-0 right-0 w-1.5 bg-[#991B1B]" />
+                              {/* Bottom inner rim */}
+                              <span className="absolute inset-x-1.5 bottom-0 h-1 bg-[#7F1D1D]" />
+                              {/* Sunken dark crimson pit floor */}
+                              <span className="absolute top-2.5 bottom-1 left-1.5 right-1.5 bg-gradient-to-b from-[#450A0A] via-[#220303] to-[#0A0101] shadow-[inset_0_5px_9px_rgba(0,0,0,0.9)] border border-[#EF4444]/30" />
+                            </div>
                           )}
-                        />
-                      </div>
-                    </div>
-                  ) : domino.posture === "FLAT_H" ? (
-                    /* FLAT_H (1×2 horizontal): Two connected 3D unit blocks side-by-side */
-                    <div
-                      className={cn(
-                        "w-full h-full -translate-y-1 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
-                        status === "won"
-                          ? "shadow-[3px_5px_0_#14532d,0_8px_14px_rgba(0,0,0,0.22)]"
-                          : "shadow-[3px_5px_0_#111111,0_8px_14px_rgba(0,0,0,0.2)]"
-                      )}
-                    >
-                      {/* Top Bevel Highlight */}
-                      <div
-                        className={cn(
-                          "h-1.5 w-full border-b border-[#111111]/60 shrink-0",
-                          status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
-                        )}
-                      />
-                      {/* Two side-by-side unit cubes with crisp center seam */}
-                      <div className="flex-1 grid grid-cols-2 w-full">
-                        <div
-                          className={cn(
-                            "border-r-2 border-[#111111]",
-                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+
+                          {/* Target Hole Cavity = Recessed 3D GREEN Hole on ALL 6 Faces */}
+                          {isHole && (
+                            <div
+                              className="pointer-events-none absolute inset-0"
+                              aria-label={isFinalFace ? "Green goal hole" : "Green target hole"}
+                            >
+                              {/* Visible top inner vertical green pit wall */}
+                              <span className="absolute inset-x-0 top-0 h-2.5 bg-[#2ECC71] border-b border-[#14532D]" />
+                              {/* Left & right inner vertical green pit walls */}
+                              <span className="absolute top-2.5 bottom-0 left-0 w-1.5 bg-[#22C55E]" />
+                              <span className="absolute top-2.5 bottom-0 right-0 w-1.5 bg-[#15803D]" />
+                              {/* Bottom inner rim */}
+                              <span className="absolute inset-x-1.5 bottom-0 h-1 bg-[#14532D]" />
+                              {/* Sunken emerald pit floor */}
+                              <div className="absolute top-2.5 bottom-1 left-1.5 right-1.5 bg-gradient-to-b from-[#064E3B] via-[#042F1E] to-[#02140A] shadow-[inset_0_5px_9px_rgba(0,0,0,0.88)] border border-[#2ECC71]/60 flex flex-col items-center justify-center text-center overflow-hidden">
+                                {!hasDomino && isPrimaryHoleAnchor && (
+                                  <span className="text-[7px] font-mono font-black uppercase leading-none text-[#4ADE80] drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)]">
+                                    {formatHoleBadge(faceHole.posture, isFinalFace)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           )}
-                        />
-                        <div
-                          className={cn(
-                            "relative",
-                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
+
+                          {/* Occupied cell test-id marker (preserves m2-domino-${r}-${c} for automated checks) */}
+                          {hasDomino && (
+                            <span
+                              data-testid={`m2-domino-${r}-${c}`}
+                              className="sr-only"
+                            >
+                              2×1 Block at ({r}, {c})
+                            </span>
                           )}
-                        >
-                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
                         </div>
-                      </div>
-                      {/* 3D Front Extruded Thickness Lip */}
-                      <div
-                        className={cn(
-                          "h-2 w-full border-t-2 border-[#111111] shrink-0",
-                          status === "won" ? "bg-[#15803d]" : "bg-[#CA8A04]"
-                        )}
-                      />
-                    </div>
-                  ) : (
-                    /* FLAT_V (2×1 vertical): Two connected 3D unit blocks front-to-back */
-                    <div
-                      className={cn(
-                        "w-full h-full -translate-y-1 rounded-xl border-2 border-[#111111] flex flex-col overflow-hidden",
-                        status === "won"
-                          ? "shadow-[3px_5px_0_#14532d,0_8px_14px_rgba(0,0,0,0.22)]"
-                          : "shadow-[3px_5px_0_#111111,0_8px_14px_rgba(0,0,0,0.2)]"
-                      )}
-                    >
-                      {/* Top Bevel Highlight */}
-                      <div
-                        className={cn(
-                          "h-1.5 w-full border-b border-[#111111]/60 shrink-0",
-                          status === "won" ? "bg-[#86efac]" : "bg-[#FEF08A]"
-                        )}
-                      />
-                      {/* Two vertical unit cubes with crisp center seam */}
-                      <div className="flex-1 grid grid-rows-2 w-full">
-                        <div
-                          className={cn(
-                            "border-b-2 border-[#111111] relative",
-                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
-                          )}
-                        >
-                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
-                        </div>
-                        <div
-                          className={cn(
-                            "relative",
-                            status === "won" ? "bg-[#2ECC71]" : "bg-[#F7DA21]"
-                          )}
-                        >
-                          <div className="absolute right-0 inset-y-0 w-1.5 bg-black/15" />
-                        </div>
-                      </div>
-                      {/* 3D Front Extruded Thickness Lip */}
-                      <div
-                        className={cn(
-                          "h-2 w-full border-t-2 border-[#111111] shrink-0",
-                          status === "won" ? "bg-[#15803d]" : "bg-[#CA8A04]"
-                        )}
-                      />
-                    </div>
+                      );
+                    })
                   )}
+
+                  {/* Sharp-Edged 3D Two-Cube 2×1 Block Actor (Zero Curved Corners; Tall 2-Cube Tower when UPRIGHT; 320ms Physics Roll) */}
+                  <div
+                    data-testid="move-two-3d-block"
+                    data-posture={domino.posture}
+                    style={{
+                      left: `${domino.c * 20}%`,
+                      top: `${domino.r * 20}%`,
+                      width: domino.posture === "FLAT_H" ? "40%" : "20%",
+                      height: domino.posture === "FLAT_V" ? "40%" : "20%",
+                      transform: blockRollTransform,
+                      transition:
+                        "left 320ms cubic-bezier(0.22, 1, 0.36, 1), top 320ms cubic-bezier(0.22, 1, 0.36, 1), width 320ms cubic-bezier(0.22, 1, 0.36, 1), height 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 320ms cubic-bezier(0.22, 1, 0.36, 1)",
+                    }}
+                    className="pointer-events-none absolute z-20"
+                  >
+                    {domino.posture === "UPRIGHT" ? (
+                      /* UPRIGHT (1×1 footprint): Two sharp 3D cubes visibly stacked vertically into a tall tower */
+                      <svg
+                        viewBox="0 0 100 100"
+                        className="w-full h-full overflow-visible"
+                        aria-hidden="true"
+                      >
+                        {/* Sharp parallelogram ground shadow on tile (r, c) */}
+                        <polygon
+                          points="10,95 84,95 96,75 22,75"
+                          fill="rgba(0,0,0,0.24)"
+                        />
+                        {/* Bottom Cube (Cube 1 of 2 — resting on tile) */}
+                        <polygon
+                          points="8,36 80,36 80,92 8,92"
+                          fill={status === "won" ? "#22C55E" : "#EAB308"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="80,36 94,16 94,72 80,92"
+                          fill={status === "won" ? "#166534" : "#A16207"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        {/* Upper Cube (Cube 2 of 2 — stacked vertically on top of Bottom Cube) */}
+                        <polygon
+                          points="8,-20 80,-20 80,36 8,36"
+                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="80,-20 94,-40 94,16 80,36"
+                          fill={status === "won" ? "#15803D" : "#CA8A04"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="8,-20 22,-40 94,-40 80,-20"
+                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                      </svg>
+                    ) : domino.posture === "FLAT_H" ? (
+                      /* FLAT_H (1×2 horizontal): Two sharp 1-unit-tall 3D cubes attached left-to-right */
+                      <svg
+                        viewBox="0 0 200 100"
+                        className="w-full h-full overflow-visible"
+                        aria-hidden="true"
+                      >
+                        {/* Ground shadow across both horizontal tiles */}
+                        <polygon
+                          points="10,94 184,94 194,78 20,78"
+                          fill="rgba(0,0,0,0.2)"
+                        />
+                        {/* Left Cube (Cube 1) */}
+                        <polygon
+                          points="6,64 18,16 100,16 88,64"
+                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="6,64 88,64 88,90 6,90"
+                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        {/* Right Cube (Cube 2 — attached along x = 88..100 seam) */}
+                        <polygon
+                          points="88,64 100,16 182,16 170,64"
+                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="88,64 170,64 170,90 88,90"
+                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="170,64 182,16 182,42 170,90"
+                          fill={status === "won" ? "#15803D" : "#CA8A04"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                      </svg>
+                    ) : (
+                      /* FLAT_V (2×1 vertical): Two sharp 1-unit-tall 3D cubes attached back-to-front */
+                      <svg
+                        viewBox="0 0 100 200"
+                        className="w-full h-full overflow-visible"
+                        aria-hidden="true"
+                      >
+                        {/* Ground shadow across both vertical tiles */}
+                        <polygon
+                          points="8,194 82,194 96,42 22,42"
+                          fill="rgba(0,0,0,0.2)"
+                        />
+                        {/* Back Cube (Cube 1) */}
+                        <polygon
+                          points="13,89 20,14 92,14 85,89"
+                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="85,89 92,14 92,40 85,115"
+                          fill={status === "won" ? "#15803D" : "#CA8A04"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        {/* Front Cube (Cube 2 — attached along y = 89 seam) */}
+                        <polygon
+                          points="6,164 13,89 85,89 78,164"
+                          fill={status === "won" ? "#86EFAC" : "#FEF08A"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="6,164 78,164 78,190 6,190"
+                          fill={status === "won" ? "#2ECC71" : "#F7DA21"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                        <polygon
+                          points="78,164 85,89 85,115 78,190"
+                          fill={status === "won" ? "#15803D" : "#CA8A04"}
+                          stroke="#111111"
+                          strokeWidth="3.5"
+                          strokeLinejoin="miter"
+                          strokeLinecap="square"
+                        />
+                      </svg>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1278,7 +1297,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             </div>
 
             <p className="text-center text-[11px] text-neutral-500 font-medium">
-              Arrow keys / WASD, swipe, or tap D-Pad · Walls block · Obstacles (✕) reset position · Match the hole to drop in
+              Arrow keys / WASD, swipe, or tap D-Pad · Walls block · Red holes reset position · Drop into the green hole
             </p>
           </div>
         )}

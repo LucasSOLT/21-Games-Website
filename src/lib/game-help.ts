@@ -87,14 +87,14 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "move-2": {
     summary:
-      "Move the 3D 2×1 block across six 5×5 cube faces and drop into each face's hole.",
-    headline: "Drop the 2×1 Block Into All 6 Holes",
+      "Move the two-cube 2×1 block across six 5×5 cube faces and drop into each face's green hole.",
+    headline: "Drop Into All 6 Green Holes",
     rules: [
       "Move with **Arrow keys / WASD**, swipe, or the on-screen **D-Pad**.",
-      "When the block is **standing (1×1)**, two blocks are stacked on top of each other; tipping it lays the **2×1 block flat** across two tiles.",
-      "Line up the block with each face's **Hole** (**1×1 Standing** or **1×2 / 2×1 Flat**) to drop in and move to the next face.",
-      "**Walls** block your movement. Hitting an **Obstacle (✕)** resets your position on the current face.",
-      "Drop into the **green goal hole** on Face 6 and beat **Par** for ⭐⭐⭐.",
+      "When the block is **standing (1×1)**, two sharp cubes are stacked vertically into a tall tower; tipping it lays the **two cubes flat** across two tiles.",
+      "Line up the block with each face's **green hole** (**1×1 Standing** or **1×2 / 2×1 Flat**) to drop in and move to the next face.",
+      "**Walls** block your movement. Falling into a **red hole** resets your position on the current face.",
+      "Complete all 6 faces and beat **Par** for ⭐⭐⭐.",
     ],
   },
   "1-win": {

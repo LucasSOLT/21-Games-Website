@@ -480,22 +480,22 @@ function NineRhymesBoard({
       onStatsOpenChange={setStatsOpen}
     >
       <div
-        className="mx-auto w-full max-w-md h-[calc(100dvh-7.5rem)] min-h-[520px] sm:h-[calc(100dvh-9rem)] flex flex-col rounded-2xl border-2 border-black bg-white overflow-hidden shadow-[0_4px_0_#111111]"
+        className="mx-auto w-full max-w-md h-[calc(100dvh-4.5rem)] max-h-[760px] min-h-[360px] sm:h-[calc(100dvh-8.5rem)] sm:min-h-[500px] flex flex-col rounded-2xl border-2 border-black bg-white overflow-hidden shadow-[0_4px_0_#111111]"
         data-testid="nine-rhymes-chat"
       >
         {/* Contact header */}
-        <div className="shrink-0 border-b-2 border-black/10 bg-[#f7f7f8] px-3 py-2 flex items-center gap-2.5">
-          <div className="h-10 w-10 rounded-full border-2 border-black bg-[#f7da21] flex items-center justify-center overflow-hidden shrink-0">
+        <div className="shrink-0 border-b-2 border-black/10 bg-[#f7f7f8] px-2.5 sm:px-3 py-1.5 sm:py-2 flex items-center gap-2 sm:gap-2.5">
+          <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-full border-2 border-black bg-[#f7da21] flex items-center justify-center overflow-hidden shrink-0">
             <GameLogo logo="rhymes" variant="mini" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-headline font-black text-base leading-tight">Nine</p>
+            <p className="font-headline font-black text-sm sm:text-base leading-tight">Nine</p>
             <p className="text-[11px] font-semibold text-neutral-500 truncate" data-testid="nine-status">
               Word {Math.min(results.length + 1, NINE_RHYMES_CLUE_COUNT)} of {NINE_RHYMES_CLUE_COUNT} · Score: {formatScore(score)} / {NINE_RHYMES_CLUE_COUNT}
             </p>
           </div>
           <span
-            className="shrink-0 rounded-full bg-black text-white px-2.5 py-1 text-[11px] font-black tracking-wide"
+            className="shrink-0 max-w-[44%] truncate rounded-full bg-black text-white px-2 sm:px-2.5 py-0.5 sm:py-1 text-[10px] sm:text-[11px] font-black tracking-wide"
             data-testid="nine-starter-badge"
           >
             {results.length === 0
@@ -505,12 +505,12 @@ function NineRhymesBoard({
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-white" aria-live="polite">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-2.5 sm:py-3 space-y-2 bg-white" aria-live="polite">
           {visible.map((m) => (
             <div key={m.id} className={cn("flex", m.role === "me" ? "justify-end" : "justify-start")}>
               <div
                 className={cn(
-                  "max-w-[82%] whitespace-pre-line rounded-2xl px-3.5 py-2 text-[15px] leading-snug font-medium animate-in fade-in zoom-in-95 duration-150",
+                  "max-w-[85%] whitespace-pre-line rounded-2xl px-3 sm:px-3.5 py-1.5 sm:py-2 text-sm sm:text-[15px] leading-snug font-medium animate-in fade-in zoom-in-95 duration-150",
                   m.role === "me"
                     ? "bg-[#007AFF] text-white rounded-br-md"
                     : "bg-[#E9E9EB] text-black rounded-bl-md"
@@ -574,13 +574,13 @@ function NineRhymesBoard({
 
         {/* Quick-reply pills */}
         {!complete && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-t border-black/10 bg-white overflow-x-auto">
+          <div className="shrink-0 flex items-center gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 border-t border-black/10 bg-white overflow-x-auto">
             {!currentHinted && (
               <button
                 type="button"
                 disabled={inputLocked}
                 onClick={() => setConfirm("hint")}
-                className="shrink-0 rounded-full border-2 border-[#007AFF] text-[#007AFF] px-3 py-1 text-xs font-bold disabled:opacity-40"
+                className="shrink-0 rounded-full border-2 border-[#007AFF] text-[#007AFF] px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40"
                 data-testid="nine-hint-pill"
               >
                 {HINT_COST_LABEL}
@@ -590,7 +590,7 @@ function NineRhymesBoard({
               type="button"
               disabled={inputLocked}
               onClick={() => setConfirm("reveal")}
-              className="shrink-0 rounded-full border-2 border-neutral-400 text-neutral-700 px-3 py-1 text-xs font-bold disabled:opacity-40"
+              className="shrink-0 rounded-full border-2 border-neutral-400 text-neutral-700 px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40"
               data-testid="nine-reveal-pill"
             >
               {REVEAL_LABEL}
@@ -598,16 +598,17 @@ function NineRhymesBoard({
           </div>
         )}
 
-        {/* iMessage input bar (readOnly: no OS keyboard) */}
+        {/* iMessage input bar (readOnly: no OS keyboard; min-w-0 + size={1} + shrink-0 guarantees Send arrow is always visible in portrait view) */}
         {!complete && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-white border-t border-black/10">
+          <div className="shrink-0 flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-white border-t border-black/10">
             <input
               readOnly
+              size={1}
               inputMode="none"
               aria-label="Your guess"
               value={input.toUpperCase()}
               placeholder="Text Message"
-              className="flex-1 rounded-full border-2 border-neutral-300 px-4 py-2 text-[15px] font-semibold tracking-widest bg-white placeholder:tracking-normal placeholder:font-normal focus:outline-hidden"
+              className="min-w-0 w-0 flex-1 rounded-full border-2 border-neutral-300 px-3.5 py-1.5 sm:py-2 text-sm sm:text-[15px] font-semibold tracking-wider bg-white placeholder:tracking-normal placeholder:font-normal focus:outline-hidden"
               data-testid="nine-input"
               onFocus={(e) => e.currentTarget.blur()}
             />
@@ -616,27 +617,27 @@ function NineRhymesBoard({
               onClick={submitGuess}
               disabled={inputLocked || input.trim().length === 0}
               aria-label="Send guess"
-              className="h-9 w-9 rounded-full bg-[#007AFF] text-white flex items-center justify-center disabled:opacity-30 transition-opacity"
+              className="shrink-0 h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-[#007AFF] text-white flex items-center justify-center shadow-xs disabled:opacity-40 transition-opacity cursor-pointer"
               data-testid="nine-send"
             >
-              <ArrowUp className="h-5 w-5" />
+              <ArrowUp className="h-5 w-5 shrink-0 stroke-[2.5]" />
             </button>
           </div>
         )}
 
         {/* Custom QWERTY keyboard */}
         {!complete && (
-          <div className="shrink-0 bg-[#D1D3D9] px-1 pt-1.5 pb-2 space-y-1.5 select-none" data-testid="nine-keyboard">
+          <div className="shrink-0 bg-[#D1D3D9] px-1 pt-1 sm:pt-1.5 pb-1.5 sm:pb-2 space-y-1 sm:space-y-1.5 select-none" data-testid="nine-keyboard">
             {KEYBOARD_ROWS.map((row, ri) => (
               <div key={ri} className="flex justify-center gap-1">
-                {ri === 2 && <span className="w-6" />}
+                {ri === 2 && <span className="w-3 min-[380px]:w-5 shrink-0" />}
                 {row.map((k) => (
                   <button
                     key={k}
                     type="button"
                     onClick={() => pressLetter(k)}
                     disabled={inputLocked}
-                    className="h-10 flex-1 max-w-[34px] rounded-md bg-white text-sm font-bold text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-200 disabled:opacity-60"
+                    className="h-9 sm:h-10 flex-1 min-w-0 max-w-[34px] rounded-md bg-white text-xs min-[380px]:text-sm font-bold text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-200 disabled:opacity-60"
                   >
                     {k}
                   </button>
@@ -647,9 +648,9 @@ function NineRhymesBoard({
                     onClick={pressBackspace}
                     disabled={inputLocked}
                     aria-label="Backspace"
-                    className="h-10 w-12 rounded-md bg-[#AEB3BE] flex items-center justify-center text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-400"
+                    className="h-9 sm:h-10 w-10 min-[380px]:w-12 shrink-0 rounded-md bg-[#AEB3BE] flex items-center justify-center text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-400"
                   >
-                    <Delete className="h-5 w-5" />
+                    <Delete className="h-4 w-4 min-[380px]:h-5 min-[380px]:w-5" />
                   </button>
                 )}
               </div>

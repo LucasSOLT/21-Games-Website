@@ -153,9 +153,10 @@
   - Directly above the iMessage input bar sit two sleek pill buttons:
     1. **`New hint (-0.5 pts)`**: Clicking opens a quick confirmation dialog (*"Use a description hint for this word? Correct guess will be worth 0.5 pts instead of 1.0 pt."*). On confirm, the player sends a blue bubble (`"Can I get a hint?"`), Nine shows `• • •` (`400ms`) and replies with the **description/definition clue**, and the `"New hint"` pill is disabled/hidden for the rest of that round.
     2. **`Reveal answer (0 pts)`**: Clicking opens a confirmation dialog (*"Reveal this word for 0 points and move to the next rhyme?"*). On confirm, a blue bubble sends the answer (`0` pts), Nine acknowledges it, and sends the next round's sentence.
-- **Custom On-Screen QWERTY Keyboard & Input Bar (Q14)**:
+- **Custom On-Screen QWERTY Keyboard, Input Bar & Mobile Portrait Fit (Q14)**:
   - **No native mobile OS keyboard popup (`readOnly` / custom key handler)**.
   - Typing on the custom bottom QWERTY keyboard (or physical desktop keyboard) populates an iMessage-style rounded input bar right above the keyboard with a blue upward arrow (`↑`) submit button (and `Enter` key).
+  - **Guaranteed Mobile Portrait Visibility (`320px+`)**: The chat container uses `h-[calc(100dvh-4.5rem)]` on mobile (`min-h-0` on the scrollable message transcript), `<input data-testid="nine-input">` sets `size={1} min-w-0 w-0 flex-1`, and the circular blue Send button (`data-testid="nine-send"`) sets `shrink-0 h-9 w-9` so the Send button, input pill, quick-reply pills, and responsive QWERTY keyboard are **always 100% visible and tappable in vertical/portrait view** on every phone screen without rotating to landscape.
   - **1 Guess Per Word**:
     - **Correct** (matches primary answer or accepted alternative spelling from Q19): Awards `1.0` pt (no hint) or `0.5` pts (after description hint); Nine replies with a randomized motivating phrase and sends the next sentence.
     - **Incorrect**: Awards `0` pts; Nine replies with a randomized gentle miss message and sends the next sentence.
@@ -234,14 +235,15 @@
   - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
   - **100% Auto-Generated Monthly Batches**: Built-in deterministic generator + backtracking Math Solver (`src/lib/generators/four-score-generator.ts`) guarantees every generated puzzle has a verified whole-number full-board solution to `80`.
 
-### Game #2 — `Move Two` (`Move 2` — NYT-Styled 5×5 2.5D Tilted Cube & 3D Stacked `2×1` Block Game) — Q41 to Q45
+### Game #2 — `Move Two` (`Move 2` — NYT-Styled 5×5 2.5D Tilted Cube & Sharp 3D Two-Cube `2×1` Block Game) — Q41 to Q45
 - **Route**: `/games/move-2` | **Archive**: `/games/move-2/archive`
-- **NYT Games Editorial Aesthetic + 2.5D Perspective-Tilted (`~25°`) `5×5` Cube + 3D Stacked `2×1` Block (Q41)**:
-  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside an **NYT Games-styled 2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a crisp warm off-white cube rim (`#F7F7F5` with `#111111` ink borders and 3D depth lip), clean white floor tiles, solid ink walls, and subtle obstacle tiles. The game board is a **cube** (never a die/dice).
-  - **3D Stacked `2×1` Block (Zero Domino/Die Pips)**:
-    - The moving piece is a clean NYT Gold (`#F7DA21`) **3D `2×1` block** made of two connected unit cubes—with **zero dice pips or domino dots**:
-      - When **standing (`UPRIGHT`, `1×1` footprint)**: visually rendered as **two 3D blocks stacked vertically on top of each other** (a bottom cube resting on the tile + a distinct horizontal 3D seam + an upper cube stacked above it with a bright top face `#FEF08A` and shaded front/side 3D walls `#CA8A04`).
-      - When **lying flat (`FLAT_H` `1×2` or `FLAT_V` `2×1`)**: visually rendered as **two connected 3D unit blocks lying side-by-side** across the two occupied grid squares with a crisp center seam, top bevel, and 3D front thickness lip.
+- **NYT Games Editorial Aesthetic + Uniform `5×5` Grid + Sharp-Edged 3D Two-Cube `2×1` Block (Q41)**:
+  - Main stage renders the current **`5×5` face** (`Face 1` through `Face 6`, `MOVE_TWO_GRID_SIZE = 5`) inside an **NYT Games-styled 2.5D perspective-tilted stage (`perspective: 920px`, `rotateX(25deg)`, `transform-style: preserve-3d`)** framed by a crisp warm off-white cube rim (`#F7F7F5` with `#111111` ink borders and 3D depth lip). The game board is a **cube** (never a die/dice).
+  - **Strictly Equal Tile Sizes (`grid-cols-5 grid-rows-5`)**: All 25 tiles use `grid-cols-5 grid-rows-5` with `aspect-square`, uniform `border-2` (zero outer `ring-*`), and `absolute` inner layers so every tile on the `5×5` board has the exact same width and height regardless of whether it is an empty floor tile, start tile, wall, red obstacle hole, or green target hole.
+  - **Sharp-Edged 3D Two-Cube `2×1` Block (Zero Curved Edges, Zero Domino Pips)**:
+    - The moving piece is rendered with **razor-sharp `90°` mitered cube corners (`strokeLinejoin="miter"`, zero rounded corners)** so it looks purely like **two sharp 3D cubes attached to each other** (never a rounded eraser or domino):
+      - **When standing (`UPRIGHT`, `1×1` footprint)**: rendered as **two sharp 3D cubes visibly stacked vertically into a tall 2-cube tower** rising dramatically above the occupied tile (`#FEF08A` top cube roof, `#F7DA21` upper cube front, `#EAB308` lower cube front, `#CA8A04` right depth walls, and a bold `#111111` horizontal cube seam).
+      - **When lying flat (`FLAT_H` `1×2` or `FLAT_V` `2×1`)**: rendered as **two sharp 3D cubes (`1` cube tall) attached side-by-side** across the two occupied tiles (`FLAT_H` left-to-right, `FLAT_V` back-to-front), showing two wide `#FEF08A` top cube squares separated by a crisp `#111111` seam and a `1`-cube-tall `#F7DA21` front wall + `#CA8A04` right wall.
   - **Deliberate, Visible 3D Rolling Physics Animation (`~320ms`)**:
     - Every move animates the `2×1` block tipping/rolling smoothly across the `5×5` grid over **`~320ms` (`cubic-bezier(0.22, 1, 0.36, 1)`)** with a mid-roll 3D tilt/arc so players clearly see how standing (`1×1`) tips into flat (`2×1`) and flat rolls or stands up. Hole drops (`320ms`) and cube face rotations (`520ms`) are similarly paced.
   - Top-right HUD renders a clean **mini 3D isometric cube diagram** highlighting which face (`Face 1 → Face 6`) is currently active and which faces have been conquered, paired with a `localStorage`-persisted **Web Audio SFX mute toggle**.
@@ -254,20 +256,20 @@
     - **`FLAT_V` (`2×1` vertical footprint on `(r, c)` and `(r+1, c)`)**:
       - Moving Up (`↑`) stands it `UPRIGHT` on `(r-1, c)`; moving Down (`↓`) stands it `UPRIGHT` on `(r+2, c)`.
       - Moving Left (`←`) or Right (`→`) rolls it sideways staying `FLAT_V` on `(r..r+1, c-1)` or `(r..r+1, c+1)`.
-- **Per-Face Coded Start (`face.start`), Recessed Target Holes (`face.hole`), Green Final Goal Hole on Face 6 & Generic Copy (Q43 & Q44)**:
-  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Start State** (`face.start`) and a **Recessed Target Hole** (`face.hole`: either a `1×1 UPRIGHT` hole or a `2×1 FLAT_H` / `FLAT_V` hole).
-  - **Hole Color Coding — Emerald Green Final Goal on Face 6**:
-    - Faces `1–5` render their recessed transition hole in **Sky/Cyan (`#0EA5E9`)** (`HOLE`).
-    - **Face 6 (`face === 5`) renders the final winning hole in Emerald Green (`#2ECC71` / `emerald-500`)** (`GOAL`) across the board, HUD, `/admin` studio preview, and game logo.
-  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The `2×1` block only drops into `face.hole` when its posture and footprint **exactly match** the hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile hole; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the surface). Dropping into the hole on `Faces 1–5` animates the block sinking into the hole, rotates the cube to `Face k+1`, and places the block at that face's coded `start`. Dropping into the green goal hole on `Face 6` wins the game!
+- **Recessed GREEN Target Holes (`Faces 1–6`), Recessed RED Obstacle Holes & Generic Copy (Q43 & Q44)**:
+  - Each of the 6 `5×5` faces (`Face 1` through `Face 6`) defines its own coded **Start State** (`face.start`) and a **Recessed Green Target Hole** (`face.hole`: either a `1×1 UPRIGHT` hole or a `2×1 FLAT_H` / `FLAT_V` hole).
+  - **Hole Color Coding — GREEN Target Holes vs. RED Obstacle Holes**:
+    - **Target Hole (`face.hole` on ALL 6 Faces `1–6`) = GREEN (`#2ECC71` / `#16A34A`)**: Every target hole the player is trying to enter is rendered as a 3D recessed **emerald green hole** (`HOLE` on Faces `1–5`, `GOAL` on Face `6` — never blue).
+    - **Obstacle Tiles (`cellType === "hazard"`) = Recessed RED Holes (`#DC2626` / `#EF4444`)**: Every obstacle tile the player must avoid is rendered as a 3D recessed **crimson red hole** cut into the cube board (visible inner red vertical walls stepping down into a dark sunken pit).
+  - **Exact Posture Hole Drop & Sequential Cube Rotation**: The `2×1` block only drops into `face.hole` when its posture and footprint **exactly match** the green hole (`UPRIGHT` on a 1-tile hole, or `FLAT_H`/`FLAT_V` occupying both tiles of a 2-tile hole; rolling flat over a 1-tile hole or standing upright on 1 tile of a 2-tile hole rests safely on the surface). Dropping into the green hole on `Faces 1–5` animates the block sinking into the hole, rotates the cube to `Face k+1`, and places the block at that face's coded `start`. Dropping into the green goal hole on `Face 6` wins the game!
   - **Clean, Generic Player-Facing Copy (How to Play & Toasts)**:
     - Outer border or wall block collision (`{ kind: "bump" }`): shows **`"Blocked by a wall."`** with a gentle bump shake and zero move penalty.
-    - Obstacle tile collision (`{ kind: "hazard" }`, `✕` tiles): increments moves by `+1`, resets the block to the current face's start tile, and shows **`"You hit an obstacle! Resetting position."`**
+    - Red obstacle hole collision (`{ kind: "hazard" }`): increments moves by `+1`, resets the block to the current face's start tile, and shows **`"You hit an obstacle! Resetting position."`**
     - Face hole transition: shows **`"Nice! Moving to Face X of 6."`**
     - Reset Face button: shows **`"Position reset."`**
 - **100% Pre-Generated 2026–2027 Daily Bank, Interactive 5×5 `/admin` Studio & Web Audio SFX (Q44 & Q45)**:
   - `src/lib/generators/move-two-generator.ts` uses per-face (`solveMoveTwoFace`) and 6-face (`solveMoveTwo`) **Breadth-First Search (BFS) solvers** to generate `5×5` layouts (`~5–8` moves/face, `~30–42` total Par across 6 faces) and pre-populate unique daily puzzles across all of 2026 and 2027.
-  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle obstacles, move/change per-face `start` and `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
+  - **Interactive 5×5 `/admin` Studio (`move-two-studio-tab.tsx`)**: Allows Admins/GMs to toggle red obstacle holes, move/change per-face `start` and green `hole` postures with live per-face & total BFS Par badges, or click **"Clear All"** (local React form state only) / **"Revert to Default"**.
   - **Controls, Synthesized Web Audio SFX & Scoring (Q45)**: Supports Arrow keys / `WASD` on desktop, touch swipe gestures, and an on-screen D-Pad on mobile, with synthesized Web Audio API sound effects (`src/lib/move-two-audio.ts`: roll clack, wall bump thud, hole drop + cube rotation whoosh, obstacle reset buzz, and Face 6 victory chord). Final score compares **Total Moves vs. Par** (`Solved in 34 moves · Par: 34 · ⭐⭐⭐`).
 
 ### Game #1 — `1 Win` (Real-Time Community Gratitude Leaderboard) — Q46 to Q48

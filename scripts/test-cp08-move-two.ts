@@ -415,13 +415,20 @@ kit.assert(
   gameSrc.includes("perspective") &&
     gameSrc.includes("rotateX(25deg)") &&
     gameSrc.includes("grid-cols-5") &&
+    gameSrc.includes("grid-rows-5") &&
+    !gameSrc.includes("ring-2") &&
     gameSrc.includes("move-two-mute-toggle") &&
     gameSrc.includes("move-two-3d-block") &&
+    gameSrc.includes('strokeLinejoin="miter"') &&
     gameSrc.includes("320ms") &&
     gameSrc.includes("Blocked by a wall.") &&
     gameSrc.includes("You hit an obstacle! Resetting position.") &&
-    gameSrc.includes("#2ECC71"),
-  "Move Two renders NYT-styled 2.5D 5×5 cube, 3D stacked 2×1 block with 320ms physics roll, green Face 6 goal hole, and generic copy"
+    gameSrc.includes("Red obstacle hole") &&
+    gameSrc.includes("#EF4444") &&
+    gameSrc.includes("#2ECC71") &&
+    !gameSrc.includes("border-sky-500") &&
+    !gameSrc.includes("text-sky-800"),
+  "Move Two renders uniform grid-cols-5 grid-rows-5 tiles, sharp-edged 3D two-cube SVG block, green target holes on all 6 faces, recessed red obstacle holes, and generic copy"
 );
 
 const studioSrc = fs.readFileSync(
@@ -430,10 +437,14 @@ const studioSrc = fs.readFileSync(
 );
 kit.assert(
   studioSrc.includes("grid-cols-5") &&
+    studioSrc.includes("grid-rows-5") &&
+    studioSrc.includes("#DC2626") &&
+    studioSrc.includes("#2ECC71") &&
+    !studioSrc.includes("bg-sky-600") &&
     studioSrc.includes("admin-move-two-clear-all") &&
     studioSrc.includes("admin-move-two-revert-default") &&
     studioSrc.includes("solveMoveTwoFace"),
-  "MoveTwoStudioTab renders interactive 5×5 face grids, per-face BFS solver, Clear All, and Revert to Default"
+  "MoveTwoStudioTab renders interactive 5×5 face grids with green target holes, red obstacle holes, per-face BFS solver, Clear All, and Revert to Default"
 );
 
 const pageSrc = fs.readFileSync(

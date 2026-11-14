@@ -146,7 +146,22 @@ kit.assert(bad.puzzle === null && bad.errors.length > 0, "draftToPuzzle reports 
 // ---- wiring --------------------------------------------------------------------
 kit.assert(cfg.isPlayableGameSlug("9-rhymes"), "9-rhymes isPlayable");
 const comp = fs.readFileSync("src/components/games/nine-rhymes.tsx", "utf8");
-for (const needle of ["readOnly", "HINT_COST_LABEL", "REVEAL_LABEL", "400", "mode", "ResultShareButtons", "GameSplashScreen", "Starter:", "Word "]) {
+for (const needle of [
+  "readOnly",
+  "size={1}",
+  "min-w-0 w-0 flex-1",
+  "shrink-0 h-9 w-9",
+  "min-h-0 overflow-y-auto",
+  "h-[calc(100dvh-4.5rem)]",
+  "HINT_COST_LABEL",
+  "REVEAL_LABEL",
+  "400",
+  "mode",
+  "ResultShareButtons",
+  "GameSplashScreen",
+  "Starter:",
+  "Word ",
+]) {
   kit.assert(comp.includes(needle), `component contains ${needle}`);
 }
 const btns = fs.readFileSync("src/components/games/result-share-buttons.tsx", "utf8");

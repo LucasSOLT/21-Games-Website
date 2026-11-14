@@ -1120,9 +1120,10 @@ kit.assert(
 const gameLogoSrc = readSrc("src/components/game-logo.tsx");
 kit.assert(
   gameLogoSrc.includes("Minimalist NYT Games Editorial Card") &&
-    gameLogoSrc.includes("Green Final Goal Hole at top-right") &&
+    gameLogoSrc.includes("Green Target Hole at top-right") &&
+    gameLogoSrc.includes('strokeLinejoin="miter"') &&
     !gameLogoSrc.includes("Domino pips on top face"),
-  "[T4·6] game-logo.tsx renders minimalist NYT Games 9 Rhymes emblem and Move Two green goal hole with 3D stacked 2x1 block (no domino pips)"
+  "[T4·6] game-logo.tsx renders minimalist NYT Games 9 Rhymes emblem and sharp-edged Move Two 2-cube block + green hole (no domino pips)"
 );
 
 const nineEngineSrc = readSrc("src/lib/nine-rhymes-engine.ts");
@@ -1134,12 +1135,25 @@ kit.assert(
 
 kit.assert(
   m2GameSrc.includes('data-testid="move-two-3d-block"') &&
+    m2GameSrc.includes("grid-rows-5") &&
+    m2GameSrc.includes('strokeLinejoin="miter"') &&
     m2GameSrc.includes("320ms") &&
     m2GameSrc.includes("Blocked by a wall.") &&
     m2GameSrc.includes("You hit an obstacle! Resetting position.") &&
+    m2GameSrc.includes("Red obstacle hole") &&
     m2GameSrc.includes("#2ECC71") &&
+    !m2GameSrc.includes("border-sky-500") &&
     !m2GameSrc.includes("Dark void hazard"),
-  "[T4·8] move-two.tsx renders NYT-styled cube, 3D stacked 2x1 block with 320ms physics roll, green Face 6 goal hole, and generic copy"
+  "[T4·8] move-two.tsx renders uniform 5x5 tiles, sharp-edged 3D two-cube SVG block, green target holes on all 6 faces, recessed red obstacle holes, and generic copy"
+);
+
+const nineRhymesCompSrc = readSrc("src/components/games/nine-rhymes.tsx");
+kit.assert(
+  nineRhymesCompSrc.includes("size={1}") &&
+    nineRhymesCompSrc.includes("min-w-0 w-0 flex-1") &&
+    nineRhymesCompSrc.includes("shrink-0 h-9 w-9") &&
+    nineRhymesCompSrc.includes("min-h-0 overflow-y-auto"),
+  "[T4·9] nine-rhymes.tsx enforces size={1} min-w-0 on input and shrink-0 on Send button so Send arrow is always visible in mobile portrait view"
 );
 
 kit.finish();
