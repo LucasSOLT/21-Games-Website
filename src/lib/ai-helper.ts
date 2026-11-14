@@ -355,11 +355,14 @@ export function localRhymesChain(starterWord: string): RhymesChainDraft {
   }
   const pool = fam.entries.filter((e) => e.word !== starter);
   const chosen = seededPick(pool, `${starter}:${fam.id}`, 9);
-  const clues: RhymeClueDraft[] = chosen.map((e) => ({
-    answer: e.word,
-    sentence: `${e.clue} (rhymes with "${starter}")`,
-    hint: `Starts with "${e.word[0]!.toUpperCase()}" and has ${e.word.length} letters.`,
-  }));
+  const clues: RhymeClueDraft[] = chosen.map((e) => {
+    const cleanClue = e.clue.trim().replace(/[.!?]+$/, "");
+    return {
+      answer: e.word,
+      sentence: `${cleanClue}.`,
+      hint: `Starts with "${e.word[0]!.toUpperCase()}" and has ${e.word.length} letters.`,
+    };
+  });
   return { starterWord: starter, clues };
 }
 
@@ -385,7 +388,8 @@ export async function suggest9RhymesChain(
       `"sentence": string, "hint": string}]} with EXACTLY 9 clues. Every answer must be a ` +
       `single real word that is a PERFECT rhyme of "${starter}" (identical ending sound), all ` +
       `different, family-friendly. "sentence" is a short clue or fill-in-the-blank that never ` +
-      `contains the answer. "hint" is a gentler extra clue.`,
+      `contains the answer and NEVER says "it rhymes with ${starter}" (the UI shows the chain target). ` +
+      `"hint" is a gentler extra clue.`,
     config
   );
   const parsed = parseJson(text);

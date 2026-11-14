@@ -68,7 +68,10 @@ function writeLocal(records: CustomPuzzleRecord[]): void {
   }
 }
 
-/** Flattens every string inside a payload for moderation (depth-limited). */
+const RASTER_DATA_URL_RE =
+  /^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i;
+
+/** Flattens every human-readable string inside a payload for moderation (depth-limited). */
 export function collectPayloadStrings(
   value: unknown,
   prefix = "payload",
@@ -77,7 +80,9 @@ export function collectPayloadStrings(
 ): Record<string, string> {
   if (depth > 4) return out;
   if (typeof value === "string") {
-    out[prefix] = value;
+    if (!RASTER_DATA_URL_RE.test(value)) {
+      out[prefix] = value;
+    }
   } else if (Array.isArray(value)) {
     value.forEach((v, i) => collectPayloadStrings(v, `${prefix}[${i}]`, depth + 1, out));
   } else if (value && typeof value === "object") {

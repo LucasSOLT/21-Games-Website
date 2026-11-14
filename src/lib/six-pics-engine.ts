@@ -105,11 +105,13 @@ export interface SixPicsClueImage {
   caption: string;
   /** Optional accepted alternate names / synonyms for this specific picture. */
   aliases?: string[];
+  /** Optional short player-facing text hint for this picture (up to 140 chars). */
+  hint?: string;
   /** Deterministic vector illustration motif key. */
   scene: SixPicsSceneKey;
   /** Background/accent colors `[bgTop, bgBottom, accent]`. */
   palette?: [string, string, string];
-  /** Optional external/Supabase/custom SVG URL rendered via `<ImageWithFallback>`. */
+  /** Optional external/Supabase/uploaded photo data URL rendered via `<ImageWithFallback>`. */
   imageUrl?: string;
   /** Optional deterministic starting open jigsaw piece (`0..5`). */
   initialPiece?: number;
@@ -691,11 +693,14 @@ export interface SixPicsValidation {
 
 function isValidImageUrl(url: unknown): boolean {
   if (url === undefined || url === "") return true;
-  if (typeof url !== "string" || url.length > 2048) return false;
+  if (typeof url !== "string") return false;
+  if (url.startsWith("data:image/")) {
+    return url.length <= 450_000;
+  }
+  if (url.length > 4096) return false;
   return (
     url.startsWith("https://") ||
     url.startsWith("http://") ||
-    url.startsWith("data:image/") ||
     url.startsWith("/")
   );
 }
@@ -745,6 +750,21 @@ export function validateSixPicsPuzzle(payload: unknown): SixPicsValidation {
       errors.push(`Picture ${n}: aliases must be an array of up to 24 strings.`);
     }
     if (
+      img.hint !== undefined &&
+      (typeof img.hint !== "string" || img.hint.length > 140)
+    ) {
+      errors.push(`Picture ${n}: hint must be at most 140 characters.`);
+    }
+    if (
+      img.initialPiece !== undefined &&
+      (typeof img.initialPiece !== "number" ||
+        !Number.isInteger(img.initialPiece) ||
+        img.initialPiece < 0 ||
+        img.initialPiece >= SIX_PICS_PIECES_PER_IMAGE)
+    ) {
+      errors.push(`Picture ${n}: initialPiece must be an integer 0..5.`);
+    }
+    if (
       typeof img.scene !== "string" ||
       !(SIX_PICS_SCENES as readonly string[]).includes(img.scene)
     ) {
@@ -752,7 +772,7 @@ export function validateSixPicsPuzzle(payload: unknown): SixPicsValidation {
     }
     if (!isValidImageUrl(img.imageUrl)) {
       errors.push(
-        `Picture ${n}: imageUrl must be a valid http(s), data:image, or relative path.`
+        `Picture ${n}: imageUrl must be a valid http(s), uploaded photo data:image, or relative path.`
       );
     }
   });
@@ -769,8 +789,10 @@ export function isSixPicsPuzzle(payload: unknown): payload is SixPicsPuzzle {
 export interface SixPicsDraftRow {
   caption: string;
   aliasesCsv?: string;
+  hint?: string;
   scene: SixPicsSceneKey;
   imageUrl: string;
+  initialPiece?: number;
 }
 
 export function draftToSixPicsPuzzle(options: {
@@ -803,11 +825,21 @@ export function draftToSixPicsPuzzle(options: {
           .filter((a) => a.length > 0 && normalizeSixPicsText(a) !== capNorm)
       ),
     ].slice(0, 20);
+    const trimmedHint = r.hint?.trim() ?? "";
+    const validInitialPiece =
+      typeof r.initialPiece === "number" &&
+      Number.isInteger(r.initialPiece) &&
+      r.initialPiece >= 0 &&
+      r.initialPiece < SIX_PICS_PIECES_PER_IMAGE
+        ? r.initialPiece
+        : undefined;
     return {
       caption: cap,
       ...(rowAliases.length > 0 ? { aliases: rowAliases } : {}),
+      ...(trimmedHint ? { hint: trimmedHint.slice(0, 140) } : {}),
       scene: r.scene,
       ...(r.imageUrl.trim() ? { imageUrl: r.imageUrl.trim() } : {}),
+      ...(validInitialPiece !== undefined ? { initialPiece: validInitialPiece } : {}),
     };
   });
 

@@ -23,6 +23,7 @@ import {
   classifyDiagnosticError,
   type DiagnosticReport,
 } from "@/lib/diagnostic-errors";
+import { normalizeVoiceNoteDataUrl } from "@/lib/voice-note-audio";
 
 const STORAGE_PREFIX = "solgames_v1";
 
@@ -628,7 +629,10 @@ export function getAllLocalPlayerJourneys(): TwentyOneJourney[] {
         if (Array.isArray(list)) {
           for (const j of list) {
             if (j && typeof j.id === "string" && j.pick1 && !byId.has(j.id)) {
-              byId.set(j.id, j);
+              byId.set(j.id, {
+                ...j,
+                voiceNoteDataUrl: normalizeVoiceNoteDataUrl(j.voiceNoteDataUrl),
+              });
             }
           }
         }
@@ -667,7 +671,7 @@ export async function fetchBoardJourneys(
             pick1: String(row.pick_1 || ""),
             reflectionNote: String(row.reflection_note || ""),
             voiceNoteDataUrl: row.voice_note_url
-              ? String(row.voice_note_url)
+              ? normalizeVoiceNoteDataUrl(String(row.voice_note_url))
               : undefined,
             createdAt: row.created_at
               ? new Date(String(row.created_at)).toLocaleDateString("en-US", {
@@ -711,8 +715,10 @@ export async function submitPlayerJourney(
     throw new Error(modCheck.reason || "Content moderation rejected submission.");
   }
 
+  const normalizedVoiceUrl = normalizeVoiceNoteDataUrl(journey.voiceNoteDataUrl);
   const newEntry: TwentyOneJourney = {
     ...journey,
+    voiceNoteDataUrl: normalizedVoiceUrl,
     id: `j-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     createdAt: "Just now",
   };
@@ -736,15 +742,27 @@ export async function submitPlayerJourney(
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from("twenty_one_responses").insert({
+        const { error } = await supabase.from("twenty_one_responses").insert({
           board_id: journey.boardId,
           player_name: journey.playerName,
           pick_6: journey.pick6,
           pick_3: journey.pick3,
           pick_1: journey.pick1,
           reflection_note: journey.reflectionNote,
-          voice_note_url: journey.voiceNoteDataUrl ?? null,
+          voice_note_url: normalizedVoiceUrl ?? null,
         });
+        if (error && normalizedVoiceUrl) {
+          // Ensure text reflection still lands remotely even if audio payload hit a remote limit
+          await supabase.from("twenty_one_responses").insert({
+            board_id: journey.boardId,
+            player_name: journey.playerName,
+            pick_6: journey.pick6,
+            pick_3: journey.pick3,
+            pick_1: journey.pick1,
+            reflection_note: journey.reflectionNote,
+            voice_note_url: null,
+          });
+        }
       } catch {
         // Already persisted locally
       }

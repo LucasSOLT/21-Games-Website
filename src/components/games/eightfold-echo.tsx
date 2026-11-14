@@ -11,8 +11,9 @@ import React, {
 } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, Calendar, Clock, Lightbulb } from "lucide-react";
+import { AlertTriangle, ArrowRight, Calendar, Check, Clock, Lightbulb } from "lucide-react";
 import {
+  ECHO_DIFFICULTIES,
   ECHO_GRID_SIZE,
   ECHO_POSITION_COLORS,
   ECHO_START_INDEX,
@@ -22,7 +23,9 @@ import {
   echoStars,
   formatEchoTime,
   formatEchoVictorySummary,
+  getEchoStage,
   pickEchoHintCandidates,
+  type EchoDifficulty,
   type EightfoldEchoPuzzle,
 } from "@/data/puzzles/eightfold-echo";
 import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
@@ -54,18 +57,64 @@ const WRONG_PENALTY_SECONDS = 5;
 const HINT_PENALTY_SECONDS = 15;
 const subscribeNoop = () => () => {};
 
-interface SavedEchoProgress {
-  puzzleId: string;
-  puzzleHash: string;
+interface EchoStageProgress {
   visited: number[];
   mistakes: number;
   baseSeconds: number;
   penaltySeconds: number;
 }
 
+interface SavedEchoProgress {
+  puzzleId: string;
+  puzzleHash: string;
+  activeDifficulty?: EchoDifficulty;
+  stages?: Partial<Record<EchoDifficulty, EchoStageProgress>>;
+  /** Legacy single-stage fields preserved for backward compatibility. */
+  visited?: number[];
+  mistakes?: number;
+  baseSeconds?: number;
+  penaltySeconds?: number;
+}
+
+function emptyStageProgress(): EchoStageProgress {
+  return {
+    visited: [ECHO_START_INDEX],
+    mistakes: 0,
+    baseSeconds: 0,
+    penaltySeconds: 0,
+  };
+}
+
+function isValidStageProgress(v: unknown): v is EchoStageProgress {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  return (
+    Array.isArray(s.visited) &&
+    s.visited.length > 0 &&
+    s.visited[0] === ECHO_START_INDEX &&
+    typeof s.mistakes === "number" &&
+    typeof s.baseSeconds === "number" &&
+    typeof s.penaltySeconds === "number"
+  );
+}
+
 function isValidDateKey(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
+
+const DIFFICULTY_META: Record<
+  EchoDifficulty,
+  { label: string; subtitle: string }
+> = {
+  easy: {
+    label: "Easy",
+    subtitle: "Direct 1-change chain",
+  },
+  hard: {
+    label: "Hard",
+    subtitle: "Lookahead chain",
+  },
+};
 
 export function EightfoldEchoGame() {
   const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
@@ -130,34 +179,59 @@ function EightfoldEchoBoard({
   puzzleHash,
   dateKey,
 }: EightfoldEchoBoardProps) {
-  const saved = useMemo<SavedEchoProgress | null>(() => {
+  const initialSaved = useMemo<{
+    activeDifficulty: EchoDifficulty;
+    stages: Record<EchoDifficulty, EchoStageProgress>;
+  }>(() => {
+    const fallback = {
+      activeDifficulty: "easy" as EchoDifficulty,
+      stages: {
+        easy: emptyStageProgress(),
+        hard: emptyStageProgress(),
+      },
+    };
     const s = getGameProgress<SavedEchoProgress>(
       "eightfold-echo",
       dateKey,
       puzzle.id
     );
-    if (
-      !s ||
-      s.puzzleHash !== puzzleHash ||
-      !Array.isArray(s.visited) ||
-      s.visited.length === 0 ||
-      s.visited[0] !== ECHO_START_INDEX
-    ) {
-      return null;
+    if (!s || s.puzzleHash !== puzzleHash) {
+      return fallback;
     }
-    return s;
+    const easySaved = isValidStageProgress(s.stages?.easy)
+      ? s.stages!.easy!
+      : emptyStageProgress();
+    const hardSaved = isValidStageProgress(s.stages?.hard)
+      ? s.stages!.hard!
+      : Array.isArray(s.visited) &&
+        s.visited.length > 0 &&
+        s.visited[0] === ECHO_START_INDEX
+      ? {
+          visited: s.visited,
+          mistakes: s.mistakes ?? 0,
+          baseSeconds: s.baseSeconds ?? 0,
+          penaltySeconds: s.penaltySeconds ?? 0,
+        }
+      : emptyStageProgress();
+
+    const activeDifficulty: EchoDifficulty =
+      s.activeDifficulty === "hard" ? "hard" : "easy";
+
+    return {
+      activeDifficulty,
+      stages: {
+        easy: easySaved,
+        hard: hardSaved,
+      },
+    };
   }, [dateKey, puzzle.id, puzzleHash]);
 
-  const [visited, setVisited] = useState<number[]>(
-    saved?.visited ?? [ECHO_START_INDEX]
+  const [difficulty, setDifficulty] = useState<EchoDifficulty>(
+    initialSaved.activeDifficulty
   );
-  const [mistakes, setMistakes] = useState<number>(saved?.mistakes ?? 0);
-  const [baseSeconds, setBaseSeconds] = useState<number>(
-    saved?.baseSeconds ?? 0
-  );
-  const [penaltySeconds, setPenaltySeconds] = useState<number>(
-    saved?.penaltySeconds ?? 0
-  );
+  const [stagesState, setStagesState] = useState<
+    Record<EchoDifficulty, EchoStageProgress>
+  >(initialSaved.stages);
   const [splashDismissed, setSplashDismissed] = useState(false);
   const [hintConfirmOpen, setHintConfirmOpen] = useState(false);
   const [hintCandidates, setHintCandidates] = useState<number[]>([]);
@@ -166,9 +240,18 @@ function EightfoldEchoBoard({
 
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordedRef = useRef(false);
+  const recordedStagesRef = useRef<Set<EchoDifficulty>>(new Set());
+
+  const currentStage = useMemo(
+    () => getEchoStage(puzzle, difficulty),
+    [puzzle, difficulty]
+  );
+  const curProgress = stagesState[difficulty];
+  const { visited, mistakes, baseSeconds, penaltySeconds } = curProgress;
 
   const complete = visited.length >= ECHO_GRID_SIZE;
+  const easyComplete = stagesState.easy.visited.length >= ECHO_GRID_SIZE;
+  const hardComplete = stagesState.hard.visited.length >= ECHO_GRID_SIZE;
   const activeTileIndex = complete
     ? -1
     : (visited[visited.length - 1] ?? ECHO_START_INDEX);
@@ -176,16 +259,30 @@ function EightfoldEchoBoard({
   const totalElapsed = baseSeconds + penaltySeconds;
   const hasSavedProgress =
     visited.length > 1 || mistakes > 0 || totalElapsed > 0;
-  const completedAlready = isDateCompleted("eightfold-echo", dateKey) || complete;
+  const completedAlready =
+    isDateCompleted("eightfold-echo", dateKey) || easyComplete || hardComplete;
 
-  // Count-up stopwatch starts ONLY after splash screen is dismissed (Q22).
+  const switchDifficulty = useCallback((nextDiff: EchoDifficulty) => {
+    setDifficulty(nextDiff);
+    setHintCandidates([]);
+    setShakeTile(null);
+    setToastMsg(null);
+  }, []);
+
+  // Count-up stopwatch starts ONLY after splash screen is dismissed (Q22) on the active unsolved stage.
   useEffect(() => {
     if (!splashDismissed || complete) return;
     const id = setInterval(() => {
-      setBaseSeconds((s) => s + 1);
+      setStagesState((prev) => ({
+        ...prev,
+        [difficulty]: {
+          ...prev[difficulty],
+          baseSeconds: prev[difficulty].baseSeconds + 1,
+        },
+      }));
     }, 1000);
     return () => clearInterval(id);
-  }, [splashDismissed, complete]);
+  }, [splashDismissed, complete, difficulty]);
 
   useEffect(
     () => () => {
@@ -195,42 +292,49 @@ function EightfoldEchoBoard({
     []
   );
 
-  // Persist progress per date + puzzle hash.
+  // Persist progress per date + puzzle hash across both Easy and Hard stages.
   useEffect(() => {
     saveGameProgress<SavedEchoProgress>("eightfold-echo", dateKey, {
       puzzleId: puzzle.id,
       puzzleHash,
-      visited,
-      mistakes,
-      baseSeconds,
-      penaltySeconds,
+      activeDifficulty: difficulty,
+      stages: stagesState,
+      visited: stagesState[difficulty].visited,
+      mistakes: stagesState[difficulty].mistakes,
+      baseSeconds: stagesState[difficulty].baseSeconds,
+      penaltySeconds: stagesState[difficulty].penaltySeconds,
     });
-  }, [
-    dateKey,
-    puzzle.id,
-    puzzleHash,
-    visited,
-    mistakes,
-    baseSeconds,
-    penaltySeconds,
-  ]);
+  }, [dateKey, puzzle.id, puzzleHash, difficulty, stagesState]);
 
-  // Record win + star/zero-mistake buckets once when solved.
+  // Record daily win when EITHER Easy or Hard is solved, and track per-stage star stats.
   useEffect(() => {
-    if (!complete || recordedRef.current) return;
-    recordedRef.current = true;
+    if (!complete || recordedStagesRef.current.has(difficulty)) return;
+    recordedStagesRef.current.add(difficulty);
+    const recordedTime = Math.max(1, totalElapsed);
+    const stars = echoStars(mistakes, totalElapsed);
     if (!isDateCompleted("eightfold-echo", dateKey)) {
-      const recordedTime = Math.max(1, totalElapsed);
-      const stars = echoStars(mistakes, totalElapsed);
       const updated = recordGameWin("eightfold-echo", dateKey, recordedTime);
       const dist = { ...updated.distribution };
       dist[`stars_${stars}`] = (dist[`stars_${stars}`] ?? 0) + 1;
+      dist[`solved_${difficulty}`] = (dist[`solved_${difficulty}`] ?? 0) + 1;
       if (mistakes === 0) {
         dist.zero_mistakes = (dist.zero_mistakes ?? 0) + 1;
       }
-      setGameStats("eightfold-echo", { ...getGameStats("eightfold-echo"), distribution: dist });
+      setGameStats("eightfold-echo", {
+        ...getGameStats("eightfold-echo"),
+        distribution: dist,
+      });
+    } else {
+      const existing = getGameStats("eightfold-echo");
+      const dist = { ...existing.distribution };
+      const stageFlag = `date_${dateKey}_${difficulty}`;
+      if (!dist[stageFlag]) {
+        dist[stageFlag] = 1;
+        dist[`solved_${difficulty}`] = (dist[`solved_${difficulty}`] ?? 0) + 1;
+        setGameStats("eightfold-echo", { ...existing, distribution: dist });
+      }
     }
-  }, [complete, dateKey, mistakes, totalElapsed]);
+  }, [complete, dateKey, difficulty, mistakes, totalElapsed]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -243,34 +347,66 @@ function EightfoldEchoBoard({
       if (!splashDismissed || complete) return;
       if (visited.includes(gridIndex)) return;
 
-      const expectedNext = puzzle.solution[visited.length];
+      const expectedNext = currentStage.solution[visited.length];
       if (gridIndex === expectedNext) {
-        const nextVisited = [...visited, gridIndex];
-        setVisited(nextVisited);
+        setStagesState((prev) => ({
+          ...prev,
+          [difficulty]: {
+            ...prev[difficulty],
+            visited: [...prev[difficulty].visited, gridIndex],
+          },
+        }));
         setHintCandidates([]);
         setToastMsg(null);
       } else {
-        setMistakes((m) => m + 1);
-        setPenaltySeconds((p) => p + WRONG_PENALTY_SECONDS);
+        setStagesState((prev) => ({
+          ...prev,
+          [difficulty]: {
+            ...prev[difficulty],
+            mistakes: prev[difficulty].mistakes + 1,
+            penaltySeconds:
+              prev[difficulty].penaltySeconds + WRONG_PENALTY_SECONDS,
+          },
+        }));
         setShakeTile(gridIndex);
         if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
         shakeTimerRef.current = setTimeout(() => setShakeTile(null), 450);
         showToast(`Not quite! +${WRONG_PENALTY_SECONDS}s`);
       }
     },
-    [splashDismissed, complete, visited, puzzle.solution, showToast]
+    [
+      splashDismissed,
+      complete,
+      visited,
+      currentStage.solution,
+      difficulty,
+      showToast,
+    ]
   );
 
   const confirmHint = useCallback(() => {
     setHintConfirmOpen(false);
     if (complete) return;
-    setPenaltySeconds((p) => p + HINT_PENALTY_SECONDS);
-    const candidates = pickEchoHintCandidates(puzzle, visited, puzzle.id);
+    setStagesState((prev) => ({
+      ...prev,
+      [difficulty]: {
+        ...prev[difficulty],
+        penaltySeconds: prev[difficulty].penaltySeconds + HINT_PENALTY_SECONDS,
+      },
+    }));
+    const candidates = pickEchoHintCandidates(
+      currentStage,
+      visited,
+      `${puzzle.id}:${difficulty}`
+    );
     setHintCandidates(candidates);
     showToast(`Hint active! +${HINT_PENALTY_SECONDS}s`);
-  }, [complete, puzzle, visited, showToast]);
+  }, [complete, difficulty, currentStage, visited, puzzle.id, showToast]);
 
-  const chainRules = useMemo(() => buildEchoChainRules(puzzle), [puzzle]);
+  const chainRules = useMemo(
+    () => buildEchoChainRules(currentStage),
+    [currentStage]
+  );
   const stars = echoStars(mistakes, totalElapsed);
   const victorySummary = formatEchoVictorySummary(totalElapsed, mistakes, stars);
   const shareText = useMemo(
@@ -279,9 +415,66 @@ function EightfoldEchoBoard({
         puzzleNumber: puzzle.puzzleNumber,
         elapsedSeconds: totalElapsed,
         mistakes,
-        solution: puzzle.solution,
+        solution: currentStage.solution,
+        difficulty,
       }),
-    [puzzle.puzzleNumber, puzzle.solution, totalElapsed, mistakes]
+    [puzzle.puzzleNumber, currentStage.solution, totalElapsed, mistakes, difficulty]
+  );
+
+  const renderDifficultyTabs = (compact = false) => (
+    <div
+      className={cn(
+        "inline-grid grid-cols-2 gap-1 rounded-xl border-2 border-black bg-neutral-100 p-1",
+        compact ? "w-full max-w-[min(92vw,380px)]" : "w-full"
+      )}
+      role="tablist"
+      aria-label="Eightfold Echo difficulty"
+      data-testid="echo-difficulty-tabs"
+    >
+      {ECHO_DIFFICULTIES.map((diff) => {
+        const isSelected = difficulty === diff;
+        const isSolved = stagesState[diff].visited.length >= ECHO_GRID_SIZE;
+        return (
+          <button
+            key={diff}
+            type="button"
+            role="tab"
+            aria-selected={isSelected}
+            onClick={() => switchDifficulty(diff)}
+            data-testid={`echo-diff-${diff}`}
+            className={cn(
+              "rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+              isSelected
+                ? "bg-black text-white shadow-sm"
+                : "text-neutral-700 hover:bg-white/80"
+            )}
+          >
+            <span>{DIFFICULTY_META[diff].label}</span>
+            <span
+              className={cn(
+                "text-[10px] font-medium hidden sm:inline",
+                isSelected ? "text-neutral-300" : "text-neutral-500"
+              )}
+            >
+              · {DIFFICULTY_META[diff].subtitle}
+            </span>
+            {isSolved && (
+              <span
+                className={cn(
+                  "inline-flex items-center justify-center h-4 w-4 rounded-full text-[10px] font-black",
+                  isSelected
+                    ? "bg-[#2ECC71] text-black"
+                    : "bg-emerald-100 text-emerald-800 border border-emerald-400"
+                )}
+                aria-label={`${DIFFICULTY_META[diff].label} solved`}
+              >
+                <Check className="h-2.5 w-2.5 stroke-[3]" />
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 
   if (!splashDismissed) {
@@ -295,12 +488,24 @@ function EightfoldEchoBoard({
         puzzleNumber={puzzle.puzzleNumber}
         dateKey={dateKey}
         showCreate={false}
-        isCompletedToday={completedAlready}
+        isCompletedToday={complete || completedAlready}
         hasSavedProgress={hasSavedProgress && !complete}
         onPlay={() => setSplashDismissed(true)}
-      />
+      >
+        <div className="space-y-1.5">
+          {renderDifficultyTabs(false)}
+          <p className="text-[11px] text-neutral-500 font-medium">
+            {difficulty === "easy"
+              ? "Easy: 1 direct match per step + subtle 2-change decoys. Solving either counts for your streak!"
+              : "Hard: Full shape vocabulary with multi-step lookahead."}
+          </p>
+        </div>
+      </GameSplashScreen>
     );
   }
+
+  const otherDifficulty: EchoDifficulty = difficulty === "easy" ? "hard" : "easy";
+  const otherSolved = stagesState[otherDifficulty].visited.length >= ECHO_GRID_SIZE;
 
   return (
     <GameShell
@@ -310,7 +515,10 @@ function EightfoldEchoBoard({
       dateKey={dateKey}
       author={puzzle.author}
     >
-      <div className="max-w-lg mx-auto px-2 sm:px-4 py-1 sm:py-2 flex flex-col items-center gap-2.5 sm:gap-3">
+      <div className="max-w-lg mx-auto px-2 sm:px-4 py-1 sm:py-2 flex flex-col items-center gap-2 sm:gap-2.5">
+        {/* Easy / Hard Difficulty Switcher */}
+        {renderDifficultyTabs(true)}
+
         {/* Compact single-screen HUD bar (fits 320px viewports cleanly) */}
         <div
           className="w-full max-w-[min(92vw,380px)] flex items-center justify-between gap-1.5 rounded-xl border-2 border-black bg-white px-2.5 py-1.5 shadow-[2px_2px_0px_#000]"
@@ -347,8 +555,8 @@ function EightfoldEchoBoard({
           )}
         </div>
 
-        {/* Toast / instruction micro-banner */}
-        <div className="h-5 flex items-center justify-center">
+        {/* Toast / instruction micro-banner (fixed height so layout never shifts) */}
+        <div className="min-h-[1.5rem] flex items-center justify-center px-1">
           {toastMsg ? (
             <span
               role="status"
@@ -360,21 +568,31 @@ function EightfoldEchoBoard({
             </span>
           ) : !complete ? (
             <p className="text-[11px] sm:text-xs text-neutral-600 font-medium text-center">
-              Tap the unvisited tile that changes <strong>exactly 1 attribute</strong> from the dotted tile.
+              {difficulty === "easy" ? (
+                <>
+                  Tap the unvisited tile that changes <strong>exactly 1 attribute</strong> from the dotted tile.
+                </>
+              ) : (
+                <>
+                  Tap the <strong>1-change</strong> tile that links all 9 tiles without stranding one.
+                </>
+              )}
             </p>
           ) : (
-            <p className="text-xs font-bold text-emerald-700">Echo chain complete!</p>
+            <p className="text-xs font-bold text-emerald-700">
+              {DIFFICULTY_META[difficulty].label} Echo chain complete!
+            </p>
           )}
         </div>
 
-        {/* 3×3 Square Shape Grid — single-screen fit on 320px mobile & desktop */}
+        {/* 3×3 Square Shape Grid — overflow-proof height derived directly from 3 square row tracks */}
         <div
-          className="w-full max-w-[min(86vw,356px)] sm:max-w-[376px] aspect-square grid grid-cols-3 gap-2 sm:gap-2.5 p-2 rounded-2xl border-2 border-black bg-neutral-50 shadow-[4px_4px_0px_#000]"
+          className="w-full max-w-[min(88vw,360px)] sm:max-w-[380px] grid grid-cols-3 gap-2 sm:gap-2.5 p-2.5 rounded-2xl border-2 border-black bg-neutral-50 shadow-[4px_4px_0px_#000]"
           role="grid"
-          aria-label="Eightfold Echo 3 by 3 shape grid"
+          aria-label={`Eightfold Echo ${difficulty} 3 by 3 shape grid`}
           data-testid="echo-grid"
         >
-          {puzzle.tiles.map((tile, idx) => {
+          {currentStage.tiles.map((tile, idx) => {
             const signatureColor = ECHO_POSITION_COLORS[idx]!;
             const visitedOrder = visited.indexOf(idx);
             const isActive = idx === activeTileIndex && !complete;
@@ -423,7 +641,7 @@ function EightfoldEchoBoard({
                       }
                 }
                 className={cn(
-                  "relative aspect-square rounded-xl flex items-center justify-center p-2 sm:p-2.5 transition-all select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-black",
+                  "relative w-full aspect-square min-w-0 min-h-0 overflow-hidden rounded-xl flex items-center justify-center p-2 sm:p-2.5 transition-all select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-black",
                   !isCompletedTile &&
                     !isActive &&
                     !complete &&
@@ -435,7 +653,12 @@ function EightfoldEchoBoard({
               >
                 {/* Q21: Completed tiles fill 100% solid in their signature color (NO step badges & inner shape hidden). */}
                 {!isCompletedTile && (
-                  <EchoTileSvg tile={tile} clipKey={`board-${puzzle.id}-${idx}`} />
+                  <div className="w-full h-full flex items-center justify-center overflow-hidden">
+                    <EchoTileSvg
+                      tile={tile}
+                      clipKey={`board-${puzzle.id}-${difficulty}-${idx}`}
+                    />
+                  </div>
                 )}
               </button>
             );
@@ -450,7 +673,7 @@ function EightfoldEchoBoard({
           >
             <div className="text-center space-y-1">
               <p className="text-xs font-extrabold uppercase tracking-wider text-purple-700">
-                Eightfold Echo #{puzzle.puzzleNumber}
+                Eightfold Echo #{puzzle.puzzleNumber} · {DIFFICULTY_META[difficulty].label}
               </p>
               <h2
                 className="font-headline font-black text-lg sm:text-xl text-neutral-900"
@@ -461,8 +684,20 @@ function EightfoldEchoBoard({
               <p className="text-xs text-neutral-500">“{puzzle.title}”</p>
             </div>
 
+            {!otherSolved && (
+              <Button
+                type="button"
+                onClick={() => switchDifficulty(otherDifficulty)}
+                className="w-full bg-[#daa8d0] hover:bg-[#c993be] text-black border-2 border-black font-bold"
+                data-testid="echo-play-other-difficulty"
+              >
+                Next: Play {DIFFICULTY_META[otherDifficulty].label} Board
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            )}
+
             <ResultShareButtons
-              title={`Eightfold Echo #${puzzle.puzzleNumber}`}
+              title={`Eightfold Echo #${puzzle.puzzleNumber} (${DIFFICULTY_META[difficulty].label})`}
               text={shareText}
               url="https://21games.ai/games/eightfold-echo"
             />
@@ -470,27 +705,27 @@ function EightfoldEchoBoard({
             {/* Ordered 0 → 8 Visual Chain */}
             <div className="space-y-2 pt-1 border-t border-neutral-200">
               <p className="text-xs font-extrabold uppercase tracking-wider text-neutral-600">
-                0 → 8 Echo Chain &amp; Step Rules
+                0 → 8 Echo Chain &amp; Step Rules ({DIFFICULTY_META[difficulty].label})
               </p>
               <div
                 className="grid grid-cols-9 gap-1"
                 data-testid="echo-chain-strip"
               >
-                {puzzle.solution.map((pos, stepIdx) => (
+                {currentStage.solution.map((pos, stepIdx) => (
                   <div
                     key={pos}
                     className="flex flex-col items-center gap-0.5"
-                    title={`Step ${stepIdx}: ${describeEchoTile(puzzle.tiles[pos]!)}`}
+                    title={`Step ${stepIdx}: ${describeEchoTile(currentStage.tiles[pos]!)}`}
                   >
                     <div
-                      className="w-full aspect-square rounded-lg p-1 bg-white"
+                      className="w-full aspect-square rounded-lg p-1 bg-white overflow-hidden"
                       style={{
                         border: `2.5px solid ${ECHO_POSITION_COLORS[pos]}`,
                       }}
                     >
                       <EchoTileSvg
-                        tile={puzzle.tiles[pos]!}
-                        clipKey={`chain-${puzzle.id}-${stepIdx}`}
+                        tile={currentStage.tiles[pos]!}
+                        clipKey={`chain-${puzzle.id}-${difficulty}-${stepIdx}`}
                       />
                     </div>
                     <span className="text-[10px] font-bold text-neutral-500 tabular-nums">
@@ -510,7 +745,7 @@ function EightfoldEchoBoard({
                       className="inline-block w-2.5 h-2.5 rounded-full mt-1 shrink-0 border border-black/30"
                       style={{
                         backgroundColor:
-                          ECHO_POSITION_COLORS[puzzle.solution[idx + 1]!],
+                          ECHO_POSITION_COLORS[currentStage.solution[idx + 1]!],
                       }}
                     />
                     <span>

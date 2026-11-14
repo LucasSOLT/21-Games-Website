@@ -164,6 +164,55 @@ kit.assert(
   "invalid override falls back cleanly"
 );
 
+// ---- Device photo data URLs, optional hints, initialPiece & moderation --------
+const customPuzzles = await import("@/lib/custom-puzzles");
+const fakeJpegDataUrl = `data:image/jpeg;base64,${"A".repeat(24_000)}`;
+const draftRes = six.draftToSixPicsPuzzle({
+  id: "6p-admin-test",
+  title: "Real Photos Edition",
+  themeAnswer: "National Parks",
+  aliasesCsv: "Parks",
+  creatorName: "Admin",
+  rows: [
+    {
+      caption: "Old Faithful",
+      aliasesCsv: "Geyser",
+      hint: "Erupts on a schedule in Wyoming",
+      scene: "volcano",
+      imageUrl: fakeJpegDataUrl,
+      initialPiece: 2,
+    },
+    { caption: "Half Dome", aliasesCsv: "Granite", scene: "pine-trees", imageUrl: "" },
+    { caption: "Grand Canyon", aliasesCsv: "Canyon", scene: "sun", imageUrl: "" },
+    { caption: "Redwoods", aliasesCsv: "Sequoia", scene: "pinecone", imageUrl: "" },
+    { caption: "Cactus", aliasesCsv: "Saguaro", scene: "sunflower", imageUrl: "" },
+    { caption: "Glacier", aliasesCsv: "Iceberg", scene: "snowflake", imageUrl: "" },
+  ],
+});
+kit.assert(
+  draftRes.puzzle !== null && six.validateSixPicsPuzzle(draftRes.puzzle).valid,
+  "draftToSixPicsPuzzle accepts >2KB uploaded JPEG data URL, optional hint, and initialPiece"
+);
+kit.eq(
+  draftRes.puzzle?.images[0]?.hint,
+  "Erupts on a schedule in Wyoming",
+  "draftToSixPicsPuzzle preserves per-picture hint"
+);
+kit.eq(
+  six.getInitialRevealedPiece(draftRes.puzzle!.images[0]!, 0, "seed"),
+  2,
+  "getInitialRevealedPiece honors admin-selected initialPiece"
+);
+const collectedStrings = customPuzzles.collectPayloadStrings(draftRes.puzzle);
+kit.assert(
+  !Object.values(collectedStrings).some((v) => v.startsWith("data:image/jpeg;base64,")),
+  "collectPayloadStrings skips binary raster base64 data URLs to prevent false-positive moderation"
+);
+kit.assert(
+  Object.values(collectedStrings).includes("Erupts on a schedule in Wyoming"),
+  "collectPayloadStrings still moderates per-picture hints and captions"
+);
+
 // ---- Config & UI wiring -------------------------------------------------------
 kit.assert(cfg.isPlayableGameSlug("6-pics"), "6-pics isPlayable");
 kit.eq(cfg.getGameBySlug("6-pics")?.showCreate, true, "6-pics showCreate is true");
@@ -175,7 +224,9 @@ for (const needle of [
   "ResultShareButtons",
   "six-pics-jigsaw-stage",
   "Overarching Theme",
-  "Reveal Piece",
+  "six-pics-confirm-reveal",
+  "Confirm?",
+  "six-pics-hint",
   "Pass / Reveal Word",
   "grid-cols-2",
   "mode === \"create\"",
@@ -183,10 +234,17 @@ for (const needle of [
 ]) {
   kit.assert(comp.includes(needle), `six-pics.tsx contains ${needle}`);
 }
+kit.assert(
+  !comp.includes("six-pics-reveal-piece"),
+  "legacy random Reveal Piece button removed in favor of tap-a-piece + stationary Confirm?"
+);
 const editor = fs.readFileSync("src/components/games/six-pics-editor.tsx", "utf8");
 kit.assert(
-  editor.includes("Auto-Generate Synonyms/Aliases") && editor.includes("generate6PicsSynonyms"),
-  "SixPicsEditor wires Auto-Generate Synonyms/Aliases button"
+  editor.includes("Auto-Generate Synonyms/Aliases") &&
+    editor.includes("generate6PicsSynonyms") &&
+    editor.includes("six-pics-upload-") &&
+    editor.includes("six-pics-hint-input-"),
+  "SixPicsEditor wires photo upload, hint input, and Auto-Generate Synonyms/Aliases"
 );
 const admin = fs.readFileSync("src/app/admin/page.tsx", "utf8");
 kit.assert(admin.includes("SixPicsStudioTab"), "/admin includes SixPicsStudioTab");

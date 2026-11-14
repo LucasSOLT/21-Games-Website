@@ -78,5 +78,50 @@ const src = fs.readFileSync("src/components/games/twenty-one-things.tsx", "utf8"
 kit.assert(src.includes('data-testid="zoom-cols-toggle"'), "toggle rendered in header slot");
 kit.assert(src.includes("getZoomGridClasses(zoomCols)"), "grid uses zoom classes");
 kit.assert(src.includes("getZoomTextClasses(zoomCols)"), "tile text uses zoom classes");
+kit.assert(
+  src.includes("VoiceNotePlayer") &&
+    src.includes("pickSupportedAudioMimeType") &&
+    src.includes("recorder.start(250)"),
+  "twenty-one-things.tsx uses cross-browser VoiceNotePlayer and MIME-negotiated chunked recording"
+);
+kit.assert(
+  !src.includes('{ type: "audio/webm" }'),
+  "twenty-one-things.tsx never hardcodes audio/webm on iOS Safari recordings"
+);
+
+// Cross-browser voice-note audio healing & validation
+const vn = await import("@/lib/voice-note-audio");
+const mp4Bytes = new Uint8Array(48);
+// ISO BMFF ftyp box at bytes 4..7
+mp4Bytes.set([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32], 0);
+const mp4B64 = Buffer.from(mp4Bytes).toString("base64");
+const mislabeledSafariClip = `data:audio/webm;base64,${mp4B64}`;
+const healedClip = vn.normalizeVoiceNoteDataUrl(mislabeledSafariClip);
+kit.eq(
+  healedClip,
+  `data:audio/mp4;base64,${mp4B64}`,
+  "normalizeVoiceNoteDataUrl auto-heals mislabeled iOS Safari ftyp MP4-in-WebM clips to audio/mp4"
+);
+
+const webmBytes = new Uint8Array(48);
+webmBytes.set([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81], 0);
+const webmB64 = Buffer.from(webmBytes).toString("base64");
+kit.eq(
+  vn.normalizeVoiceNoteDataUrl(`data:audio/webm;codecs=opus;base64,${webmB64}`),
+  `data:audio/webm;base64,${webmB64}`,
+  "normalizeVoiceNoteDataUrl preserves valid WebM EBML clips"
+);
+
+kit.eq(
+  vn.normalizeVoiceNoteDataUrl("data:audio/webm;base64,"),
+  undefined,
+  "normalizeVoiceNoteDataUrl rejects empty 0-byte recordings so broken Error widgets never render"
+);
+
+const healedBlob = vn.voiceNoteDataUrlToBlob(mislabeledSafariClip);
+kit.assert(
+  healedBlob !== null && healedBlob.type === "audio/mp4" && healedBlob.size === 48,
+  "voiceNoteDataUrlToBlob creates typed audio/mp4 Blob for Safari/Chrome playback"
+);
 
 kit.finish();

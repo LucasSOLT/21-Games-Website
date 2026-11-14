@@ -60,10 +60,28 @@ export function formatBlanks(answerLength: number): string {
   return `${blanks} (${answerLength} ${answerLength === 1 ? "letter" : "letters"})`;
 }
 
+/**
+ * Strips any legacy `" — it rhymes with 'starter'."` or `"(rhymes with 'starter')"`
+ * suffix from cached/override/custom clue sentences so Nine never repeats the
+ * starting word after Round 1.
+ */
+export function stripStarterRhymeSuffix(sentence: string): string {
+  const trimmed = sentence.trim();
+  const stripped = trimmed
+    .replace(/\s*[—–-]\s*it\s+rhymes\s+with\s+[“"'][^”"']+[”"']\s*[.!?]?$/i, "")
+    .replace(/\s*\(\s*rhymes\s+with\s+[“"'][^”"']+[”"']\s*\)\s*[.!?]?$/i, "")
+    .trim();
+  if (!stripped) return trimmed;
+  if (stripped !== trimmed && !/[.!?_]$/.test(stripped)) {
+    return `${stripped}.`;
+  }
+  return stripped;
+}
+
 /** Inserts the blanks into the sentence (replacing `___`) or appends them. */
 export function renderPrompt(clue: NineRhymesClue): string {
   const blanks = formatBlanks(normalizeRhymeWord(clue.answer).length);
-  const sentence = clue.sentence.trim();
+  const sentence = stripStarterRhymeSuffix(clue.sentence);
   if (/_{3,}/.test(sentence)) return sentence.replace(/_{3,}/, blanks);
   return `${sentence}\n${blanks}`;
 }

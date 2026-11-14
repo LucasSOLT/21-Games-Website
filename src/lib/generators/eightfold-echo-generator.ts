@@ -17,6 +17,9 @@ import { fnv1a32, mulberry32 } from "@/lib/seeded-random";
 export const ECHO_GRID_SIZE = 9;
 export const ECHO_START_INDEX = 4;
 
+export const ECHO_DIFFICULTIES = ["easy", "hard"] as const;
+export type EchoDifficulty = (typeof ECHO_DIFFICULTIES)[number];
+
 export const ECHO_SHAPES = [
   "circle",
   "triangle",
@@ -39,6 +42,11 @@ export const ECHO_FILLS = [
 
 export const ECHO_MARKS = [0, 1, 2, 3, 4] as const;
 
+/** Crisp, unmistakable Easy-mode vocabulary (no pentagon/hexagon or left/right ambiguity). */
+export const EASY_ECHO_SHAPES = ["circle", "square", "triangle", "diamond"] as const;
+export const EASY_ECHO_FILLS = ["hollow", "solid", "top", "bottom", "ring"] as const;
+export const EASY_ECHO_MARKS = [0, 1, 2, 3] as const;
+
 export type EchoShape = (typeof ECHO_SHAPES)[number];
 export type EchoFill = (typeof ECHO_FILLS)[number];
 export type EchoMarks = (typeof ECHO_MARKS)[number];
@@ -54,16 +62,27 @@ export interface EchoTile {
   customSvgUrl?: string;
 }
 
+export interface EightfoldEchoStage {
+  difficulty: EchoDifficulty;
+  /** Tiles by grid index 0..8 (row-major). */
+  tiles: EchoTile[];
+  /** Grid indices in chain order; `solution[0]` is always the center (`4`). */
+  solution: number[];
+  seed?: string;
+}
+
 export interface EightfoldEchoPuzzle {
   id: string;
   puzzleNumber: number;
   title: string;
   author: string;
   editor: string;
-  /** Tiles by grid index 0..8 (row-major). */
+  /** Primary/Hard tiles by grid index 0..8 (row-major, kept at top-level for compatibility). */
   tiles: EchoTile[];
   /** Grid indices in chain order; `solution[0]` is always the center (`4`). */
   solution: number[];
+  /** Daily Easy & Hard boards (`2` games per day). */
+  stages?: Record<EchoDifficulty, EightfoldEchoStage>;
   seed?: string;
   customDate?: string;
 }
@@ -400,41 +419,42 @@ export interface EchoValidation {
   errors: string[];
 }
 
-export function validateEightfoldEchoPuzzle(payload: unknown): EchoValidation {
+function validateEchoStageTilesAndSolution(
+  tilesRaw: unknown,
+  solRaw: unknown,
+  label: string,
+  requireZeroAmbiguity = false
+): string[] {
   const errors: string[] = [];
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return { valid: false, errors: ["Payload must be a non-null object."] };
-  }
-  const p = payload as Record<string, unknown>;
   if (
-    !Array.isArray(p.tiles) ||
-    p.tiles.length !== ECHO_GRID_SIZE ||
-    !p.tiles.every(isEchoTile)
+    !Array.isArray(tilesRaw) ||
+    tilesRaw.length !== ECHO_GRID_SIZE ||
+    !tilesRaw.every(isEchoTile)
   ) {
-    errors.push("tiles must be exactly 9 valid {shape, fill, marks} objects.");
-    return { valid: false, errors };
+    errors.push(`${label}: tiles must be exactly 9 valid {shape, fill, marks} objects.`);
+    return errors;
   }
-  const tiles = p.tiles as EchoTile[];
+  const tiles = tilesRaw as EchoTile[];
   if (new Set(tiles.map(tileKey)).size !== ECHO_GRID_SIZE) {
-    errors.push("All 9 tiles must be distinct.");
+    errors.push(`${label}: All 9 tiles must be distinct.`);
   }
 
-  const sol = p.solution;
   if (
-    !Array.isArray(sol) ||
-    sol.length !== ECHO_GRID_SIZE ||
-    !sol.every((v) => Number.isInteger(v) && v >= 0 && v < ECHO_GRID_SIZE) ||
-    new Set(sol).size !== ECHO_GRID_SIZE
+    !Array.isArray(solRaw) ||
+    solRaw.length !== ECHO_GRID_SIZE ||
+    !solRaw.every((v) => Number.isInteger(v) && v >= 0 && v < ECHO_GRID_SIZE) ||
+    new Set(solRaw).size !== ECHO_GRID_SIZE
   ) {
-    errors.push("solution must be a permutation of grid indices 0..8.");
-    return { valid: false, errors };
+    errors.push(`${label}: solution must be a permutation of grid indices 0..8.`);
+    return errors;
   }
+  const sol = solRaw as number[];
   if (sol[0] !== ECHO_START_INDEX) {
-    errors.push("solution must start at the center tile (index 4).");
+    errors.push(`${label}: solution must start at the center tile (index 4).`);
   }
   for (let k = 0; k < sol.length - 1; k++) {
-    if (tileDistance(tiles[sol[k] as number]!, tiles[sol[k + 1] as number]!) !== 1) {
-      errors.push(`Step ${k + 1} must change exactly one attribute.`);
+    if (tileDistance(tiles[sol[k]!]!, tiles[sol[k + 1]!]!) !== 1) {
+      errors.push(`${label}: Step ${k + 1} must change exactly one attribute.`);
     }
   }
   if (errors.length === 0) {
@@ -442,13 +462,50 @@ export function validateEightfoldEchoPuzzle(payload: unknown): EchoValidation {
     if (solved.count !== 1) {
       errors.push(
         solved.count === 0
-          ? "Puzzle has no valid chain."
-          : "Puzzle has more than one valid chain."
+          ? `${label}: Puzzle has no valid chain.`
+          : `${label}: Puzzle has more than one valid chain.`
       );
     } else if (JSON.stringify(solved.first) !== JSON.stringify(sol)) {
-      errors.push("solution does not match the unique solved chain.");
+      errors.push(`${label}: solution does not match the unique solved chain.`);
+    } else if (requireZeroAmbiguity && solved.ambiguousSteps !== 0) {
+      errors.push(`${label}: Easy stage must have zero ambiguous 1-change steps.`);
     }
   }
+  return errors;
+}
+
+export function validateEightfoldEchoPuzzle(payload: unknown): EchoValidation {
+  const errors: string[] = [];
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { valid: false, errors: ["Payload must be a non-null object."] };
+  }
+  const p = payload as Record<string, unknown>;
+  errors.push(...validateEchoStageTilesAndSolution(p.tiles, p.solution, "puzzle"));
+
+  if (p.stages !== undefined) {
+    if (!p.stages || typeof p.stages !== "object" || Array.isArray(p.stages)) {
+      errors.push("stages must be an { easy, hard } object when provided.");
+    } else {
+      const stagesObj = p.stages as Record<string, unknown>;
+      for (const diff of ECHO_DIFFICULTIES) {
+        const st = stagesObj[diff];
+        if (!st || typeof st !== "object" || Array.isArray(st)) {
+          errors.push(`stages.${diff} must be a valid stage object.`);
+        } else {
+          const stRec = st as Record<string, unknown>;
+          errors.push(
+            ...validateEchoStageTilesAndSolution(
+              stRec.tiles,
+              stRec.solution,
+              `stages.${diff}`,
+              diff === "easy"
+            )
+          );
+        }
+      }
+    }
+  }
+
   if (typeof p.title !== "string" || p.title.trim().length === 0) {
     errors.push("title is required.");
   }
@@ -457,6 +514,25 @@ export function validateEightfoldEchoPuzzle(payload: unknown): EchoValidation {
 
 export function isEightfoldEchoPuzzle(payload: unknown): payload is EightfoldEchoPuzzle {
   return validateEightfoldEchoPuzzle(payload).valid;
+}
+
+/**
+ * Counts how many unvisited non-immediate tiles sit at `tileDistance === 2` (2 changes away)
+ * from the starting center tile (`index 4`). Easy boards keep `1..3` near-miss decoys.
+ */
+export function countStartNearMissDecoys(
+  stage: Pick<EightfoldEchoStage, "tiles" | "solution">
+): number {
+  const startTile = stage.tiles[ECHO_START_INDEX]!;
+  const trueFirstHop = stage.solution[1];
+  let count = 0;
+  for (let idx = 0; idx < stage.tiles.length; idx++) {
+    if (idx === ECHO_START_INDEX || idx === trueFirstHop) continue;
+    if (tileDistance(startTile, stage.tiles[idx]!) === 2) {
+      count++;
+    }
+  }
+  return count;
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +612,7 @@ export function buildEchoShareText(options: {
   elapsedSeconds: number;
   mistakes: number;
   solution?: readonly number[];
+  difficulty?: EchoDifficulty;
 }): string {
   const stars = echoStars(options.mistakes, options.elapsedSeconds);
   const summary = formatEchoVictorySummary(
@@ -546,11 +623,14 @@ export function buildEchoShareText(options: {
   const chainEmojis = (options.solution ?? [4, 0, 1, 2, 3, 5, 6, 7, 8])
     .map((pos) => ECHO_POSITION_EMOJI[pos] ?? "🟩")
     .join("");
-  return `Eightfold Echo #${options.puzzleNumber}\n${summary}\n${chainEmojis}`;
+  const diffSuffix = options.difficulty
+    ? ` (${options.difficulty === "easy" ? "Easy" : "Hard"})`
+    : "";
+  return `Eightfold Echo #${options.puzzleNumber}${diffSuffix}\n${summary}\n${chainEmojis}`;
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic Generator + Monthly Batch Builder
+// Deterministic Generator + Easy/Hard Stages + Monthly Batch Builder
 // ---------------------------------------------------------------------------
 
 export interface EchoGenerationMeta {
@@ -568,6 +648,12 @@ const ATTR_VALUES: Record<EchoAttribute, readonly (string | number)[]> = {
   marks: ECHO_MARKS,
 };
 
+const EASY_ATTR_VALUES: Record<EchoAttribute, readonly (string | number)[]> = {
+  shape: EASY_ECHO_SHAPES,
+  fill: EASY_ECHO_FILLS,
+  marks: EASY_ECHO_MARKS,
+};
+
 const MAX_ATTEMPTS = 4000;
 
 function randomTile(rand: () => number): EchoTile {
@@ -576,6 +662,22 @@ function randomTile(rand: () => number): EchoTile {
     fill: ECHO_FILLS[Math.floor(rand() * ECHO_FILLS.length)]!,
     marks: ECHO_MARKS[Math.floor(rand() * ECHO_MARKS.length)]!,
   };
+}
+
+function randomEasyTile(rand: () => number): EchoTile {
+  return {
+    shape: EASY_ECHO_SHAPES[Math.floor(rand() * EASY_ECHO_SHAPES.length)]!,
+    fill: EASY_ECHO_FILLS[Math.floor(rand() * EASY_ECHO_FILLS.length)]!,
+    marks: EASY_ECHO_MARKS[Math.floor(rand() * EASY_ECHO_MARKS.length)]!,
+  };
+}
+
+function shuffleInPlace<T>(arr: T[], rand: () => number): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+  }
+  return arr;
 }
 
 /** Random walk of 9 distinct tiles; consecutive hops never reuse the same attribute. */
@@ -603,12 +705,151 @@ function randomChain(rand: () => number): EchoTile[] | null {
   return chain;
 }
 
-function shuffleInPlace<T>(arr: T[], rand: () => number): T[] {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+/**
+ * Constructive induced-path walk for Easy mode:
+ * - Every hop changes 1 attribute in the crisp Easy vocabulary.
+ * - Every newly added tile `chain[m]` (`m >= 2`) has `tileDistance(chain[i], chain[m]) >= 2`
+ *   for ALL earlier non-adjacent tiles `0 <= i <= m - 2`.
+ *   This guarantees `ambiguousSteps === 0` AND `solveEightfoldEcho(tiles).count === 1`!
+ */
+function buildEasyInducedChain(rand: () => number): EchoTile[] | null {
+  const start = randomEasyTile(rand);
+  const chain: EchoTile[] = [start];
+  const used = new Set<string>([tileKey(start)]);
+  let lastAttr: EchoAttribute | null = null;
+
+  while (chain.length < ECHO_GRID_SIZE) {
+    const cur = chain[chain.length - 1]!;
+    const attrChoices = shuffleInPlace(
+      ECHO_ATTRIBUTES.filter((a) => a !== lastAttr),
+      rand
+    );
+    let placed = false;
+    for (const attr of attrChoices) {
+      const valChoices = shuffleInPlace(
+        EASY_ATTR_VALUES[attr].filter((v) => v !== cur[attr]),
+        rand
+      );
+      for (const val of valChoices) {
+        const next = { ...cur, [attr]: val } as EchoTile;
+        const key = tileKey(next);
+        if (used.has(key)) continue;
+        // Induced-path invariant: zero 1-change shortcuts from any earlier tile!
+        let shortcut = false;
+        for (let i = 0; i <= chain.length - 2; i++) {
+          if (tileDistance(chain[i]!, next) < 2) {
+            shortcut = true;
+            break;
+          }
+        }
+        if (shortcut) continue;
+        used.add(key);
+        chain.push(next);
+        lastAttr = attr;
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+    if (!placed) return null;
   }
-  return arr;
+  return chain;
+}
+
+function layoutChainOnGrid(
+  chain: readonly EchoTile[],
+  rand: () => number
+): { tiles: EchoTile[]; solution: number[] } {
+  const positions = shuffleInPlace([0, 1, 2, 3, 5, 6, 7, 8], rand);
+  const tiles = new Array<EchoTile>(ECHO_GRID_SIZE);
+  const solution: number[] = [ECHO_START_INDEX];
+  tiles[ECHO_START_INDEX] = chain[0]!;
+  for (let k = 1; k < chain.length; k++) {
+    const pos = positions[k - 1]!;
+    tiles[pos] = chain[k]!;
+    solution.push(pos);
+  }
+  return { tiles, solution };
+}
+
+/**
+ * Deterministically generates an intuitive Easy Eightfold Echo stage:
+ * - `solveEightfoldEcho(tiles).count === 1`
+ * - `ambiguousSteps === 0` (exact 1 unvisited 1-change match at every step 0..7)
+ * - `1..3` tempting 2-change near-miss decoy tiles from the starting center tile (`Step 0`).
+ */
+export function generateEasyEchoStage(seed: string): EightfoldEchoStage {
+  const rand = mulberry32(fnv1a32(`eightfold-echo:easy:${seed}`));
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const chain = buildEasyInducedChain(rand);
+    if (!chain) continue;
+    const { tiles, solution } = layoutChainOnGrid(chain, rand);
+    const nearMisses = countStartNearMissDecoys({ tiles, solution });
+    if (nearMisses < 1 || nearMisses > 3) continue;
+    const solved = solveEightfoldEcho(tiles, ECHO_START_INDEX, 2);
+    if (solved.count !== 1 || solved.ambiguousSteps !== 0) continue;
+    return {
+      difficulty: "easy",
+      tiles,
+      solution,
+      seed,
+    };
+  }
+  throw new Error(`Easy Eightfold Echo generator exhausted attempts for seed "${seed}"`);
+}
+
+/**
+ * Deterministically generates a Hard Eightfold Echo stage:
+ * - Full 6-shape × 8-fill × 5-dot vocabulary
+ * - `solveEightfoldEcho(tiles).count === 1`
+ * - `ambiguousSteps >= minAmbiguous` (default `2`, requiring Hamiltonian lookahead).
+ */
+export function generateHardEchoStage(
+  seed: string,
+  minAmbiguous = 2
+): EightfoldEchoStage {
+  const rand = mulberry32(fnv1a32(`eightfold-echo:${seed}`));
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const chain = randomChain(rand);
+    if (!chain) continue;
+    const { tiles, solution } = layoutChainOnGrid(chain, rand);
+    const solved = solveEightfoldEcho(tiles, ECHO_START_INDEX, 2);
+    if (solved.count !== 1 || solved.ambiguousSteps < minAmbiguous) continue;
+    return {
+      difficulty: "hard",
+      tiles,
+      solution,
+      seed,
+    };
+  }
+  if (minAmbiguous > 1) {
+    return generateHardEchoStage(`${seed}:r1`, 1);
+  }
+  if (minAmbiguous > 0) {
+    return generateHardEchoStage(`${seed}:relaxed`, 0);
+  }
+  throw new Error(`Hard Eightfold Echo generator exhausted attempts for seed "${seed}"`);
+}
+
+/**
+ * Resolves the requested difficulty stage (`easy` or `hard`) for any `EightfoldEchoPuzzle`,
+ * seamlessly synthesizing `easy` if a legacy single-board override lacks `stages`.
+ */
+export function getEchoStage(
+  puzzle: EightfoldEchoPuzzle,
+  difficulty: EchoDifficulty
+): EightfoldEchoStage {
+  const fromStages = puzzle.stages?.[difficulty];
+  if (fromStages) return fromStages;
+  if (difficulty === "hard") {
+    return {
+      difficulty: "hard",
+      tiles: puzzle.tiles,
+      solution: puzzle.solution,
+      seed: puzzle.seed,
+    };
+  }
+  return generateEasyEchoStage(puzzle.seed ?? puzzle.id);
 }
 
 const ECHO_TITLES: readonly string[] = [
@@ -627,47 +868,33 @@ const ECHO_TITLES: readonly string[] = [
 ];
 
 /**
- * Deterministically generates a solver-verified puzzle for `seed`.
- * Every returned layout has `solveEightfoldEcho(tiles).count === 1`.
+ * Deterministically generates a solver-verified dual-stage (`Easy` + `Hard`) puzzle for `seed`.
+ * Every returned layout has `solveEightfoldEcho(tiles).count === 1` on both stages.
  */
 export function generateEightfoldEchoPuzzle(
   seed: string,
   meta: EchoGenerationMeta,
-  minAmbiguous = 1
+  minAmbiguous = 2
 ): EightfoldEchoPuzzle {
-  const rand = mulberry32(fnv1a32(`eightfold-echo:${seed}`));
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const chain = randomChain(rand);
-    if (!chain) continue;
-    const positions = shuffleInPlace([0, 1, 2, 3, 5, 6, 7, 8], rand);
-    const tiles = new Array<EchoTile>(ECHO_GRID_SIZE);
-    const solution: number[] = [ECHO_START_INDEX];
-    tiles[ECHO_START_INDEX] = chain[0]!;
-    for (let k = 1; k < chain.length; k++) {
-      const pos = positions[k - 1]!;
-      tiles[pos] = chain[k]!;
-      solution.push(pos);
-    }
-    const solved = solveEightfoldEcho(tiles, ECHO_START_INDEX, 2);
-    if (solved.count !== 1 || solved.ambiguousSteps < minAmbiguous) continue;
-    const defaultTitle =
-      ECHO_TITLES[fnv1a32(`title:${seed}`) % ECHO_TITLES.length]!;
-    return {
-      id: meta.id,
-      puzzleNumber: meta.puzzleNumber,
-      title: meta.title ?? defaultTitle,
-      author: meta.author ?? "SOL Theory",
-      editor: meta.editor ?? "Auto-Generated",
-      tiles,
-      solution,
-      seed,
-      ...(meta.customDate ? { customDate: meta.customDate } : {}),
-    };
-  }
-  if (minAmbiguous > 0) {
-    return generateEightfoldEchoPuzzle(`${seed}:relaxed`, meta, 0);
-  }
-  throw new Error(`Eightfold Echo generator exhausted attempts for seed "${seed}"`);
+  const easy = generateEasyEchoStage(seed);
+  const hard = generateHardEchoStage(seed, minAmbiguous);
+  const defaultTitle =
+    ECHO_TITLES[fnv1a32(`title:${seed}`) % ECHO_TITLES.length]!;
+  return {
+    id: meta.id,
+    puzzleNumber: meta.puzzleNumber,
+    title: meta.title ?? defaultTitle,
+    author: meta.author ?? "SOL Theory",
+    editor: meta.editor ?? "Auto-Generated",
+    tiles: hard.tiles,
+    solution: hard.solution,
+    stages: {
+      easy,
+      hard,
+    },
+    seed,
+    ...(meta.customDate ? { customDate: meta.customDate } : {}),
+  };
 }
 
 /** Generates and validates a full calendar month (`month` is 1..12) of Eightfold Echo puzzles. */

@@ -52,7 +52,10 @@ function PureEchoSvg({
   return (
     <svg
       viewBox="0 0 100 100"
-      className={cn("w-full h-full select-none pointer-events-none", className)}
+      width="100%"
+      height="100%"
+      preserveAspectRatio="xMidYMid meet"
+      className={cn("block w-full h-full max-w-full max-h-full select-none pointer-events-none", className)}
       aria-hidden="true"
     >
       {needsClip && (

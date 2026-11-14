@@ -31,23 +31,49 @@ kit.eq(
   "exact Q21 signature position colors (center #2ECC71)"
 );
 
-// ---- 66-day bank + solver uniqueness -----------------------------------------
+// ---- 66-day bank + solver uniqueness (Easy & Hard stages) --------------------
 kit.eq(echo.EIGHTFOLD_ECHO_PUZZLES.length, 66, "bank has 66 puzzles");
 let allBankValid = true;
 let allUnique = true;
+let allEasyIntuitive = true;
+let allHardLookahead = true;
 for (const p of echo.EIGHTFOLD_ECHO_PUZZLES) {
   const v = echo.validateEightfoldEchoPuzzle(p);
   if (!v.valid) {
     allBankValid = false;
     console.error("Invalid Echo puzzle:", p.id, v.errors);
   }
-  const solved = echo.solveEightfoldEcho(p.tiles, 4, 2);
-  if (solved.count !== 1 || p.solution[0] !== 4) {
+  const easyStage = echo.getEchoStage(p, "easy");
+  const hardStage = echo.getEchoStage(p, "hard");
+  const easySolved = echo.solveEightfoldEcho(easyStage.tiles, 4, 2);
+  const hardSolved = echo.solveEightfoldEcho(hardStage.tiles, 4, 2);
+  const nearMisses = echo.countStartNearMissDecoys(easyStage);
+  if (
+    easySolved.count !== 1 ||
+    hardSolved.count !== 1 ||
+    easyStage.solution[0] !== 4 ||
+    hardStage.solution[0] !== 4
+  ) {
     allUnique = false;
   }
+  if (easySolved.ambiguousSteps !== 0 || nearMisses < 1 || nearMisses > 3) {
+    allEasyIntuitive = false;
+    console.error("Easy stage invariant failed:", p.id, {
+      ambiguousSteps: easySolved.ambiguousSteps,
+      nearMisses,
+    });
+  }
+  if (hardSolved.ambiguousSteps < 1) {
+    allHardLookahead = false;
+  }
 }
-kit.assert(allBankValid, "all 66 bank puzzles pass validateEightfoldEchoPuzzle");
-kit.assert(allUnique, "all 66 bank puzzles have unique Hamiltonian chain starting at center (4)");
+kit.assert(allBankValid, "all 66 bank puzzles pass validateEightfoldEchoPuzzle (Easy + Hard)");
+kit.assert(allUnique, "all 66 bank puzzles have unique Hamiltonian chains on both Easy and Hard");
+kit.assert(
+  allEasyIntuitive,
+  "all 66 Easy stages have ambiguousSteps === 0 and 1..3 near-miss 2-change decoys from center"
+);
+kit.assert(allHardLookahead, "all 66 Hard stages require lookahead across multiple 1-change options");
 
 // ---- Solver negative cases (0 solutions & >=2 solutions) ----------------------
 const sample = echo.EIGHTFOLD_ECHO_PUZZLES[0]!;
@@ -125,6 +151,17 @@ kit.assert(
   shareText.startsWith("Eightfold Echo #18\nSolved in 0:42 · 0 Mistakes · ⭐⭐⭐\n"),
   "share text header + victory line"
 );
+const shareTextEasy = echo.buildEchoShareText({
+  puzzleNumber: 18,
+  elapsedSeconds: 42,
+  mistakes: 0,
+  solution: sample.solution,
+  difficulty: "easy",
+});
+kit.assert(
+  shareTextEasy.startsWith("Eightfold Echo #18 (Easy)\nSolved in 0:42 · 0 Mistakes · ⭐⭐⭐\n"),
+  "share text includes difficulty badge when provided"
+);
 
 // ---- Monthly batch + daily engine --------------------------------------------
 const jan = echo.generateEightfoldEchoMonthlyBatch(2027, 1);
@@ -153,11 +190,19 @@ for (const needle of [
   "dashed",
   "ECHO_POSITION_COLORS",
   "!isCompletedTile && (",
+  "echo-difficulty-tabs",
+  "echo-diff-",
+  "min-w-0 min-h-0 overflow-hidden",
 ]) {
   kit.assert(comp.includes(needle), `eightfold-echo.tsx contains ${needle}`);
 }
+kit.assert(
+  !comp.includes("aspect-square grid grid-cols-3"),
+  "outer echo-grid omits conflicting aspect-square height lock"
+);
 const svgComp = fs.readFileSync("src/components/games/echo-tile-svg.tsx", "utf8");
 kit.assert(svgComp.includes("ImageWithFallback"), "EchoTileSvg supports ImageWithFallback");
+kit.assert(svgComp.includes('width="100%"') && svgComp.includes('height="100%"'), "PureEchoSvg sets explicit 100% width/height");
 const admin = fs.readFileSync("src/app/admin/page.tsx", "utf8");
 kit.assert(admin.includes("EightfoldEchoStudioTab"), "/admin includes EightfoldEchoStudioTab");
 const archive = await import("@/app/games/[slug]/archive/page");

@@ -456,6 +456,55 @@ export function generateFourScorePuzzle(
   };
 }
 
+export function defaultRevealedOperandCount(digitCount: number): number {
+  return digitCount >= 5 ? 2 : 1;
+}
+
+/**
+ * Masks unrevealed numeric operands in `canonicalEquation` with `__` while keeping
+ * the full operator & parenthesis blueprint visible (`= 80` on the right-hand side).
+ */
+export function revealFourScoreFormulaWithCount(
+  canonicalEquation: string,
+  revealedNumbersCount: number
+): string {
+  const eqParts = canonicalEquation.split(" = ");
+  const lhs = eqParts[0] ?? canonicalEquation;
+  const rhs = eqParts[1] ?? String(FOUR_SCORE_TARGET);
+
+  const matches = lhs.match(/\d+/g) ?? [];
+  const totalOperands = matches.length;
+  if (totalOperands === 0) return canonicalEquation;
+
+  const keep = Math.max(
+    0,
+    Math.min(totalOperands, Math.floor(revealedNumbersCount))
+  );
+  let idx = 0;
+  const maskedLhs = lhs.replace(/\d+/g, (token) => {
+    const show = idx < keep;
+    idx += 1;
+    return show ? token : "__";
+  });
+  return `${maskedLhs} = ${rhs}`;
+}
+
+/**
+ * Builds the top-left Formula Guide for a Four Score board:
+ * - `4`-tile boards start with `1` operand + operator revealed (e.g. `(((25 + __) × __) ÷ __) = 80`)
+ * - `5–6+`-tile boards start with `2` operands + operators revealed (e.g. `((((4 + 46) − __) × __) ÷ __) = 80`)
+ * - Optional `extraRevealed` reveals additional numbers up to `digits.length - 1`.
+ */
+export function buildFourScoreFormulaBlueprint(
+  puzzle: Pick<FourScorePuzzle, "digits" | "canonicalEquation">,
+  extraRevealed: number = 0
+): string {
+  const base = defaultRevealedOperandCount(puzzle.digits.length);
+  const maxKeep = Math.max(1, puzzle.digits.length - 1);
+  const keep = Math.min(maxKeep, base + Math.max(0, Math.floor(extraRevealed)));
+  return revealFourScoreFormulaWithCount(puzzle.canonicalEquation, keep);
+}
+
 export function buildFourScoreShareText(options: {
   puzzleNumber: number;
   digitsCount: number;

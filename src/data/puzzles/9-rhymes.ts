@@ -131,13 +131,15 @@ function shuffled<T>(items: readonly T[], seed: string): T[] {
   return arr;
 }
 
-/** Builds the Nine-style clue for a dictionary entry. */
-export function buildClueFromEntry(entry: RhymeEntry, starter: string): NineRhymesClue {
+/** Builds the Nine-style clue for a dictionary entry (without repeating the starter word). */
+export function buildClueFromEntry(entry: RhymeEntry, _starter?: string): NineRhymesClue {
+  void _starter;
   const word = entry.word;
   const last = word[word.length - 1]!.toUpperCase();
+  const cleanClue = entry.clue.trim().replace(/[.!?]+$/, "");
   return {
     answer: word,
-    sentence: `${entry.clue} — it rhymes with “${starter}”.`,
+    sentence: `${cleanClue}.`,
     hint:
       word.length > 3
         ? `It starts with “${word[0]!.toUpperCase()}” and ends with “${last}”.`

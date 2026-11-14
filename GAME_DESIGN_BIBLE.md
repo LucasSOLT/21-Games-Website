@@ -101,12 +101,13 @@
 
 ## 2. Game-by-Game Finalized Specifications (Parts B–H: Q5–Q48)
 
-### Game #21 — `21 Things` (LIVE — Enhanced with 3-Col ↔ 2-Col Zoom, Splash, Moderation & Error Boundary)
+### Game #21 — `21 Things` (LIVE — Enhanced with 3-Col ↔ 2-Col Zoom, Cross-Browser Voice Notes, Splash, Moderation & Error Boundary)
 - **Route**: `/games/21-things` | **Archive**: `/games/21-things/archive`
-- **Core Loop**: Single-screen `3×7` grid narrowing funnel (`21 → 6 [Yellow] → 3 [Purple] → 1 [Green]`), voice/text reflection on the `#1` item, real community journey feed (`twenty_one_responses`), and Creator Mode (`?b=21t-xxxxxxxx`).
+- **Core Loop**: Single-screen `3×7` grid narrowing funnel (`21 → 6 [Yellow] → 3 [Purple] → 1 [Green]`), voice/text reflection on the `#1` item, real community journey feed (`twenty_one_journeys` / `twenty_one_responses`), and Creator Mode (`?b=21t-xxxxxxxx`).
 - **New Enhancements**:
   - Wrap in `<GameSplashScreen>` and `<GameErrorBoundary>`.
   - **Accessibility Zoom Layout Toggle (`R6`)**: Direct `3 Col` ↔ `2 Col` toggle pill in the top header bar persisted in `localStorage` (`solgames_21t_grid_cols`), enlarging tiles into a square-proportioned 2-column layout with crisp legible typography for mobile and visually impaired players.
+  - **Cross-Browser Self-Healing Voice Notes (`voice-note-audio.ts` + `<VoiceNotePlayer>`)**: Negotiates `audio/mp4` first (native iOS/macOS Safari + universal Chrome/Firefox playback) then `audio/webm;codecs=opus` / `audio/webm`, caps bitrate at `32 kbps` with `60s` max auto-stop (`< 350 KB`, safely under Postgres RLS's `1 MB` `voice_note_url` ceiling), inspects base64 magic bytes (`ftyp` → `audio/mp4`, `\x1A\x45\xDF\xA3` → `audio/webm`) to retroactively heal mislabeled iPhone clips already stored in Supabase, plays via `Blob` Object URLs, and renders a minimalist `<VoiceNotePlayer>` that hides/degrades cleanly instead of ever rendering a broken `▶ Error` widget.
   - Enforce Tier 1 + Tier 2 moderation on public daily reflections (strictly clean) vs. private custom boards (Tier 1 slurs blocked, casual swearing allowed).
 
 ### Game #17 — `17 Syllables` (Daily 5-7-5 Haiku Reconstruction Puzzle) — Q5 to Q11
@@ -139,15 +140,15 @@
 - **Visual Interface & Minimalist NYT-Styled Logo**:
   - Minimalist NYT-meets-Apple-iMessage chat view.
   - **Minimalist NYT-Styled `9 Rhymes` Logo (`game-logo.tsx`)**: Clean geometric card emblem with `#171717` ink border and offset shadow, pairing a bold geometric numeral `9` inside an NYT Gold (`#F9D423`) tile with 3 stepped horizontal rhyme-chain bars in Gold (`#F9D423`), Emerald (`#2ECC71`), and Lavender (`#DAA8D0`).
-  - **Top Contact Header (Q17)**: Shows **"Nine"** with the `9 Rhymes` mini emblem, the active rhyme badge (`Starter: CAR` on Word 1, then `Rhymes with: FAR` on Word 2, etc.), and a live uncluttered status pill: `Word 3 of 9 · Score: 2.5 / 9`.
-- **Linear Word-to-Word Rhyme Progression & Word-Length Rules (Q12 & Q13)**:
-  - **One Exact Perfect Rhyme Sound + Linear Chain Progression (Q12)**: All 10 words in a game (1 Starter Word + 9 target answers) share **one exact Perfect Rhyme sound**, and **each new word prompts the player to rhyme with the word immediately before it**:
-    - Bubble 0 introduces the starter word: `"Here's today's word: CAR"`.
-    - **Word 1 of 9** rhymes with the Starter Word (`"Word 1 of 9 · Rhymes with CAR"`).
-    - **Words 2 through 9** prompt the player to rhyme with the preceding target word (`"Word 2 of 9 · The next word rhymes with FAR"`, `"Word 3 of 9 · The next word rhymes with STAR"`, ..., `"Word 9 of 9 · The next word rhymes with [Word 8]"`), giving the game a linear chain progression feel.
-  - **Exact Letter-Count Clue in Every Blank (Q13)**: Nine's fill-in-the-blank prompt always displays spaced underscores matching the exact letter count plus a badge (e.g., `"Finish the sentence: 'Wow, this guy split on a _ _ _ _ (4 letters).'"`) so homophones/near-spellings (`RIME (4)` vs `RHYME (5)`) are 100% unambiguous.
+  - **Top Contact Header (Q17)**: Shows **"Nine"** with the `9 Rhymes` mini emblem and a live uncluttered status line (`Word 3 of 9 · Score: 2.5 / 9`), with **no** redundant top-right `Rhymes with: ...` / `Starter: ...` badge pill.
+- **Linear Word-to-Word Rhyme Progression & Starter-Word Isolation Rule (Q12 & Q13)**:
+  - **One Exact Perfect Rhyme Sound + Linear Chain Progression (Q12)**: All 10 words in a game (1 Starter Word + 9 target answers) share **one exact Perfect Rhyme sound**, and **the Starter Word is ONLY shown in Nine's opening message and Round 1**:
+    - Bubble 0 introduces the starter word: `"Here's today's word: PLATE"`.
+    - **Word 1 of 9** rhymes with the Starter Word (`"Word 1 of 9 · Rhymes with PLATE"`), followed by the clue sentence with **no** redundant `"— it rhymes with 'plate'"` suffix.
+    - **Words 2 through 9** prompt the player to rhyme **only** with the preceding target word (`"Word 2 of 9 · The next word rhymes with DEBATE"`, `"Word 3 of 9 · The next word rhymes with GATE"`, ..., `"Word 9 of 9 · The next word rhymes with [Word 8]"`), and **never** mention the starting word again in Nine's clue sentences (`renderPrompt` also strips any legacy `"it rhymes with ..."` suffixes from custom/cached clues).
+  - **Exact Letter-Count Clue in Every Blank (Q13)**: Nine's clue prompt always displays spaced underscores matching the exact letter count plus a badge (`"_ _ _ _ (4 letters)"`) so homophones/near-spellings (`RIME (4)` vs `RHYME (5)`) are 100% unambiguous.
 - **Chat Pacing & Typing Indicator (Q16)**:
-  - Nine starts the chat with Bubble 1: `"Here's today's word: TIME"` followed immediately by Bubble 2 (Round 1's fill-in-the-blank sentence).
+  - Nine starts the chat with Bubble 1: `"Here's today's word: TIME"` followed immediately by Bubble 2 (Round 1's clue sentence).
   - Whenever the player sends a guess, requests a hint, or reveals an answer, Nine displays a brief animated iMessage typing indicator bubble (`• • •` for **`400ms`**) before Nine's response bubble pops in, keeping the chat scrolled smoothly to the bottom.
 - **Quick-Reply Hint & Reveal Pills with Confirmation Popup (Q15)**:
   - Directly above the iMessage input bar sit two sleek pill buttons:
@@ -165,10 +166,13 @@
 - **Admin Studio & Accepted Spellings (Q19)**:
   - In `/admin` (and Creator Mode), each of the 9 rows has: `Primary Answer` (determines the letter count), `Accepted Alternative Spellings` (comma-separated optional list), `Fill-in-the-Blank Sentence`, and `Description Hint`.
 
-### Game #8 — `Eightfold Echo` (3×3 Shape Logic Sequence) — Q20 to Q26
+### Game #8 — `Eightfold Echo` (3×3 Shape Logic Sequence — Daily `Easy` & `Hard` Boards) — Q20 to Q26
 - **Route**: `/games/eightfold-echo` | **Archive**: `/games/eightfold-echo/archive`
-- **100% Auto-Generated Monthly Batches + Inline Parametric SVG Library (Q20)**:
-  - Powered by a deterministic parametric SVG Shape Engine (`src/lib/generators/eightfold-echo-generator.ts`) that renders crisp inline SVGs (circles, polygons, concentric rings, quadrants, half-fills `left/right/top/bottom/solid/hollow`, dot matrices, rotation progressions, complement pairs, and `?` deduction triples) with `<ImageWithFallback>` support for optional custom SVG uploads.
+- **Two Daily Boards (`Easy` + `Hard`) & Logical Soundness Guarantees (Q20)**:
+  - Powered by a deterministic parametric SVG Shape Engine (`src/lib/generators/eightfold-echo-generator.ts`), every calendar day bundles **2 solver-verified boards** (`stages: { easy, hard }`, defaulting to **Easy** on both the splash screen and board header):
+    - **Easy Board (`ambiguousSteps === 0` + Near-Miss Decoys)**: Uses unmistakable high-contrast shapes (`circle`, `square`, `triangle`, `diamond`), crisp fills (`hollow`, `solid`, `top`, `bottom`, `ring`), and `0..3` dots. Guarantees **`solveEightfoldEcho(tiles).count === 1` AND `ambiguousSteps === 0`** — at every step `0..7`, **exact 1** unvisited tile is `1` attribute change away (`tileDistance === 1`), while **`1–3` near-miss decoy tiles sit `2` changes away (`tileDistance === 2`)** from the starting center tile so players compare attributes carefully without ever being penalized on a valid 1-change tap.
+    - **Hard Board (`ambiguousSteps >= 2` Hamiltonian Lookahead)**: Uses the full `6` shapes × `8` fills × `0..4` dots vocabulary with **`solveEightfoldEcho(tiles).count === 1` and `ambiguousSteps >= 2`**, requiring genuine multi-step lookahead so no tile is stranded.
+  - **Daily Streak Rule**: Solving **either** `Easy` or `Hard` records the daily win (`recordGameWin("eightfold-echo", dateKey)`), while players can freely switch tabs and complete both boards.
   - Automatically generates and validates full monthly batches (`Month M+2`) and supports deterministic date-seeded fallback (`YYYY-MM-DD`).
 - **Signature Position Colors & Dotted-to-Solid Visual Progression (Q21)**:
   - **No `#1, #2, #3` step number badges on completed tiles.**
@@ -183,32 +187,32 @@
 - **Zero-Authoring Candidate-Pulse Hint System (Q23)**:
   - Clicking **"Hint (+15s)"** opens a confirmation popup. On confirm, it adds `+15s` to the stopwatch and highlights/pulses **2 candidate tiles** on the board (the true next tile + 1 remaining unvisited decoy tile).
 - **Post-Game `0 → 8` Chain & Rule Walkthrough (Q24 & Q26)**:
-  - Victory screen displays the final score as **`Solved in 0:42 · 0 Mistakes · ⭐⭐⭐`** (`3 stars` = `0 mistakes & < 60s`, `2 stars` = `≤ 2 mistakes & < 120s`, `1 star` = completed) and reveals the ordered `0 → 8` visual chain with auto-generated 1-line explanations of each step's logic rule.
-- **Single-Screen Fit (Q25)**:
-  - The `3×3` square grid + compact stopwatch/mistakes bar fits 100% on a single viewport without scrolling on both desktop and `320px` mobile.
+  - Victory screen displays the final score as **`Solved in 0:42 · 0 Mistakes · ⭐⭐⭐`** (`3 stars` = `0 mistakes & < 60s`, `2 stars` = `≤ 2 mistakes & < 120s`, `1 star` = completed), offers a `"Next: Play Hard →"` button when finishing Easy, and reveals the ordered `0 → 8` visual chain with auto-generated 1-line explanations of each step's logic rule.
+- **Overflow-Proof Grid Frame & Single-Screen Fit (Q25)**:
+  - `[data-testid="echo-grid"]` omits conflicting outer `aspect-square` height locks and instead wraps 3 columns × 3 rows of `w-full aspect-square min-w-0 min-h-0 overflow-hidden` tile buttons (`width="100%" height="100%"` on `<svg>`), guaranteeing the outer rounded black frame encloses all 9 tiles cleanly on every iOS Safari / shared-link WebView load without ever clipping or under-sizing behind row 3.
 
 ### Game #6 — `6 Pics` (6-Piece Jigsaw Image-Naming Game) — Q27 to Q33
 - **Route**: `/games/6-pics` | **Archive**: `/games/6-pics/archive`
 - **Clean Top Navigation & Mobile Header Ellipsis Truncation Rule (All Games & Archives)**:
   - Individual game headers (`GameShell`) and archive headers (`GameArchiveView`) **never** render a multi-game horizontal pill switcher bar (which crowds centered titles with 9 live games). Players return to the homepage via the `SOL GaMES` mark or `← All Games` button to switch games.
   - On narrow mobile viewports (`320px–430px`), `GameShell` gives left and right button clusters `shrink-0 sm:flex-1` and the center title container `flex-1 min-w-0 overflow-hidden` with `truncate min-w-0` on `<h1>` so longer game titles (`"Eightfold Echo"`, `"17 Syllables"`, etc.) cleanly truncate with an ellipsis (`"Eightfold E…"`) next to `#puzzleNumber` without ever colliding with header controls.
-- **Visible Overarching Theme + 6 Jigsaw-Covered Images (Q27 & Q28)**:
-  - The puzzle's **Overarching Theme** (e.g., `Theme: Hawaii`) is **visible at the top** throughout gameplay to guide the player's guesses.
+- **Visible Overarching Theme + 6 Jigsaw-Covered Images + Optional Hints (Q27 & Q28)**:
+  - The puzzle's **Overarching Theme** (e.g., `Theme: Hawaii`) is **visible at the top** throughout gameplay to guide the player's guesses, alongside an optional per-picture **Hint** pill (`💡 Hint: ...`) whenever configured by an Admin/GM or Creator.
   - Players progress sequentially through **6 focused `4:3` images** (`Pic 1 of 6` → `Pic 6 of 6`), trying to **guess the name of EACH image** while revealing as few puzzle pieces as possible.
-  - Each image is covered by **6 interlocking SVG jigsaw puzzle pieces** (`3×2` layout). At the start of each image, **5 pieces cover the artwork** and **1 piece is already open** (`1/6` visible, deterministically chosen over a piece containing visual subject detail).
-- **Guessing, Free Wrong Guesses & `Reveal Piece (-1 pt)` (Q29)**:
+  - Each image is covered by **6 interlocking SVG jigsaw puzzle pieces** (`3×2` layout). At the start of each image, **5 pieces cover the artwork** and **1 piece is already open** (`1/6` visible, deterministically chosen or selected by the Admin/Creator via `initialPiece`).
+- **Tap-a-Piece Selection + Zero-Shift Stationary `Confirm?` Button (Q29)**:
   - Typing a guess up top checks that image's primary name + accepted synonyms/aliases.
   - **Wrong guesses** shake (`"Not quite!"`) with **zero point penalty** and do **not** auto-remove puzzle pieces.
-  - Clicking **`Reveal Piece (-1 pt)`** removes **1 random covered jigsaw piece** from the board (`5` covering → `4` → `3` → `2` → `1` → `0`).
+  - **Direct Jigsaw Piece Selection + Stationary `Confirm?` Button**: There is **no** random `Reveal Piece` button. Instead, players **tap/click directly on any covered puzzle piece** they want to uncover (highlighting that piece in gold; tapping again deselects). A **permanent, fixed-height (`h-8`) `Confirm?` button** (`data-testid="six-pics-confirm-reveal"`) stays rendered in place at all times (greyed out / disabled until a piece is tapped, producing **`0px` layout shift**). Pressing `Confirm?` removes that chosen piece and reduces that picture's point value by `-1 pt` (`6 pts → 5 → 4 → 3 → 2 → 1 pt`), clearly explained right on screen.
   - Clicking **`Pass / Reveal Word (0 pts)`** (confirmation-gated while pieces remain, or 1-tap once all 6 pieces are open) uncovers the full image, reveals the word for `0` points, and lets the player advance.
-  - Whenever an image is solved or passed, all remaining pieces pop off to reveal the full illustration + earned points before advancing to the next image (`Next Picture →` / `Enter`).
-- **Fuzzy Per-Image Matching + Free AI Synonym Generator in `/admin` (Q30)**:
+  - Whenever an image is solved or passed, all remaining pieces pop off to reveal the full illustration/photo + earned points before advancing to the next image (`Next Picture →` / `Enter`).
+- **Fuzzy Per-Image Matching + Admin Device Photo Upload, Hints & AI Synonyms (Q30)**:
   - Answer matcher normalizes case/whitespace/punctuation/articles/plurals, checks the image's primary name + accepted per-image synonyms/aliases (including scene-level synonyms), and grants **1-letter typo forgiveness** (`Levenshtein distance ≤ 1` for candidate answers with `≥ 5` characters).
-  - In `/admin` (and Creator Mode), each picture card provides an **"✨ Auto-Aliases"** button powered by `gemini-2.5-flash` (with OpenRouter toggle + local dictionary fallback) that populates accepted per-image synonyms in 1 click.
+  - Default bank/future games keep crisp inline SVG illustrations, **AND** `/admin` **6 Pics Studio** (`SixPicsEditor`) lets Admins/Game Masters (and Creators) **upload actual photos from their device** (client-side `<canvas>` compressed to `640×480` `4:3` JPEG `0.80` data URLs up to `450 KB`), reset back to SVG, edit the **overarching theme**, edit **picture names (`caption`)**, add an **optional `hint`**, pick the **starting uncovered jigsaw piece (`#1–#6`)**, and click **"✨ Auto-Aliases"** to generate accepted synonyms.
 - **36-Point Scoring (`0–36`) & Post-Game `2×3` Summary Grid (Q31–Q33)**:
   - Per image `i ∈ {1..6}` with `r_i ∈ {0..5}` extra pieces removed: `score_i = 6 - r_i` (`6 pts` at `1/6` shown down to `1 pt` at `6/6` shown) if named correctly, or `0 pts` if passed/missed. Total score: `0` to `36` points (`X / 36 pts · Y / 6 named`).
   - Post-game ending screen transitions into a **`2×3` grid** displaying all 6 uncovered images, their numbered names (`1. Ocean`), per-image score badges (`6/6 pts`, `0/6 pts`), 6-tile emoji receipt (`🟩` `5–6 pts`, `🟨` `3–4 pts`, `🟧` `1–2 pts`, `⬜` `0 pts`), and decoupled **Share** + **Copy results** buttons.
-  - Every image renders through `<ImageWithFallback>` supporting external/Supabase URLs AND rich inline SVG illustrated scene cards so broken images are impossible.
+  - Every image renders through `<ImageWithFallback>` supporting uploaded `data:image/*` photos, external/Supabase URLs, AND rich inline SVG illustrated scene cards so broken images are impossible.
 
 ### Game #5 — `Connect 5` (LIVE — Enhanced with Splash, Moderation & Error Boundary)
 - **Route**: `/games/connect-5` | **Archive**: `/games/connect-5/archive`
@@ -229,10 +233,11 @@
 - **Mathematical Legality & Guardrails (Q37)**:
   - **Whole-Number Division Only**: `A ÷ B` is only allowed if `B !== 0` and `A % B === 0`. If not evenly divisible, shake and show `"Must divide evenly into a whole number"`.
   - **Non-Negative & Bounded Values**: Intermediate results must stay whole numbers with `|value| ≤ 10,000` (`x²` and `xʸ` are rejected with a shake if the result exceeds `10,000`).
-- **Live Equation Builder Display + Unlimited Undo/Reset (Q38)**:
-  - Above the tile grid, display a crisp **Live Equation Banner** that dynamically builds the algebraic expression as the player combines tiles (e.g., `((3² + 7) × 5) = 80`), alongside unlimited **"Undo Last Step"** and **"Reset Board"** buttons with zero penalty.
+- **Top-Left Formula Blueprint Guide + Full Live Formula Display + Unlimited Undo/Reset (Q38)**:
+  - At the top-left of the target banner, display a **Formula Blueprint Guide (`data-testid="four-score-formula-guide"`)** showing the full parenthesized formula skeleton to `80` with the **starting number + operator pre-revealed** (`1` starter number + operator on `4`-tile boards like `((25 + __) × __) − __ = 80`; **first `2` numbers + operators** on `5–6`-tile boards like `(((4 + 46) − __) × __) = 80`), plus an optional `+1 #` hint pill to reveal one additional number slot if stuck.
+  - Directly below, display the player's **Full Live Formula** (`data-testid="four-score-live-equation"` / `four-score-live-formula`) across all combined tile expressions and the currently armed operator (while also showing sub-expressions like `(20 × 5)` inside combined number cards), alongside unlimited **"Undo Last Step"** and **"Reset Board"** buttons with zero penalty.
 - **Calculator-Style Win Verification & Built-In Solver (Q39 & Q40)**:
-  - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
+  - **Any valid full-board sequence** of the given tiles and operators that legally evaluates to **`80`** is immediately celebrated as a win (players do not have to follow the exact Formula Guide order)! The victory modal shows both the player's winning equation and the generator's intended canonical equation.
   - **100% Auto-Generated Monthly Batches**: Built-in deterministic generator + backtracking Math Solver (`src/lib/generators/four-score-generator.ts`) guarantees every generated puzzle has a verified whole-number full-board solution to `80`.
 
 ### Game #2 — `Move Two` (`Move 2` — NYT-Styled 3D Floating Bloxorz Puzzle · `6×6` Easy, `8×8` Medium & `10×10` Hard) — Q41 to Q45

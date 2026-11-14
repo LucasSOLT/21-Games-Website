@@ -39,7 +39,7 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
       "Text with Nine: 9 daily clues where each new word rhymes with the word right before it.",
     headline: "Linear 9-Word Rhyme Chain",
     rules: [
-      "**Word 1** rhymes with today's **Starter word**, and each new word rhymes with the **previous word** in the chain.",
+      "**Word 1** rhymes with today's **Starter word**, and **Words 2–9** each rhyme directly with the **previous word** you solved.",
       "Each prompt shows the exact **letter count**; you get **1 guess** per word.",
       "**New hint** costs 0.5 pts (1× per round); **Reveal answer** scores 0.",
       "Score out of 9: 🟩 full point · 🟨 half point · ⬜ miss.",
@@ -47,24 +47,24 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "eightfold-echo": {
     summary:
-      "Follow the visual logic rules to trace the 8-step sequence across a 3×3 grid.",
-    headline: "Trace the Echo from the Center",
+      "Trace an 8-step chain across a 3×3 grid where every move changes exactly 1 visual attribute.",
+    headline: "Change Exactly 1 Attribute Per Step",
     rules: [
-      "Start at the **center cell** and visit every cell exactly once (8 moves).",
-      "Each hop must obey the shared **shape / color / echo** rule.",
-      "Wrong move = **+5s**. A Hint costs **+15s** and pulses two candidates.",
-      "Finish fast with few mistakes for ⭐⭐⭐.",
+      "Play **Easy** (intuitive 1-step path with near-miss decoys) or **Hard** (multi-step lookahead) — solving **either** board counts toward your daily streak.",
+      "Start at the **center tile** and visit all 9 tiles once (8 steps).",
+      "Each next tile must change **exactly 1** attribute (**shape**, **fill**, or **dot count**) while keeping the other 2 identical.",
+      "Wrong tap = **+5s**; **Hint** pulses the next valid tile (**+15s**).",
     ],
   },
   "6-pics": {
     summary:
-      "Use the overarching theme to name all 6 hidden pictures while removing as few puzzle pieces as possible.",
+      "Use the overarching theme to name all 6 hidden pictures while uncovering as few puzzle pieces as possible.",
     headline: "Name All 6 Hidden Pictures (36 Pts Max)",
     rules: [
       "Check the **Overarching Theme** at the top — all 6 pictures belong to it.",
-      "Each picture starts covered by **5 of 6 puzzle pieces** (`1/6` visible, worth **6 pts**).",
-      "Wrong guesses have **no penalty**. Tap **Reveal Piece (-1 pt)** to uncover a random piece, or **Pass (0 pts)** to reveal and move on.",
-      "Score up to **6 pts per picture** (`36` max) and view the full **2×3** gallery at the end.",
+      "Each picture starts with **1 of 6 puzzle pieces open** for free (worth **6 pts**). Wrong guesses have **no penalty**!",
+      "Need to see more? **Tap any covered puzzle piece** to select it, then press **Confirm? (-1 pt)** to remove that piece (`6 pts → 1 pt`).",
+      "Tap **Pass (0 pts)** if stumped, and view all 6 full pictures in a **2×3** gallery at the end.",
     ],
   },
   "connect-5": {
@@ -77,12 +77,12 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
   },
   "four-score": {
     summary:
-      "Use every digit and a few operators to build an equation that equals 80.",
-    headline: "Make 80",
+      "Follow the top-left Formula Guide or find your own path using every tile and operator to reach 80.",
+    headline: "Combine Every Tile & Operator to Reach 80",
     rules: [
-      "Place all digits and operators (`+ − × ÷ x² xʸ`) on the board.",
-      "Every digit must be used; division must come out whole.",
-      "The live equation banner shows your running total. Undo / Reset anytime.",
+      "Check the **Formula Guide** at the top-left — your starting number and operator (e.g. `(25 + __)`) are already revealed!",
+      "Use **every** number tile and single-use operator (`+ − × ÷ x² xʸ`) once; division must come out whole.",
+      "Need another nudge? Tap **+1 #** to reveal another number, or use **Undo / Reset** anytime with no penalty.",
     ],
   },
   "move-2": {

@@ -11,12 +11,21 @@ import React, {
 } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, Calendar, RotateCcw, Trophy, Undo2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Calendar,
+  Lightbulb,
+  RotateCcw,
+  Trophy,
+  Undo2,
+} from "lucide-react";
 import {
   FOUR_SCORE_TARGET,
   applyBinaryFourScore,
   applyUnaryFourScore,
+  buildFourScoreFormulaBlueprint,
   buildFourScoreShareText,
+  defaultRevealedOperandCount,
   isUnaryOperator,
   type FourScoreOperator,
   type FourScorePuzzle,
@@ -61,6 +70,7 @@ interface SavedFourScoreProgress {
   puzzleHash: string;
   history: BoardStepSnapshot[];
   undoCount: number;
+  extraHintNumbers?: number;
 }
 
 function isValidDateKey(value: string | null): value is string {
@@ -163,6 +173,9 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     saved?.history ?? [initialSnapshot(puzzle)]
   );
   const [undoCount, setUndoCount] = useState<number>(saved?.undoCount ?? 0);
+  const [extraHintNumbers, setExtraHintNumbers] = useState<number>(
+    saved?.extraHintNumbers ?? 0
+  );
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
   const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
   const [splashDismissed, setSplashDismissed] = useState(false);
@@ -180,6 +193,22 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
   const missedFinal = fullBoardUsed && current.tiles[0]!.value !== FOUR_SCORE_TARGET;
   const hasSavedProgress = history.length > 1;
 
+  const baseRevealedCount = defaultRevealedOperandCount(puzzle.digits.length);
+  const maxRevealableCount = Math.max(1, puzzle.digits.length - 1);
+  const totalRevealedCount = Math.min(
+    maxRevealableCount,
+    baseRevealedCount + extraHintNumbers
+  );
+  const canRevealMoreHints = !won && totalRevealedCount < maxRevealableCount;
+
+  const formulaBlueprint = useMemo(
+    () =>
+      won
+        ? puzzle.canonicalEquation
+        : buildFourScoreFormulaBlueprint(puzzle, extraHintNumbers),
+    [won, puzzle, extraHintNumbers]
+  );
+
   useEffect(
     () => () => {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
@@ -195,8 +224,9 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       puzzleHash,
       history,
       undoCount,
+      extraHintNumbers,
     });
-  }, [dateKey, puzzle.id, puzzleHash, history, undoCount]);
+  }, [dateKey, puzzle.id, puzzleHash, history, undoCount, extraHintNumbers]);
 
   // Record win once on reaching 80 with full board used.
   useEffect(() => {
@@ -375,22 +405,54 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     if (won) {
       return `${current.tiles[0]!.expr} = ${FOUR_SCORE_TARGET}`;
     }
+    if (missedFinal) {
+      return `${current.tiles[0]!.expr} = ${current.tiles[0]!.value} (target ${FOUR_SCORE_TARGET})`;
+    }
     const activeTile = selectedTileId
-      ? current.tiles.find((t) => t.id === selectedTileId)
+      ? current.tiles.find((t) => t.id === selectedTileId) ?? null
       : null;
     const activeOp = selectedOpId
-      ? current.ops.find((o) => o.id === selectedOpId)
+      ? current.ops.find((o) => o.id === selectedOpId && !o.used) ?? null
       : null;
+
+    const otherCombined = current.tiles
+      .filter((t) => t.id !== activeTile?.id && t.expr !== String(t.value))
+      .map((t) => `${t.expr} = ${t.value}`);
+
     if (activeTile && activeOp) {
       const sym = activeOp.op === "xʸ" ? "^" : activeOp.op;
-      return `${activeTile.expr} ${sym} ?`;
+      const activeDraft = `(${activeTile.expr} ${sym} __)`;
+      return otherCombined.length > 0
+        ? `${otherCombined.join(" · ")}  ·  ${activeDraft}`
+        : activeDraft;
     }
-    if (activeTile && activeTile.expr !== String(activeTile.value)) {
-      return `${activeTile.expr} = ${activeTile.value}`;
+    if (activeTile) {
+      const activeDraft =
+        activeTile.expr !== String(activeTile.value)
+          ? `${activeTile.expr} = ${activeTile.value}  →  pick next operator`
+          : `(${activeTile.expr} ○ __)  →  pick an operator`;
+      return otherCombined.length > 0
+        ? `${otherCombined.join(" · ")}  ·  ${activeDraft}`
+        : activeDraft;
+    }
+
+    const allCombined = current.tiles
+      .filter((t) => t.expr !== String(t.value))
+      .map((t) => `${t.expr} = ${t.value}`);
+    if (allCombined.length > 0) {
+      return allCombined.join("  ·  ");
     }
     if (current.lastExpr) return current.lastExpr;
-    return "Select a number tile, then an operator to build toward 80.";
-  }, [won, current.tiles, current.ops, current.lastExpr, selectedTileId, selectedOpId]);
+    return "Tap a starting number tile and operator to build toward 80.";
+  }, [
+    won,
+    missedFinal,
+    current.tiles,
+    current.ops,
+    current.lastExpr,
+    selectedTileId,
+    selectedOpId,
+  ]);
 
   const shareText = useMemo(
     () =>
@@ -430,38 +492,76 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       author={puzzle.author}
     >
       <div className="max-w-lg mx-auto px-3 sm:px-4 py-2 space-y-4">
-        {/* Target 80 + Live Equation Builder Banner (Q38) */}
+        {/* Top-Left Formula Guide + Target 80 + Live Equation Builder Banner */}
         <div
           className={cn(
-            "rounded-2xl border-2 border-black bg-white p-3.5 sm:p-4 space-y-2 shadow-[4px_4px_0px_#000]",
+            "rounded-2xl border-2 border-black bg-white p-3.5 sm:p-4 space-y-2.5 shadow-[4px_4px_0px_#000]",
             shaking && "animate-bounce border-red-600"
           )}
           data-testid="four-score-banner"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-extrabold uppercase tracking-wider text-neutral-500">
-                Target Score
+          <div className="flex items-start justify-between gap-3">
+            {/* Top-Left: Formula Blueprint Guide (starting number + operator shown!) */}
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-800">
+                  Formula Guide
+                </span>
+                {canRevealMoreHints && (
+                  <button
+                    type="button"
+                    onClick={() => setExtraHintNumbers((n) => n + 1)}
+                    className="inline-flex items-center gap-1 rounded-full border border-black bg-[#F9D423] hover:bg-[#F9D423]/80 px-2 py-0.5 text-[10px] font-black text-black shadow-[1px_1px_0px_#000]"
+                    data-testid="four-score-reveal-hint"
+                    title="Reveal one more number in the formula guide"
+                  >
+                    <Lightbulb className="h-2.5 w-2.5" />
+                    +1 #
+                  </button>
+                )}
+              </div>
+              <p
+                className="font-mono font-black text-xs sm:text-sm text-neutral-900 bg-neutral-100 border border-black/20 rounded-lg px-2.5 py-1.5 break-words"
+                data-testid="four-score-formula-guide"
+              >
+                {formulaBlueprint}
               </p>
-              <p className="font-headline font-black text-3xl sm:text-4xl leading-none text-neutral-900">
-                {FOUR_SCORE_TARGET}
+              <p className="text-[10px] font-semibold text-neutral-500">
+                Any valid order using every tile &amp; operator to reach 80 wins!
               </p>
             </div>
-            <div className="text-right text-xs font-bold text-neutral-600 space-y-0.5">
-              <div>
-                Tiles left: <strong>{current.tiles.length}</strong> / {puzzle.digits.length}
+
+            {/* Top-Right: Target 80 + Remaining Inventory */}
+            <div className="shrink-0 text-right space-y-1">
+              <div className="inline-flex flex-col items-end rounded-xl border-2 border-black bg-[#FFFBE6] px-2.5 py-1 shadow-[2px_2px_0px_#000]">
+                <span className="text-[9px] font-black uppercase tracking-wider text-amber-800">
+                  Target
+                </span>
+                <span className="font-headline font-black text-2xl sm:text-3xl leading-none text-neutral-900">
+                  {FOUR_SCORE_TARGET}
+                </span>
               </div>
-              <div>
-                Operators left: <strong>{unusedOpsCount}</strong> / {puzzle.operators.length}
+              <div className="text-[11px] font-bold text-neutral-600 leading-tight">
+                <div>
+                  Tiles: <strong>{current.tiles.length}</strong>/{puzzle.digits.length}
+                </div>
+                <div>
+                  Ops: <strong>{unusedOpsCount}</strong>/{puzzle.operators.length}
+                </div>
               </div>
             </div>
           </div>
 
-          <div
-            className="rounded-xl bg-[#fffbe6] border-2 border-black/20 px-3 py-2 font-mono text-xs sm:text-sm font-bold text-neutral-900 break-words"
-            data-testid="four-score-live-equation"
-          >
-            {liveEquationText}
+          <div className="space-y-0.5">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-500">
+              Your Live Formula
+            </p>
+            <div
+              className="rounded-xl bg-[#fffbe6] border-2 border-black/20 px-3 py-2 font-mono text-xs sm:text-sm font-bold text-neutral-900 break-words"
+              data-testid="four-score-live-equation"
+            >
+              {liveEquationText}
+            </div>
           </div>
 
           {errorMsg && (

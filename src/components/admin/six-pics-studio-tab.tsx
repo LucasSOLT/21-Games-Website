@@ -91,7 +91,9 @@ export function SixPicsStudioTab({
         ...r,
         caption: "",
         aliasesCsv: "",
+        hint: "",
         imageUrl: "",
+        initialPiece: undefined,
       })),
     });
     setErrors([]);
@@ -138,7 +140,7 @@ export function SixPicsStudioTab({
       details: [
         `Visible overarching theme: ${puzzle.themeAnswer}`,
         `${SIX_PICS_COUNT} jigsaw-covered pictures (36 pts max)`,
-        `Per-image accepted synonyms + 1-letter typo forgiveness`,
+        `Supports uploaded device photos, optional hints & accepted synonyms`,
       ],
       playImmediately,
     });
@@ -157,10 +159,10 @@ export function SixPicsStudioTab({
             🖼️ 6 Pics Studio
           </Badge>
           <h3 className="font-headline font-black text-xl">
-            Curate overarching theme &amp; 6 jigsaw-covered pictures
+            Curate overarching theme, upload real photos &amp; edit hints
           </h3>
           <p className="text-xs text-gray-600">
-            Schedule {targetDate} — players see the overarching theme at top and uncover 1/6 jigsaw pieces to name each picture (36 pts max).
+            Schedule {targetDate} — keep default SVG illustrations or upload real photos from your device, edit answer names, synonyms, and optional hints.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

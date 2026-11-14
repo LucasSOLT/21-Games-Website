@@ -35,7 +35,6 @@ import {
   draftToSixPicsPuzzle,
   getInitialRevealedPiece,
   matchSixPicsImageGuess,
-  pickNextRandomPiece,
   renderSixPicsSceneDataUri,
   scoreForSixPicsImage,
   totalScoreForSixPics,
@@ -129,7 +128,7 @@ function SixPicsClueVisual({
 
 /**
  * 6-Piece Interlocking Jigsaw Overlay (`3×2` SVG puzzle pieces over the `4:3` picture).
- * Covered pieces block 5/6 of the image at start; revealed pieces animate off smoothly.
+ * Covered pieces can be tapped directly to arm the stationary `Confirm?` reveal button.
  */
 function SixPicsJigsawStage({
   clue,
@@ -137,18 +136,23 @@ function SixPicsJigsawStage({
   revealedPieces,
   fullyUncovered,
   currentWorth,
+  selectedPieceIndex = null,
+  onSelectPiece,
 }: {
   clue: SixPicsClueImage;
   imageIndex: number;
   revealedPieces: readonly number[];
   fullyUncovered: boolean;
   currentWorth: number;
+  selectedPieceIndex?: number | null;
+  onSelectPiece?: (pieceIndex: number) => void;
 }) {
   const revealedSet = useMemo(
     () => new Set(fullyUncovered ? [0, 1, 2, 3, 4, 5] : revealedPieces),
     [fullyUncovered, revealedPieces]
   );
   const coveredCount = SIX_PICS_PIECES_PER_IMAGE - revealedSet.size;
+  const interactive = !fullyUncovered && Boolean(onSelectPiece);
 
   return (
     <div
@@ -165,7 +169,10 @@ function SixPicsJigsawStage({
       <svg
         viewBox={SIX_PICS_JIGSAW_VIEWBOX}
         preserveAspectRatio="none"
-        className="absolute inset-0 w-full h-full pointer-events-none"
+        className={cn(
+          "absolute inset-0 w-full h-full",
+          !interactive && "pointer-events-none"
+        )}
         aria-label={`${coveredCount} of ${SIX_PICS_PIECES_PER_IMAGE} puzzle pieces covering picture`}
       >
         <defs>
@@ -177,17 +184,47 @@ function SixPicsJigsawStage({
             <stop offset="0%" stopColor="#3f3f46" />
             <stop offset="100%" stopColor="#27272a" />
           </linearGradient>
+          <linearGradient id="six-pics-piece-grad-selected" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#fef08a" />
+            <stop offset="100%" stopColor="#f4d621" />
+          </linearGradient>
         </defs>
 
         {SIX_PICS_JIGSAW_PIECES.map((piece) => {
           const isOpen = revealedSet.has(piece.index);
+          const isSelected = !isOpen && selectedPieceIndex === piece.index;
+          const canTap = interactive && !isOpen;
           const checker = (piece.row + piece.col) % 2 === 0;
           return (
             <g
               key={piece.index}
               data-testid={`jigsaw-piece-${piece.index}`}
               data-covered={isOpen ? "false" : "true"}
+              data-selected={isSelected ? "true" : "false"}
+              role={canTap ? "button" : undefined}
+              tabIndex={canTap ? 0 : undefined}
+              aria-pressed={canTap ? isSelected : undefined}
+              aria-label={
+                canTap
+                  ? isSelected
+                    ? `Deselect puzzle piece ${piece.index + 1}`
+                    : `Select puzzle piece ${piece.index + 1} to reveal (-1 pt)`
+                  : undefined
+              }
+              onClick={canTap ? () => onSelectPiece?.(piece.index) : undefined}
+              onKeyDown={
+                canTap
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectPiece?.(piece.index);
+                      }
+                    }
+                  : undefined
+              }
+              className={cn(canTap && "cursor-pointer focus:outline-none")}
               style={{
+                pointerEvents: isOpen ? "none" : "auto",
                 opacity: isOpen ? 0 : 1,
                 transform: isOpen ? "scale(0.92)" : "scale(1)",
                 transformOrigin: `${piece.center[0]}px ${piece.center[1]}px`,
@@ -197,21 +234,23 @@ function SixPicsJigsawStage({
               <path
                 d={piece.d}
                 fill={
-                  checker
+                  isSelected
+                    ? "url(#six-pics-piece-grad-selected)"
+                    : checker
                     ? "url(#six-pics-piece-grad-a)"
                     : "url(#six-pics-piece-grad-b)"
                 }
-                stroke="#f4d621"
-                strokeWidth={2.2}
+                stroke={isSelected ? "#000000" : "#f4d621"}
+                strokeWidth={isSelected ? 3.2 : 2.2}
                 strokeLinejoin="round"
               />
               <circle
                 cx={piece.center[0]}
                 cy={piece.center[1]}
                 r={13}
-                fill="#18181b"
+                fill={isSelected ? "#000000" : "#18181b"}
                 stroke="#f4d621"
-                strokeOpacity={0.75}
+                strokeOpacity={isSelected ? 1 : 0.75}
                 strokeWidth={1.6}
               />
               <text
@@ -225,6 +264,19 @@ function SixPicsJigsawStage({
               >
                 {piece.index + 1}
               </text>
+              {isSelected && (
+                <text
+                  x={piece.center[0]}
+                  y={piece.center[1] + 24}
+                  textAnchor="middle"
+                  fill="#000000"
+                  fontSize="8.5"
+                  fontWeight="900"
+                  fontFamily="ui-sans-serif, system-ui, sans-serif"
+                >
+                  CONFIRM?
+                </text>
+              )}
             </g>
           );
         })}
@@ -472,6 +524,7 @@ function SixPicsBoard({
   const [shaking, setShaking] = useState(false);
   const [confirmingPass, setConfirmingPass] = useState(false);
   const [awaitingAdvance, setAwaitingAdvance] = useState(false);
+  const [selectedPieceIndex, setSelectedPieceIndex] = useState<number | null>(null);
 
   const nextButtonRef = useRef<HTMLButtonElement | null>(null);
   const guessInputRef = useRef<HTMLInputElement | null>(null);
@@ -575,20 +628,34 @@ function SixPicsBoard({
     }
   }, [finished, isCustom, dateKey, outcomes, totalScore]);
 
-  const handleRevealPiece = useCallback(() => {
-    if (finished || awaitingAdvance) return;
-    const nextPiece = pickNextRandomPiece(currentRevealedPieces);
-    if (nextPiece === null) return;
-    const nextRevealed = [...currentRevealedPieces, nextPiece];
+  const handleSelectPiece = useCallback(
+    (pieceIndex: number) => {
+      if (finished || awaitingAdvance) return;
+      if (currentRevealedPieces.includes(pieceIndex)) return;
+      setConfirmingPass(false);
+      setSelectedPieceIndex((prev) => (prev === pieceIndex ? null : pieceIndex));
+    },
+    [finished, awaitingAdvance, currentRevealedPieces]
+  );
+
+  const handleConfirmRevealPiece = useCallback(() => {
+    if (finished || awaitingAdvance || selectedPieceIndex === null) return;
+    if (currentRevealedPieces.includes(selectedPieceIndex)) {
+      setSelectedPieceIndex(null);
+      return;
+    }
+    const pieceToOpen = selectedPieceIndex;
+    const nextRevealed = [...currentRevealedPieces, pieceToOpen];
     setCurrentRevealedPieces(nextRevealed);
+    setSelectedPieceIndex(null);
     setConfirmingPass(false);
     const nextWorth = scoreForSixPicsImage(true, nextRevealed.length - 1);
     setFeedback(
       nextRevealed.length >= SIX_PICS_PIECES_PER_IMAGE
-        ? `All 6 pieces uncovered! Worth ${nextWorth} pt.`
-        : `Piece #${nextPiece + 1} removed — ${nextRevealed.length}/6 shown (worth ${nextWorth} pts).`
+        ? `Piece #${pieceToOpen + 1} removed (-1 pt) — all 6 uncovered (worth ${nextWorth} pt).`
+        : `Piece #${pieceToOpen + 1} removed (-1 pt) — ${nextRevealed.length}/6 shown (worth ${nextWorth} pts).`
     );
-  }, [finished, awaitingAdvance, currentRevealedPieces]);
+  }, [finished, awaitingAdvance, selectedPieceIndex, currentRevealedPieces]);
 
   const submitGuess = useCallback(
     (e?: React.FormEvent) => {
@@ -610,6 +677,7 @@ function SixPicsBoard({
         setOutcomes((prev) => [...prev, outcome]);
         setGuessInput("");
         setFeedback(null);
+        setSelectedPieceIndex(null);
         setConfirmingPass(false);
         setAwaitingAdvance(true);
         return;
@@ -628,7 +696,7 @@ function SixPicsBoard({
       shakeTimerRef.current = setTimeout(() => setShaking(false), 420);
       setFeedback(
         remainingCoveredCount > 0
-          ? `Not quite (“${trimmed}”) — try again or Reveal Piece (-1 pt)!`
+          ? `Not quite (“${trimmed}”) — try again or tap a piece + Confirm? (-1 pt)!`
           : `Not quite (“${trimmed}”) — try another word or Pass (0 pts).`
       );
     },
@@ -654,6 +722,7 @@ function SixPicsBoard({
     setOutcomes((prev) => [...prev, outcome]);
     setGuessInput("");
     setFeedback(null);
+    setSelectedPieceIndex(null);
     setConfirmingPass(false);
     setAwaitingAdvance(true);
   }, [finished, awaitingAdvance, currentRevealedPieces, extraPiecesRemovedOnCurrent]);
@@ -673,6 +742,7 @@ function SixPicsBoard({
     setWrongGuesses([]);
     setGuessInput("");
     setFeedback(null);
+    setSelectedPieceIndex(null);
     setConfirmingPass(false);
     if (nextIdx < SIX_PICS_COUNT) {
       const firstOpen = getInitialRevealedPiece(
@@ -736,7 +806,7 @@ function SixPicsBoard({
       <div className="max-w-xl mx-auto px-2.5 sm:px-4 py-1.5 sm:py-2 space-y-3.5">
         {!finished ? (
           /* ================================================================
-           * GAMEPLAY: Visible Theme + Guess/Reveal Bar + 6-Piece Jigsaw Stage
+           * GAMEPLAY: Visible Theme + Guess/Confirm Bar + 6-Piece Jigsaw Stage
            * ================================================================ */
           <div className="space-y-3" data-testid="six-pics-gameplay">
             {/* Overarching Theme + Running Score Banner */}
@@ -792,6 +862,19 @@ function SixPicsBoard({
               })}
             </div>
 
+            {/* Optional Per-Picture Hint (configured by Admin / Creator) */}
+            {currentClue.hint?.trim() && (
+              <div
+                className="rounded-xl border-2 border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-950"
+                data-testid="six-pics-hint"
+              >
+                <span className="font-black uppercase tracking-wider mr-1.5 text-amber-800">
+                  Hint:
+                </span>
+                {currentClue.hint.trim()}
+              </div>
+            )}
+
             {/* Guess Input OR Post-Solve Full Reveal Interstitial */}
             {!awaitingAdvance ? (
               <form
@@ -822,20 +905,32 @@ function SixPicsBoard({
                   </Button>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* Stationary Confirm? + Pass Row (Fixed h-8 height -> zero layout shift) */}
+                <div className="flex flex-wrap items-center justify-between gap-2 min-h-8">
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={remainingCoveredCount <= 0}
-                    onClick={handleRevealPiece}
-                    className="h-8 px-3 text-xs font-black border-2 border-black bg-[#f4d621] hover:bg-[#f4d621]/80 text-black disabled:opacity-50"
-                    data-testid="six-pics-reveal-piece"
+                    disabled={
+                      selectedPieceIndex === null || remainingCoveredCount <= 0
+                    }
+                    onClick={handleConfirmRevealPiece}
+                    className={cn(
+                      "h-8 px-3 text-xs font-black border-2 transition-colors",
+                      selectedPieceIndex !== null && remainingCoveredCount > 0
+                        ? "border-black bg-[#f4d621] hover:bg-[#f4d621]/85 text-black shadow-[2px_2px_0px_#000]"
+                        : "border-neutral-300 bg-neutral-100 text-neutral-400 cursor-not-allowed disabled:opacity-100"
+                    )}
+                    data-testid="six-pics-confirm-reveal"
                   >
-                    <Puzzle className="h-3.5 w-3.5 mr-1.5" />
-                    {remainingCoveredCount > 0
-                      ? `Reveal Piece (-1 pt · ${remainingCoveredCount} left)`
-                      : "All 6 Pieces Open (1 pt)"}
+                    <Puzzle className="h-3.5 w-3.5 mr-1.5 shrink-0" />
+                    {remainingCoveredCount <= 0
+                      ? "All 6 Pieces Open (1 pt)"
+                      : selectedPieceIndex !== null
+                      ? `Confirm? (-1 pt → ${Math.max(1, currentWorth - 1)} ${
+                          Math.max(1, currentWorth - 1) === 1 ? "pt" : "pts"
+                        })`
+                      : "Confirm? (-1 pt · tap a piece)"}
                   </Button>
 
                   {confirmingPass ? (
@@ -875,13 +970,22 @@ function SixPicsBoard({
                   )}
                 </div>
 
-                {feedback ? (
-                  <p className="text-xs font-bold text-amber-800">{feedback}</p>
-                ) : (
-                  <p className="text-[11px] text-neutral-500">
-                    1/6 of the picture is open for free — wrong guesses have no penalty!
-                  </p>
-                )}
+                <div className="min-h-[18px] flex items-center">
+                  {feedback ? (
+                    <p className="text-xs font-bold text-amber-800 leading-snug">
+                      {feedback}
+                    </p>
+                  ) : selectedPieceIndex !== null ? (
+                    <p className="text-xs font-bold text-amber-900 leading-snug">
+                      Piece #{selectedPieceIndex + 1} selected — press Confirm? to reveal it (-1 pt: {currentWorth} → {Math.max(1, currentWorth - 1)}{" "}
+                      {Math.max(1, currentWorth - 1) === 1 ? "pt" : "pts"}).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-neutral-500 leading-snug">
+                      Tap any covered puzzle piece below, then press Confirm? (-1 pt per piece: 6 pts → 1 pt). Wrong guesses are free!
+                    </p>
+                  )}
+                </div>
               </form>
             ) : (
               <div
@@ -934,6 +1038,8 @@ function SixPicsBoard({
               revealedPieces={currentRevealedPieces}
               fullyUncovered={awaitingAdvance}
               currentWorth={currentWorth}
+              selectedPieceIndex={selectedPieceIndex}
+              onSelectPiece={handleSelectPiece}
             />
 
             {wrongGuesses.length > 0 && !awaitingAdvance && (
@@ -1203,7 +1309,7 @@ function SixPicsCreator() {
           </div>
         ) : (
           <>
-            <SixPicsEditor value={editor} onChange={setEditor} />
+            <SixPicsEditor value={editor} onChange={setEditor} compactPhotos />
             {errors.length > 0 && (
               <ul className="rounded-xl border-2 border-red-300 bg-red-50 p-3 text-xs font-semibold text-red-700 list-disc list-inside space-y-0.5">
                 {errors.map((e) => (

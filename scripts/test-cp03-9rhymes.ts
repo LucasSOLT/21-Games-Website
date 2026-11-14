@@ -123,14 +123,29 @@ const trF = eng.buildTranscript(good, { results: full, currentHinted: false } as
 kit.assert(
   [1, 2, 3, 4, 5, 6, 7, 8].every((i) => {
     const promptMsg = trF.find((m: { id: string }) => m.id === `q${i}`);
-    return Boolean(
-      promptMsg &&
-        promptMsg.text.includes(
-          `Word ${i + 1} of 9 · The next word rhymes with ${good.clues[i - 1]!.answer.toUpperCase()}`
-        )
+    if (!promptMsg) return false;
+    const lower = promptMsg.text.toLowerCase();
+    return (
+      promptMsg.text.includes(
+        `Word ${i + 1} of 9 · The next word rhymes with ${good.clues[i - 1]!.answer.toUpperCase()}`
+      ) &&
+      !lower.includes("it rhymes with") &&
+      !lower.includes(`"${good.starterWord.toLowerCase()}"`) &&
+      !lower.includes(`“${good.starterWord.toLowerCase()}”`)
     );
   }),
-  "Rounds 2..9 prompt bubbles linearly say 'The next word rhymes with <previous word>'"
+  "Rounds 2..9 prompt bubbles linearly say 'The next word rhymes with <previous word>' and never repeat starter word"
+);
+kit.assert(
+  !eng
+    .renderPrompt({
+      answer: "gate",
+      sentence: "Garden entrance — it rhymes with “plate”.",
+      hint: "Starts with G.",
+    })
+    .toLowerCase()
+    .includes("plate"),
+  "renderPrompt strips legacy 'it rhymes with <starter>' suffixes"
 );
 kit.assert(trF[trF.length - 1].text === "That's all 9! You scored 9 / 9 today.", "summary bubble");
 const share = eng.buildShareText({ puzzleNumber: 12, results: full as never });
@@ -159,11 +174,11 @@ for (const needle of [
   "mode",
   "ResultShareButtons",
   "GameSplashScreen",
-  "Starter:",
   "Word ",
 ]) {
   kit.assert(comp.includes(needle), `component contains ${needle}`);
 }
+kit.assert(!comp.includes('data-testid="nine-starter-badge"'), "redundant top-right rhyme badge removed");
 const btns = fs.readFileSync("src/components/games/result-share-buttons.tsx", "utf8");
 kit.assert(btns.includes("nativeShareResultsOnly") && btns.includes("copyResultsOnly"), "Share + Copy use split helpers");
 kit.assert(btns.includes("Copy results") && btns.includes("Share") && btns.includes("2000"), "Share/Copy labels + 2000ms");

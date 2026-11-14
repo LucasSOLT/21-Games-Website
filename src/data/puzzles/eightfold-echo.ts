@@ -7,7 +7,11 @@
  */
 
 import {
+  EASY_ECHO_FILLS,
+  EASY_ECHO_MARKS,
+  EASY_ECHO_SHAPES,
   ECHO_ATTRIBUTES,
+  ECHO_DIFFICULTIES,
   ECHO_FILLS,
   ECHO_GRID_SIZE,
   ECHO_MARKS,
@@ -18,6 +22,7 @@ import {
   buildEchoChainRules,
   buildEchoShareText,
   changedAttribute,
+  countStartNearMissDecoys,
   describeEchoStep,
   describeEchoTile,
   echoDotPositions,
@@ -25,8 +30,11 @@ import {
   echoStars,
   formatEchoTime,
   formatEchoVictorySummary,
+  generateEasyEchoStage,
   generateEightfoldEchoMonthlyBatch,
   generateEightfoldEchoPuzzle,
+  generateHardEchoStage,
+  getEchoStage,
   isEchoTile,
   isEightfoldEchoPuzzle,
   pickEchoHintCandidates,
@@ -36,6 +44,7 @@ import {
   tileKey,
   validateEightfoldEchoPuzzle,
   type EchoAttribute,
+  type EchoDifficulty,
   type EchoFill,
   type EchoMarks,
   type EchoShape,
@@ -43,10 +52,15 @@ import {
   type EchoTile,
   type EchoValidation,
   type EightfoldEchoPuzzle,
+  type EightfoldEchoStage,
 } from "@/lib/generators/eightfold-echo-generator";
 
 export {
+  EASY_ECHO_FILLS,
+  EASY_ECHO_MARKS,
+  EASY_ECHO_SHAPES,
   ECHO_ATTRIBUTES,
+  ECHO_DIFFICULTIES,
   ECHO_FILLS,
   ECHO_GRID_SIZE,
   ECHO_MARKS,
@@ -57,6 +71,7 @@ export {
   buildEchoChainRules,
   buildEchoShareText,
   changedAttribute,
+  countStartNearMissDecoys,
   describeEchoStep,
   describeEchoTile,
   echoDotPositions,
@@ -64,8 +79,11 @@ export {
   echoStars,
   formatEchoTime,
   formatEchoVictorySummary,
+  generateEasyEchoStage,
   generateEightfoldEchoMonthlyBatch,
   generateEightfoldEchoPuzzle,
+  generateHardEchoStage,
+  getEchoStage,
   isEchoTile,
   isEightfoldEchoPuzzle,
   pickEchoHintCandidates,
@@ -75,6 +93,7 @@ export {
   tileKey,
   validateEightfoldEchoPuzzle,
   type EchoAttribute,
+  type EchoDifficulty,
   type EchoFill,
   type EchoMarks,
   type EchoShape,
@@ -82,6 +101,7 @@ export {
   type EchoTile,
   type EchoValidation,
   type EightfoldEchoPuzzle,
+  type EightfoldEchoStage,
 };
 
 import {
@@ -93,34 +113,61 @@ import {
 
 export const EIGHTFOLD_ECHO_BANK_SIZE = 66;
 
+function echoStageSignature(tiles: readonly EchoTile[], solution: readonly number[]): string {
+  return `${tiles.map(tileKey).join("|")}::${solution.join(",")}`;
+}
+
 function buildEchoBank(): EightfoldEchoPuzzle[] {
   const bank: EightfoldEchoPuzzle[] = [];
+  const seenEasy = new Set<string>();
+  const seenHard = new Set<string>();
   for (let i = 0; i < EIGHTFOLD_ECHO_BANK_SIZE; i++) {
-    bank.push(
-      generateEightfoldEchoPuzzle(`bank:v1:${i}`, {
+    let chosen: EightfoldEchoPuzzle | null = null;
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const seed = attempt === 0 ? `bank:v1:${i}` : `bank:v1:${i}:a${attempt}`;
+      const candidate = generateEightfoldEchoPuzzle(seed, {
         id: `8e-bank-${String(i + 1).padStart(2, "0")}`,
         puzzleNumber: i + 1,
-      })
-    );
+      });
+      const easyStage = getEchoStage(candidate, "easy");
+      const hardStage = getEchoStage(candidate, "hard");
+      const easySig = echoStageSignature(easyStage.tiles, easyStage.solution);
+      const hardSig = echoStageSignature(hardStage.tiles, hardStage.solution);
+      if (!seenEasy.has(easySig) && !seenHard.has(hardSig)) {
+        seenEasy.add(easySig);
+        seenHard.add(hardSig);
+        chosen = candidate;
+        break;
+      }
+      if (!chosen) chosen = candidate;
+    }
+    bank.push(chosen!);
   }
   return bank;
 }
 
-/** 66-day solver-verified Eightfold Echo puzzle bank. */
+/** 66-day solver-verified Eightfold Echo puzzle bank (Easy + Hard per day). */
 export const EIGHTFOLD_ECHO_PUZZLES: EightfoldEchoPuzzle[] = buildEchoBank();
 
 const ECHO_DATE_CACHE = new Map<string, EightfoldEchoPuzzle>();
-const SEEN_ECHO_SIGNATURES = new Set<string>(
-  EIGHTFOLD_ECHO_PUZZLES.map(
-    (p) => `${p.tiles.map(tileKey).join("|")}::${p.solution.join(",")}`
-  )
+const SEEN_ECHO_EASY_SIGNATURES = new Set<string>(
+  EIGHTFOLD_ECHO_PUZZLES.map((p) => {
+    const st = getEchoStage(p, "easy");
+    return echoStageSignature(st.tiles, st.solution);
+  })
+);
+const SEEN_ECHO_HARD_SIGNATURES = new Set<string>(
+  EIGHTFOLD_ECHO_PUZZLES.map((p) => {
+    const st = getEchoStage(p, "hard");
+    return echoStageSignature(st.tiles, st.solution);
+  })
 );
 
 /**
  * Deterministic, cached, non-repeating 2026–2027 bank resolution for Eightfold Echo.
  * - For `0 <= diff < 66`, returns `EIGHTFOLD_ECHO_PUZZLES[diff]`.
  * - For all other dates, generates and caches a Hamiltonian-solver-verified puzzle
- *   keyed by `"bank:date:" + dateKey`.
+ *   (with unique Easy + Hard stages) keyed by `"bank:date:" + dateKey`.
  */
 export function getEightfoldEchoPuzzleForDate(
   dateKey: string = getLocalDateKey()
@@ -154,9 +201,16 @@ export function getEightfoldEchoPuzzleForDate(
       puzzleNumber,
       customDate: dateKey,
     });
-    const sig = `${candidate.tiles.map(tileKey).join("|")}::${candidate.solution.join(",")}`;
-    if (!SEEN_ECHO_SIGNATURES.has(sig)) {
-      SEEN_ECHO_SIGNATURES.add(sig);
+    const easyStage = getEchoStage(candidate, "easy");
+    const hardStage = getEchoStage(candidate, "hard");
+    const easySig = echoStageSignature(easyStage.tiles, easyStage.solution);
+    const hardSig = echoStageSignature(hardStage.tiles, hardStage.solution);
+    if (
+      !SEEN_ECHO_EASY_SIGNATURES.has(easySig) &&
+      !SEEN_ECHO_HARD_SIGNATURES.has(hardSig)
+    ) {
+      SEEN_ECHO_EASY_SIGNATURES.add(easySig);
+      SEEN_ECHO_HARD_SIGNATURES.add(hardSig);
       chosen = candidate;
       break;
     }

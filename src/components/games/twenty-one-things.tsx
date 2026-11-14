@@ -23,10 +23,17 @@ import {
   Share2,
   Sparkles,
   User,
-  Volume2,
   Wand2,
   ZoomIn,
 } from "lucide-react";
+import {
+  MAX_VOICE_NOTE_DATA_URL_CHARS,
+  MAX_VOICE_NOTE_SECONDS,
+  VOICE_NOTE_BITS_PER_SECOND,
+  normalizeVoiceNoteDataUrl,
+  pickSupportedAudioMimeType,
+} from "@/lib/voice-note-audio";
+import { VoiceNotePlayer } from "./voice-note-player";
 import {
   decodeShareable21Board,
   get21ThingsBoardForDate,
@@ -719,8 +726,41 @@ function TwentyOneThingsBoardView({
     }
   };
 
+  const stopAudioRecording = useCallback(() => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const rec = mediaRecorderRef.current;
+    if (rec && rec.state !== "inactive") {
+      try {
+        rec.stop();
+      } catch {
+        // Ignore stop error if already stopping
+      }
+    }
+    setIsRecordingAudio(false);
+    if (recordingStreamRef.current) {
+      recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+      recordingStreamRef.current = null;
+    }
+  }, []);
+
   const startAudioRecording = async () => {
     if (typeof window === "undefined") return;
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      toast({
+        title: "Voice Recording Unsupported",
+        description:
+          "This browser doesn't support microphone recording. You can still type your reflection note below!",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!isMountedRef.current) {
@@ -728,35 +768,106 @@ function TwentyOneThingsBoardView({
         return;
       }
       recordingStreamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
+
+      const chosenMime = pickSupportedAudioMimeType();
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(
+          stream,
+          chosenMime
+            ? {
+                mimeType: chosenMime,
+                audioBitsPerSecond: VOICE_NOTE_BITS_PER_SECOND,
+              }
+            : { audioBitsPerSecond: VOICE_NOTE_BITS_PER_SECOND }
+        );
+      } catch {
+        recorder = chosenMime
+          ? new MediaRecorder(stream, { mimeType: chosenMime })
+          : new MediaRecorder(stream);
+      }
+
       audioChunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
       };
 
       recorder.onstop = () => {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
         stream.getTracks().forEach((t) => t.stop());
         if (recordingStreamRef.current === stream) {
           recordingStreamRef.current = null;
         }
         if (!isMountedRef.current) return;
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setIsRecordingAudio(false);
+
+        const rawMime =
+          recorder.mimeType ||
+          chosenMime ||
+          audioChunksRef.current[0]?.type ||
+          "";
+        const cleanMime = rawMime.split(";")[0]?.trim() || "";
+        const blob = new Blob(
+          audioChunksRef.current,
+          cleanMime ? { type: cleanMime } : undefined
+        );
+
+        if (blob.size < 64) {
+          toast({
+            title: "Recording Too Short",
+            description:
+              "No audio was captured. Please record for at least 1 second and try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         const reader = new FileReader();
         reader.onloadend = () => {
-          if (isMountedRef.current && typeof reader.result === "string") {
-            setVoiceNoteDataUrl(reader.result);
+          if (!isMountedRef.current || typeof reader.result !== "string") return;
+          if (reader.result.length > MAX_VOICE_NOTE_DATA_URL_CHARS) {
+            toast({
+              title: "Voice Note Too Long",
+              description:
+                "Please keep voice reflections under 60 seconds so everyone can play them smoothly.",
+              variant: "destructive",
+            });
+            return;
           }
+          const normalized = normalizeVoiceNoteDataUrl(reader.result);
+          if (!normalized) {
+            toast({
+              title: "Could Not Save Voice Note",
+              description:
+                "Audio encoding failed on this device. Please try recording again or type a note below.",
+              variant: "destructive",
+            });
+            return;
+          }
+          setVoiceNoteDataUrl(normalized);
         };
         reader.readAsDataURL(blob);
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      setVoiceNoteDataUrl(undefined);
+      recorder.start(250);
       setIsRecordingAudio(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
+        setRecordingSeconds((prev) => {
+          const next = prev + 1;
+          if (next >= MAX_VOICE_NOTE_SECONDS) {
+            stopAudioRecording();
+          }
+          return next;
+        });
       }, 1000);
     } catch {
       toast({
@@ -765,25 +876,6 @@ function TwentyOneThingsBoardView({
           "Could not access microphone. You can still type your reflection note below!",
         variant: "destructive",
       });
-    }
-  };
-
-  const stopAudioRecording = () => {
-    if (mediaRecorderRef.current && isRecordingAudio) {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {
-        // Ignore stop error
-      }
-      setIsRecordingAudio(false);
-    }
-    if (recordingStreamRef.current) {
-      recordingStreamRef.current.getTracks().forEach((t) => t.stop());
-      recordingStreamRef.current = null;
-    }
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
     }
   };
 
@@ -2039,14 +2131,13 @@ function TwentyOneThingsBoardView({
                         className="bg-red-600 text-white hover:bg-red-700 font-bold text-xs h-10 animate-pulse"
                       >
                         <MicOff className="h-4 w-4 mr-1.5" />
-                        Stop ({recordingSeconds}s)
+                        Stop ({recordingSeconds}s / {MAX_VOICE_NOTE_SECONDS}s)
                       </Button>
                     )}
                     {voiceNoteDataUrl && (
-                      <audio
+                      <VoiceNotePlayer
                         src={voiceNoteDataUrl}
-                        controls
-                        className="h-9 max-w-full sm:max-w-[180px]"
+                        onRemove={() => setVoiceNoteDataUrl(undefined)}
                       />
                     )}
                   </div>
@@ -2214,13 +2305,8 @@ function TwentyOneThingsBoardView({
                     </p>
 
                     {j.voiceNoteDataUrl && (
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <Volume2 className="h-4 w-4 text-purple-700" />
-                        <audio
-                          src={j.voiceNoteDataUrl}
-                          controls
-                          className="h-8 w-full max-w-[240px] sm:max-w-xs"
-                        />
+                      <div className="pt-0.5">
+                        <VoiceNotePlayer src={j.voiceNoteDataUrl} />
                       </div>
                     )}
 

@@ -83,6 +83,40 @@ kit.assert(
   "invalid override falls back cleanly"
 );
 
+// ---- Formula Blueprint Guide (starting number(s) + operator revealed) --------
+kit.eq(
+  fsMod.buildFourScoreFormulaBlueprint({
+    digits: [25, 15, 4, 2],
+    canonicalEquation: "(((25 + 15) × 4) ÷ 2) = 80",
+  }),
+  "(((25 + __) × __) ÷ __) = 80",
+  "4-tile board reveals 1st number + operator in Formula Guide"
+);
+kit.eq(
+  fsMod.buildFourScoreFormulaBlueprint({
+    digits: [4, 46, 10, 4, 2],
+    canonicalEquation: "((((4 + 46) − 10) × 4) ÷ 2) = 80",
+  }),
+  "((((4 + 46) − __) × __) ÷ __) = 80",
+  "5-tile board reveals first 2 numbers + operators in Formula Guide"
+);
+kit.eq(
+  fsMod.buildFourScoreFormulaBlueprint(
+    {
+      digits: [25, 15, 4, 2],
+      canonicalEquation: "(((25 + 15) × 4) ÷ 2) = 80",
+    },
+    1
+  ),
+  "(((25 + 15) × __) ÷ __) = 80",
+  "+1 # hint reveals one additional operand while keeping remaining slots masked"
+);
+kit.eq(
+  fsMod.revealFourScoreFormulaWithCount("(((20 × 5) − 4²) − 4) = 80", 1),
+  "(((20 × __) − __²) − __) = 80",
+  "unary ² superscript is preserved on masked operands (__²)"
+);
+
 // ---- Config & UI wiring -------------------------------------------------------
 kit.assert(cfg.isPlayableGameSlug("four-score"), "four-score isPlayable");
 kit.eq(cfg.getGameBySlug("four-score")?.showCreate, false, "four-score showCreate is false");
@@ -96,6 +130,8 @@ for (const needle of [
   "Reset Board",
   "Your Winning Equation",
   "Canonical Solution",
+  "four-score-formula-guide",
+  "four-score-reveal-hint",
   "four-score-live-equation",
 ]) {
   kit.assert(comp.includes(needle), `four-score.tsx contains ${needle}`);

@@ -6,19 +6,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  ECHO_DIFFICULTIES,
   ECHO_POSITION_COLORS,
   ECHO_POSITION_NAMES,
   buildEchoChainRules,
+  countStartNearMissDecoys,
   describeEchoTile,
   generateEightfoldEchoPuzzle,
+  getEchoStage,
   solveEightfoldEcho,
   validateEightfoldEchoPuzzle,
+  type EchoDifficulty,
   type EightfoldEchoPuzzle,
 } from "@/data/puzzles/eightfold-echo";
 import { getDailyPuzzleForGame, getPuzzleNumberForDate } from "@/lib/daily-engine";
 import { getAdminOverridesForGame } from "@/lib/game-storage";
 import { EchoTileSvg } from "@/components/games/echo-tile-svg";
 import type { GenericPublishRequest } from "@/components/admin/generic-publish";
+import { cn } from "@/lib/utils";
 
 interface EightfoldEchoStudioTabProps {
   targetDate: string;
@@ -62,6 +67,7 @@ export function EightfoldEchoStudioTab({
   }, [targetDate, initialPuzzle]);
 
   const [draft, setDraft] = useState<EightfoldEchoPuzzle>(initialPuzzle);
+  const [previewDifficulty, setPreviewDifficulty] = useState<EchoDifficulty>("easy");
   const [rerollCount, setRerollCount] = useState(0);
   const [seedInput, setSeedInput] = useState(initialPuzzle.seed ?? `date:${targetDate}`);
   const [errors, setErrors] = useState<string[]>([]);
@@ -117,10 +123,23 @@ export function EightfoldEchoStudioTab({
     setErrors([]);
   };
 
-  const solved = useMemo(() => solveEightfoldEcho(draft.tiles), [draft.tiles]);
-  const rules = useMemo(() => buildEchoChainRules(draft), [draft]);
+  const activeStage = useMemo(
+    () => getEchoStage(draft, previewDifficulty),
+    [draft, previewDifficulty]
+  );
+  const solved = useMemo(
+    () => solveEightfoldEcho(activeStage.tiles),
+    [activeStage.tiles]
+  );
+  const nearMissCount = useMemo(
+    () => countStartNearMissDecoys(activeStage),
+    [activeStage]
+  );
+  const rules = useMemo(() => buildEchoChainRules(activeStage), [activeStage]);
 
   const handlePublish = (playImmediately: boolean) => {
+    const easyStage = getEchoStage(draft, "easy");
+    const hardStage = getEchoStage(draft, "hard");
     const candidate: EightfoldEchoPuzzle = {
       ...draft,
       id: `8e-admin-${targetDate}`,
@@ -128,6 +147,12 @@ export function EightfoldEchoStudioTab({
       title: draft.title.trim() || "Harmonic Resonance",
       author: "SOL Theory",
       editor: "Daily Editorial",
+      tiles: hardStage.tiles,
+      solution: hardStage.solution,
+      stages: {
+        easy: easyStage,
+        hard: hardStage,
+      },
       customDate: targetDate,
     };
     const check = validateEightfoldEchoPuzzle(candidate);
@@ -146,9 +171,10 @@ export function EightfoldEchoStudioTab({
         author: candidate.author,
         editor: candidate.editor,
       },
-      preview: `${candidate.title} — chain ${candidate.solution.join(" → ")}`,
+      preview: `${candidate.title} — Easy (${easyStage.solution.join(" → ")}) & Hard (${hardStage.solution.join(" → ")})`,
       details: [
-        `Solver verified unique 0 → 8 chain (${solved.ambiguousSteps} decoy-rich steps)`,
+        `Easy verified: 0 ambiguous steps, ${countStartNearMissDecoys(easyStage)} 2-change near-miss decoys`,
+        `Hard verified: ${solveEightfoldEcho(hardStage.tiles).ambiguousSteps} lookahead steps`,
         `Seed: ${candidate.seed ?? "custom"}`,
       ],
       playImmediately,
@@ -166,10 +192,10 @@ export function EightfoldEchoStudioTab({
             🔷 Eightfold Echo Studio
           </Badge>
           <h3 className="font-headline font-black text-xl">
-            Preview &amp; Reroll 3×3 Logic Sequence
+            Preview &amp; Reroll Daily Easy &amp; Hard Sequences
           </h3>
           <p className="text-xs text-gray-600">
-            100% auto-generated &amp; Hamiltonian-solver verified for {targetDate}. Reroll any seed or customize title/SVG overrides.
+            100% auto-generated &amp; Hamiltonian-solver verified (Easy + Hard) for {targetDate}.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -210,24 +236,48 @@ export function EightfoldEchoStudioTab({
         </p>
       )}
 
+      {/* Stage Preview Switcher */}
+      <div className="inline-grid grid-cols-2 gap-1 rounded-xl border-2 border-black bg-neutral-100 p-1">
+        {ECHO_DIFFICULTIES.map((diff) => (
+          <button
+            key={diff}
+            type="button"
+            onClick={() => setPreviewDifficulty(diff)}
+            className={cn(
+              "rounded-lg px-4 py-1.5 text-xs font-bold transition-all cursor-pointer",
+              previewDifficulty === diff
+                ? "bg-black text-white"
+                : "text-neutral-700 hover:bg-white"
+            )}
+          >
+            {diff === "easy" ? "Easy Board" : "Hard Board"}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
         {/* Left: Live 3×3 Preview */}
         <div className="md:col-span-5 space-y-3">
           <div className="flex items-center justify-between text-xs font-bold">
-            <span>3×3 Board Preview</span>
+            <span>
+              3×3 {previewDifficulty === "easy" ? "Easy" : "Hard"} Preview
+            </span>
             <span className="inline-flex items-center gap-1 text-emerald-700">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Unique paths: {solved.count}
+              Unique paths: {solved.count} ·{" "}
+              {previewDifficulty === "easy"
+                ? `${nearMissCount} near-miss decoys`
+                : `${solved.ambiguousSteps} lookahead steps`}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl border-2 border-black bg-neutral-50 max-w-xs">
-            {draft.tiles.map((tile, idx) => {
-              const stepOrder = draft.solution.indexOf(idx);
+            {activeStage.tiles.map((tile, idx) => {
+              const stepOrder = activeStage.solution.indexOf(idx);
               const color = ECHO_POSITION_COLORS[idx]!;
               return (
                 <div
                   key={idx}
-                  className="relative aspect-square rounded-xl bg-white p-2 flex items-center justify-center"
+                  className="relative w-full aspect-square overflow-hidden rounded-xl bg-white p-2 flex items-center justify-center"
                   style={{
                     border:
                       idx === 4
@@ -236,7 +286,10 @@ export function EightfoldEchoStudioTab({
                   }}
                   title={`${ECHO_POSITION_NAMES[idx]}: Step ${stepOrder} — ${describeEchoTile(tile)}`}
                 >
-                  <EchoTileSvg tile={tile} clipKey={`admin-${targetDate}-${idx}`} />
+                  <EchoTileSvg
+                    tile={tile}
+                    clipKey={`admin-${targetDate}-${previewDifficulty}-${idx}`}
+                  />
                   <span
                     className="absolute top-1 right-1 rounded-full px-1.5 text-[10px] font-black text-black border border-black/40"
                     style={{ backgroundColor: color }}
@@ -252,7 +305,7 @@ export function EightfoldEchoStudioTab({
           </p>
         </div>
 
-        {/* Right: Seed, Title, Custom SVG URLs & 0 → 8 Rule Walkthrough */}
+        {/* Right: Seed, Title, & 0 → 8 Rule Walkthrough */}
         <div className="md:col-span-7 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -287,12 +340,12 @@ export function EightfoldEchoStudioTab({
 
           <div className="rounded-xl bg-neutral-50 border border-neutral-200 p-3 space-y-1.5">
             <p className="text-xs font-extrabold uppercase tracking-wider text-neutral-600">
-              Verified 0 → 8 Chain Walkthrough
+              Verified 0 → 8 Chain Walkthrough ({previewDifficulty === "easy" ? "Easy" : "Hard"})
             </p>
             {rules.map((rule, idx) => (
               <p key={idx} className="text-xs text-neutral-700">
                 <strong>
-                  Step {idx} → {idx + 1} (pos {draft.solution[idx]} → {draft.solution[idx + 1]}):
+                  Step {idx} → {idx + 1} (pos {activeStage.solution[idx]} → {activeStage.solution[idx + 1]}):
                 </strong>{" "}
                 {rule}
               </p>
