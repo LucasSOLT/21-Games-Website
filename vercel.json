@@ -6,7 +6,17 @@
       "permanent": true
     },
     {
+      "source": "/solgames/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
       "source": "/solgames/:path*",
+      "destination": "/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/solgames/:path*/",
       "destination": "/:path*",
       "permanent": true
     }
