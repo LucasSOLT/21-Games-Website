@@ -1194,22 +1194,24 @@ export function GameLogo({
             opacity="0.14"
           />
 
-          {/* Floating 3D Stone & Terracotta Bloxorz Tiles */}
-          {/* Back-Center Terracotta Fragile Slab */}
-          <g>
+          {/* Floating 3D Stone & Red Obstacle Bloxorz Tiles */}
+          {/* Back-Center Red Obstacle Slab */}
+          <g strokeMiterlimit="1.4">
             <polygon
               points="31,42 47,36 60,43 44,49"
-              fill="#FB923C"
+              fill="#EF4444"
               stroke={INK}
               strokeWidth="2.1"
               strokeLinejoin="miter"
+              strokeMiterlimit="1.4"
             />
             <polygon
               points="31,42 44,49 44,54 31,47"
-              fill="#EA580C"
+              fill="#DC2626"
               stroke={INK}
               strokeWidth="2"
               strokeLinejoin="miter"
+              strokeMiterlimit="1.4"
             />
           </g>
 

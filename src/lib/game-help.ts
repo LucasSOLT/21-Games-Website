@@ -92,8 +92,8 @@ export const GAME_HELP: Record<AllGameSlug, GameHelpContent> = {
     rules: [
       "Pick **Easy (6×6)**, **Medium (8×8)**, or **Hard (10×10)** — solving **any** board counts toward your daily streak.",
       "Move with **Arrow keys / WASD**, swipe, or the **D-Pad**. Stay on the tiles — stepping off an open edge tips the block into the void!",
-      "**Orange (Fragile) tiles** hold your block when lying **flat**, but break if you stand **upright (1×1)** on them.",
-      "**Circle switches (○)** toggle bridges on any touch; **X switches (✕)** require standing **upright** directly on them.",
+      "**Red Obstacles** are strictly off-limits — touching a Red Obstacle **at all** (standing or flat) sends you back to Start.",
+      "**Circle switches (○)** activate blue bridges on any touch; **Heavy X switches (✕)** activate only when standing **upright (1×1)** directly on them.",
       "Stand **upright (1×1)** directly over the **green square hole** to drop through and win!",
     ],
   },

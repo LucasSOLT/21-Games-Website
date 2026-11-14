@@ -61,6 +61,12 @@ import { GameSplashScreen } from "@/components/game-splash-screen";
 import { ResultShareButtons } from "@/components/games/result-share-buttons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 interface StageHistorySnapshot {
@@ -242,10 +248,22 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   });
 
   const [feedback, setFeedback] = useState<{
-    tone: "neutral" | "warn" | "info";
+    tone: "warn" | "info";
     message: string;
   } | null>(null);
+  const [victoryModalOpen, setVictoryModalOpen] = useState<boolean>(
+    () =>
+      initialSaved
+        ? initialSaved.stages[initialSaved.activeDifficulty].status === "won"
+        : false
+  );
   const [muted, setMuted] = useState<boolean>(() => isMoveTwoMuted());
+
+  useEffect(() => {
+    if (!feedback) return;
+    const t = setTimeout(() => setFeedback(null), 1900);
+    return () => clearTimeout(t);
+  }, [feedback]);
 
   // Live 60fps animation pose & broken fragile tile indicator
   const [animPose, setAnimPose] = useState<CuboidAnimationPose | null>(null);
@@ -445,8 +463,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           tone: "warn",
           message:
             outcome.kind === "fall_bridge"
-              ? `Bridge ${outcome.bridgeId} is closed! Trigger its switch first.`
-              : "Tipped off the island edge! Resetting to Start.",
+              ? `Bridge ${outcome.bridgeId} closed! Hit its switch.`
+              : "Fell off the edge! Resetting to Start.",
         });
 
         animKindRef.current = "falling";
@@ -489,8 +507,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         playMoveTwoFragileCrackSfx();
         setFeedback({
           tone: "warn",
-          message:
-            "Fragile orange tile broke! Roll flat across orange tiles instead of standing upright.",
+          message: "Hit an obstacle! Resetting to Start.",
         });
 
         animKindRef.current = "falling";
@@ -582,6 +599,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               },
             };
           });
+          setVictoryModalOpen(true);
         }
       };
 
@@ -638,6 +656,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     cancelActiveRaf();
     setFeedback(null);
     setActiveDifficulty(diff);
+    setVictoryModalOpen(stageStates[diff].status === "won");
   };
 
   const handleUndo = () => {
@@ -665,6 +684,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
   const handleResetStage = () => {
     cancelActiveRaf();
+    setVictoryModalOpen(false);
     const resetBlock = getInitialBlockState(currentStage);
     if (currentState.status !== "won") {
       setHistoryByDiff((prev) => ({
@@ -789,7 +809,10 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             (anyWonToday && !hasSavedMoves)
           }
           hasSavedProgress={hasSavedMoves}
-          onPlay={() => setSplashDismissed(true)}
+          onPlay={() => {
+            setSplashDismissed(true);
+            setVictoryModalOpen(stageStates[activeDifficulty].status === "won");
+          }}
         >
           <div
             className="space-y-2 text-left"
@@ -846,10 +869,10 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   );
   const postureLabel =
     currentState.block.posture === "UPRIGHT"
-      ? "Standing 1×1"
+      ? "1×1 ↑"
       : currentState.block.posture === "FLAT_H"
-      ? "Flat 1×2 ↔"
-      : "Flat 2×1 ↕";
+      ? "1×2 ↔"
+      : "2×1 ↕";
 
   return (
     <GameShell
@@ -859,7 +882,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       dateKey={activeDateKey}
       author={puzzle.author}
     >
-      <div className="mx-auto max-w-xl w-full px-3 py-3 sm:py-5 space-y-3">
+      <div className="mx-auto max-w-xl w-full px-3 py-2.5 sm:py-4 space-y-2.5">
         {/* NYT Sudoku-Style Difficulty Switcher Tabs */}
         <div
           className="grid grid-cols-3 gap-1.5 rounded-2xl border-2 border-black bg-white p-1 shadow-[0_2px_0_#171717]"
@@ -909,9 +932,9 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           })}
         </div>
 
-        {/* Compact Status & Audio Strip */}
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 border-black bg-white px-3 py-2 shadow-[0_2px_0_#171717]">
-          <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm">
+        {/* Fixed-Height Single-Row Status & Audio Strip (Zero Height Shift) */}
+        <div className="flex h-11 flex-nowrap items-center justify-between gap-2 rounded-2xl border-2 border-black bg-white px-3 shadow-[0_2px_0_#171717] overflow-hidden">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 text-[11px] min-[375px]:text-xs sm:text-sm whitespace-nowrap min-w-0">
             <span className="font-mono font-black text-black">
               Moves: {currentState.moves}
             </span>
@@ -919,30 +942,41 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             <span className="font-mono font-bold text-neutral-600">
               Par: {currentStage.par}
             </span>
-            {currentState.falls > 0 && (
-              <>
-                <span className="text-neutral-300">·</span>
-                <span className="font-mono font-semibold text-orange-700">
-                  Falls: {currentState.falls}
-                </span>
-              </>
-            )}
+            <span className="text-neutral-300">·</span>
+            <span
+              className={cn(
+                "font-mono font-semibold",
+                currentState.falls > 0 ? "text-red-600" : "text-neutral-400"
+              )}
+            >
+              Falls: {currentState.falls}
+            </span>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className="border-black bg-[#FEF9C3] text-black font-mono text-[11px] font-bold px-2 py-0.5"
-            >
-              {postureLabel}
-            </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {currentState.status === "won" ? (
+              <button
+                type="button"
+                onClick={() => setVictoryModalOpen(true)}
+                className="rounded-full border border-black bg-[#2ECC71] px-2.5 py-0.5 text-[11px] font-black text-black cursor-pointer hover:brightness-95"
+              >
+                Results
+              </button>
+            ) : (
+              <Badge
+                variant="outline"
+                className="border-black bg-[#FEF9C3] text-black font-mono text-[11px] font-bold px-2 py-0.5 whitespace-nowrap"
+              >
+                {postureLabel}
+              </Badge>
+            )}
             <button
               type="button"
               onClick={handleToggleMute}
               data-testid="move-two-mute-toggle"
               aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
               title={muted ? "Unmute SFX" : "Mute SFX"}
-              className="h-7 w-7 rounded-full border border-neutral-300 hover:border-black bg-neutral-50 flex items-center justify-center text-neutral-700 cursor-pointer"
+              className="h-7 w-7 shrink-0 rounded-full border border-neutral-300 hover:border-black bg-neutral-50 flex items-center justify-center text-neutral-700 cursor-pointer"
             >
               {muted ? (
                 <VolumeX className="h-3.5 w-3.5" />
@@ -953,39 +987,122 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           </div>
         </div>
 
-        {/* Feedback Banner */}
-        {feedback && (
-          <div
-            role="status"
-            className={cn(
-              "rounded-xl border-2 px-3 py-1.5 text-xs font-bold text-center transition-all",
-              feedback.tone === "warn"
-                ? "border-orange-500 bg-orange-50 text-orange-950"
-                : feedback.tone === "info"
-                ? "border-blue-500 bg-blue-50 text-blue-950"
-                : "border-neutral-300 bg-neutral-50 text-neutral-800"
-            )}
-          >
-            {feedback.message}
-          </div>
-        )}
-
-        {/* Main 3D Floating Bloxorz Island Canvas */}
+        {/* Main 3D Floating Bloxorz Island Canvas (with non-shifting floating toast inside) */}
         <MoveTwoBloxorzCanvas
           stage={currentStage}
           bridgeMask={currentState.block.bridgeMask}
           pose={effectivePose}
           brokenFragileCell={brokenFragileCell}
+          overlayToast={feedback}
           interactive={currentState.status !== "won"}
           onSwipeDirection={performMove}
         />
 
-        {/* Victory Card OR Controls + D-Pad */}
-        {currentState.status === "won" ? (
+        {/* Primary Directional Arrow D-Pad Card (Stationary — Undo/Reset moved far below) */}
+        <div className="rounded-2xl border-2 border-black bg-white py-3.5 px-4 shadow-[0_2px_0_#171717] flex items-center justify-center">
           <div
-            className="rounded-3xl border-2 border-black bg-white p-5 space-y-4 shadow-[0_5px_0_#171717] text-center animate-in fade-in zoom-in-95 duration-200"
-            data-testid="move-two-victory-card"
+            className="grid grid-cols-3 gap-2"
+            aria-label="Directional roll controls"
           >
+            <div />
+            <button
+              type="button"
+              disabled={currentState.status === "won"}
+              onClick={() => performMove("up")}
+              data-testid="move-two-btn-up"
+              aria-label="Roll Up"
+              className="h-11 w-14 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 disabled:opacity-45 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+            >
+              <ArrowUp className="h-5 w-5 stroke-[2.5]" />
+            </button>
+            <div />
+            <button
+              type="button"
+              disabled={currentState.status === "won"}
+              onClick={() => performMove("left")}
+              data-testid="move-two-btn-left"
+              aria-label="Roll Left"
+              className="h-11 w-14 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 disabled:opacity-45 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+            >
+              <ArrowLeft className="h-5 w-5 stroke-[2.5]" />
+            </button>
+            <button
+              type="button"
+              disabled={currentState.status === "won"}
+              onClick={() => performMove("down")}
+              data-testid="move-two-btn-down"
+              aria-label="Roll Down"
+              className="h-11 w-14 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 disabled:opacity-45 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+            >
+              <ArrowDown className="h-5 w-5 stroke-[2.5]" />
+            </button>
+            <button
+              type="button"
+              disabled={currentState.status === "won"}
+              onClick={() => performMove("right")}
+              data-testid="move-two-btn-right"
+              aria-label="Roll Right"
+              className="h-11 w-14 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 disabled:opacity-45 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
+            >
+              <ArrowRight className="h-5 w-5 stroke-[2.5]" />
+            </button>
+          </div>
+        </div>
+
+        {/* Secondary Utility Footer — Placed Far Below D-Pad to Prevent Accidental Taps */}
+        <div
+          className="mt-10 pt-6 pb-12 border-t border-neutral-200 flex flex-col items-center gap-3"
+          data-testid="move-two-secondary-controls"
+        >
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={
+                currentState.status === "won" ||
+                historyByDiff[activeDifficulty].length === 0
+              }
+              onClick={handleUndo}
+              data-testid="move-two-undo"
+              className="rounded-xl border-2 border-black font-bold text-xs px-4"
+            >
+              <Undo2 className="h-3.5 w-3.5 mr-1.5" />
+              Undo Move
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleResetStage}
+              data-testid="move-two-reset"
+              className="rounded-xl border-2 border-black font-bold text-xs px-4"
+            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+              Reset Board
+            </Button>
+          </div>
+
+          <Link
+            href="/games/move-2/archive"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-500 hover:text-black underline underline-offset-4"
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            Browse Move Two Archive
+          </Link>
+        </div>
+      </div>
+
+      {/* Zero-Shift Centered Victory Modal */}
+      <Dialog
+        open={victoryModalOpen && currentState.status === "won"}
+        onOpenChange={setVictoryModalOpen}
+      >
+        <DialogContent
+          className="max-w-md border-2 border-black bg-white p-5 sm:p-6 rounded-3xl shadow-[0_6px_0_#171717] text-center"
+          data-testid="move-two-victory-card"
+        >
+          <div className="space-y-4">
             <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-[#2ECC71] px-3 py-1 text-xs font-black text-black">
               <Trophy className="h-3.5 w-3.5" />
               <span>
@@ -995,10 +1112,10 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
             </div>
 
             <div className="space-y-1">
-              <h2 className="font-headline font-black text-2xl text-black">
+              <DialogTitle className="font-headline font-black text-2xl text-black text-center">
                 {puzzle.title}
-              </h2>
-              <p className="text-sm font-semibold text-neutral-700">
+              </DialogTitle>
+              <DialogDescription className="text-sm font-semibold text-neutral-700 text-center">
                 Solved in{" "}
                 <span className="font-mono font-black text-black">
                   {currentState.moves}
@@ -1006,7 +1123,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                 moves · Par{" "}
                 <span className="font-mono font-bold">{currentStage.par}</span>{" "}
                 · {"⭐".repeat(currentStars)}
-              </p>
+              </DialogDescription>
             </div>
 
             {/* 3-Difficulty Progress Summary */}
@@ -1065,7 +1182,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </Button>
             </div>
 
-            <div className="pt-1 border-t border-neutral-200">
+            <div className="pt-2 border-t border-neutral-200">
               <ResultShareButtons
                 title={`Move Two #${puzzle.puzzleNumber}`}
                 text={shareText}
@@ -1082,109 +1199,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               </Link>
             </div>
           </div>
-        ) : (
-          <div className="space-y-3">
-            {/* Tactile D-Pad + Undo / Reset Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-black bg-white p-3 shadow-[0_2px_0_#171717]">
-              {/* D-Pad */}
-              <div
-                className="grid grid-cols-3 gap-1.5 mx-auto sm:mx-0"
-                aria-label="Directional roll controls"
-              >
-                <div />
-                <button
-                  type="button"
-                  onClick={() => performMove("up")}
-                  data-testid="move-two-btn-up"
-                  aria-label="Roll Up"
-                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
-                >
-                  <ArrowUp className="h-4 w-4 stroke-[2.5]" />
-                </button>
-                <div />
-                <button
-                  type="button"
-                  onClick={() => performMove("left")}
-                  data-testid="move-two-btn-left"
-                  aria-label="Roll Left"
-                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
-                >
-                  <ArrowLeft className="h-4 w-4 stroke-[2.5]" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => performMove("down")}
-                  data-testid="move-two-btn-down"
-                  aria-label="Roll Down"
-                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
-                >
-                  <ArrowDown className="h-4 w-4 stroke-[2.5]" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => performMove("right")}
-                  data-testid="move-two-btn-right"
-                  aria-label="Roll Right"
-                  className="h-10 w-12 rounded-xl border-2 border-black bg-[#FAF9F5] hover:bg-[#F7DA21] active:translate-y-0.5 flex items-center justify-center shadow-[0_2px_0_#171717] cursor-pointer"
-                >
-                  <ArrowRight className="h-4 w-4 stroke-[2.5]" />
-                </button>
-              </div>
-
-              {/* Undo / Reset / Archive */}
-              <div className="flex flex-wrap items-center justify-center gap-2 mx-auto sm:mx-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={historyByDiff[activeDifficulty].length === 0}
-                  onClick={handleUndo}
-                  data-testid="move-two-undo"
-                  className="rounded-xl border-2 border-black font-bold text-xs"
-                >
-                  <Undo2 className="h-3.5 w-3.5 mr-1" />
-                  Undo Move
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleResetStage}
-                  data-testid="move-two-reset"
-                  className="rounded-xl border-2 border-black font-bold text-xs"
-                >
-                  <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                  Reset Board
-                </Button>
-              </div>
-            </div>
-
-            {/* Compact NYT Bloxorz Tile Legend */}
-            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-xl border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] font-semibold text-neutral-700">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3 w-3 border border-black bg-[#FB923C] inline-block" />
-                <span>Orange: Flat Only</span>
-              </span>
-              {currentStage.switches.some((s) => s.kind === "soft") && (
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="h-3 w-3 rounded-full border border-black bg-[#2563EB] inline-block" />
-                  <span>○ Switch: Any Touch</span>
-                </span>
-              )}
-              {currentStage.switches.some((s) => s.kind === "heavy") && (
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="font-mono font-black text-[#6D28D9]">✕</span>
-                  <span>Heavy Switch: Upright Only</span>
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3 w-3 border border-black bg-[#2ECC71] inline-block" />
-                <span>Green Hole: Stand 1×1</span>
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
+        </DialogContent>
+      </Dialog>
     </GameShell>
   );
 }

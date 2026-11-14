@@ -24,6 +24,7 @@ export interface MoveTwoBloxorzCanvasProps {
   bridgeMask: number;
   pose: CuboidAnimationPose;
   brokenFragileCell?: { r: number; c: number; progress: number } | null;
+  overlayToast?: { tone: "warn" | "info"; message: string } | null;
   onSwipeDirection?: (dir: MoveTwoDirection) => void;
   interactive?: boolean;
   className?: string;
@@ -47,8 +48,8 @@ function drawPolygon(
   ctx.fillStyle = fillStyle;
   ctx.fill();
   if (lineWidth > 0) {
-    ctx.lineJoin = "miter";
-    ctx.miterLimit = 6;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = lineWidth;
     ctx.stroke();
@@ -151,7 +152,7 @@ function drawShatteringFragileTile(
     const p1 = projectPoint3D({ c: c0 + 0.46, r: r0, z: zTop }, fit);
     const p2 = projectPoint3D({ c: c0 + 0.46, r: r0 + 0.46, z: zTop }, fit);
     const p3 = projectPoint3D({ c: c0, r: r0 + 0.46, z: zTop }, fit);
-    drawPolygon(ctx, [p0, p1, p2, p3], "#EA580C", "#171717", 1.2);
+    drawPolygon(ctx, [p0, p1, p2, p3], "#DC2626", "#171717", 1.2);
   }
   ctx.restore();
 }
@@ -336,29 +337,25 @@ function drawBridgeSlats(
   ctx.restore();
 }
 
-function drawFragileSeamInlay(
+function drawObstacleInlay(
   ctx: CanvasRenderingContext2D,
   fit: BoardViewportFit,
   c: number,
   r: number
 ): void {
-  const p0 = projectPoint3D({ c: c + 0.22, r: r + 0.3, z: 0.01 }, fit);
-  const p1 = projectPoint3D({ c: c + 0.52, r: r + 0.52, z: 0.01 }, fit);
-  const p2 = projectPoint3D({ c: c + 0.78, r: r + 0.44, z: 0.01 }, fit);
-  const p3 = projectPoint3D({ c: c + 0.46, r: r + 0.76, z: 0.01 }, fit);
+  const pad = 0.21;
+  const p00 = projectPoint3D({ c: c + pad, r: r + pad, z: 0.01 }, fit);
+  const p10 = projectPoint3D({ c: c + 1 - pad, r: r + pad, z: 0.01 }, fit);
+  const p11 = projectPoint3D({ c: c + 1 - pad, r: r + 1 - pad, z: 0.01 }, fit);
+  const p01 = projectPoint3D({ c: c + pad, r: r + 1 - pad, z: 0.01 }, fit);
 
-  ctx.save();
-  ctx.strokeStyle = "rgba(124, 45, 18, 0.5)";
-  ctx.lineWidth = Math.max(1.1, fit.scale * 0.028);
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  ctx.moveTo(p0.x, p0.y);
-  ctx.lineTo(p1.x, p1.y);
-  ctx.lineTo(p2.x, p2.y);
-  ctx.moveTo(p1.x, p1.y);
-  ctx.lineTo(p3.x, p3.y);
-  ctx.stroke();
-  ctx.restore();
+  drawPolygon(
+    ctx,
+    [p00, p10, p11, p01],
+    "#B91C1C",
+    "#7F1D1D",
+    Math.max(1.1, fit.scale * 0.03)
+  );
 }
 
 export function MoveTwoBloxorzCanvas({
@@ -366,6 +363,7 @@ export function MoveTwoBloxorzCanvas({
   bridgeMask,
   pose,
   brokenFragileCell = null,
+  overlayToast = null,
   onSwipeDirection,
   interactive = true,
   className,
@@ -424,6 +422,8 @@ export function MoveTwoBloxorzCanvas({
 
     ctx.save();
     ctx.scale(dpr, dpr);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
 
     // 1. Editorial warm cream background + subtle radial vignette
     ctx.fillStyle = "#FAF9F5";
@@ -527,12 +527,12 @@ export function MoveTwoBloxorzCanvas({
             drawShatteringFragileTile(ctx, fit, c, r, brokenProgress);
           } else {
             drawFloatingSlab(ctx, fit, c, r, 0, TILE_SLAB_THICKNESS, {
-              top: "#FB923C",
-              left: "#EA580C",
-              right: "#C2410C",
+              top: "#EF4444",
+              left: "#DC2626",
+              right: "#B91C1C",
               stroke: "#171717",
             });
-            drawFragileSeamInlay(ctx, fit, c, r);
+            drawObstacleInlay(ctx, fit, c, r);
           }
           continue;
         }
@@ -594,6 +594,21 @@ export function MoveTwoBloxorzCanvas({
         pointerStartRef.current = null;
       }}
     >
+      {overlayToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="move-two-toast"
+          className={cn(
+            "pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-20 max-w-[90%] truncate rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-opacity",
+            overlayToast.tone === "warn"
+              ? "border-red-600 bg-red-50/95 text-red-950"
+              : "border-blue-600 bg-blue-50/95 text-blue-950"
+          )}
+        >
+          {overlayToast.message}
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         data-testid="move-two-3d-block"

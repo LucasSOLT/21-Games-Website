@@ -417,13 +417,13 @@ export function stepBloxorzBlock(
   }
 
   // 3. Fragile terracotta tile check: safe when FLAT_H / FLAT_V, shatters when UPRIGHT!
-  if (attempted.posture === "UPRIGHT") {
-    const onlyCell = cells[0]!;
-    if (stage.grid[onlyCell.r]![onlyCell.c] === "fragile") {
+  // 3. Red Obstacle check: touching an Obstacle tile AT ALL (standing OR flat, even 1 half) resets to Start
+  for (const cell of cells) {
+    if (stage.grid[cell.r]![cell.c] === "fragile") {
       return {
         kind: "fall_fragile",
         attempted,
-        brokenCell: onlyCell,
+        brokenCell: cell,
       };
     }
   }
@@ -1150,7 +1150,7 @@ function buildEasyCandidate(
   };
 
   const transformed = transformStageSymmetry(base, Math.floor(rng() * 8));
-  sprinkleFragileTiles(transformed, rng, 1 + Math.floor(rng() * 3));
+  sprinkleFragileTiles(transformed, rng, 1 + Math.floor(rng() * 2));
   return transformed;
 }
 
@@ -1313,7 +1313,7 @@ function buildMediumCandidate(
   };
 
   const transformed = transformStageSymmetry(base, Math.floor(rng() * 8));
-  sprinkleFragileTiles(transformed, rng, 2 + Math.floor(rng() * 4));
+  sprinkleFragileTiles(transformed, rng, 2 + Math.floor(rng() * 2));
   return transformed;
 }
 
@@ -1558,7 +1558,7 @@ function buildHardCandidate(
   };
 
   const transformed = transformStageSymmetry(base, Math.floor(rng() * 8));
-  sprinkleFragileTiles(transformed, rng, 4 + Math.floor(rng() * 5));
+  sprinkleFragileTiles(transformed, rng, 2 + Math.floor(rng() * 3));
   return transformed;
 }
 

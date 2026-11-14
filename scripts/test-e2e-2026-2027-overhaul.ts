@@ -424,10 +424,10 @@ const closedBridgeOut = m2Gen.stepBloxorzBlock(
   "right" // FLAT_H on (2,1)-(2,2)
 );
 kit.assert(
-  fragileFlat.kind === "moved" &&
+  fragileFlat.kind === "fall_fragile" &&
     fragileUpright.kind === "fall_fragile" &&
     closedBridgeOut.kind === "fall_bridge",
-  "[T1·F5.4] Fragile tile holds FLAT_H ('moved'), breaks under UPRIGHT ('fall_fragile'), and retracted bridge returns 'fall_bridge'"
+  "[T1·F5.4] Red Obstacle tile triggers 'fall_fragile' on ANY touch (both FLAT_H and UPRIGHT), and retracted bridge returns 'fall_bridge'"
 );
 
 // Soft switch + 1x1 goal shaft check
@@ -1077,13 +1077,18 @@ kit.assert(
 
 kit.assert(
   m2GameSrc.includes('data-testid="move-two-difficulty-tabs"') &&
+    m2GameSrc.includes('data-testid="move-two-secondary-controls"') &&
     m2CanvasSrc.includes('data-testid="move-two-3d-block"') &&
-    m2CanvasSrc.includes('lineJoin = "miter"') &&
+    m2CanvasSrc.includes('data-testid="move-two-toast"') &&
+    m2CanvasSrc.includes('lineJoin = "round"') &&
+    !m2CanvasSrc.includes('lineJoin = "miter"') &&
     m2CanvasSrc.includes("#2ECC71") &&
-    m2CanvasSrc.includes("#FB923C") &&
+    m2CanvasSrc.includes("#EF4444") &&
+    !m2CanvasSrc.includes("#FB923C") &&
     m2CanvasSrc.includes("#60A5FA") &&
+    gameShellSrc.includes('data-testid="move-two-help-guide"') &&
     !m2GameSrc.includes("Dark void hazard"),
-  "[T4·8] move-two.tsx and move-two-canvas.tsx render 6×6/8×8/10×10 difficulty tabs, mitered 3D NYT Gold 2-cube block, emerald 1×1 goal shaft, terracotta fragile tiles, and cobalt bridges"
+  "[T4·8] move-two UI renders 6×6/8×8/10×10 tabs, flush round-joined 3D NYT Gold block (no miter spikes), crimson Red Obstacles (#EF4444), emerald goal hole, floating toast, separated Undo/Reset footer, and ? visual tile guide"
 );
 
 const nineRhymesCompSrc = readSrc("src/components/games/nine-rhymes.tsx");

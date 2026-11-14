@@ -176,26 +176,26 @@ kit.eq(
   "Partial 1-cell overhang onto interior void cell triggers cliff tumble (fall_void)"
 );
 
-// 3b. Fragile Terracotta Tile: SAFE when FLAT, BREAKS when UPRIGHT!
+// 3b. Red Obstacle Tile ("fragile"): ANY touch (FLAT or UPRIGHT) resets to Start!
 const flatOnFragile = m2.stepBloxorzBlock(
   synthStage,
   { posture: "UPRIGHT", r: 2, c: 0, bridgeMask: 0 },
-  "right" // lands FLAT_H on (2,1)-(2,2), covering fragile (2,2)
+  "right" // lands FLAT_H on (2,1)-(2,2), touching Red Obstacle (2,2)
 );
 kit.eq(
   flatOnFragile.kind,
-  "moved",
-  "Fragile terracotta tile safely supports FLAT_H block"
+  "fall_fragile",
+  "Red Obstacle tile immediately resets player when touched FLAT_H (fall_fragile)"
 );
 const uprightOnFragile = m2.stepBloxorzBlock(
   synthStage,
   { posture: "FLAT_H", r: 2, c: 0, bridgeMask: 0 },
-  "right" // stands UPRIGHT on fragile (2,2)
+  "right" // stands UPRIGHT on Red Obstacle (2,2)
 );
 kit.eq(
   uprightOnFragile.kind,
   "fall_fragile",
-  "Fragile terracotta tile shatters when block stands UPRIGHT on it (fall_fragile)"
+  "Red Obstacle tile immediately resets player when block stands UPRIGHT on it (fall_fragile)"
 );
 
 // 3c. Soft Switch (○) vs Heavy Switch (✕) + Closed vs Open Bridge
@@ -327,6 +327,7 @@ const seenEasy = new Set<string>();
 const seenMedium = new Set<string>();
 const seenHard = new Set<string>();
 let all426Valid = true;
+let all1278ObstacleFreeReplay = true;
 
 for (const d of ALL_DATES) {
   const res = daily.getDailyPuzzleForGame<import("@/data/puzzles/move-2").MoveTwoPuzzle>(
@@ -338,6 +339,31 @@ for (const d of ALL_DATES) {
     break;
   }
   const { easy, medium, hard } = res.puzzle.stages;
+  for (const stage of [easy, medium, hard]) {
+    let st = m2.getInitialBlockState(stage);
+    let won = false;
+    for (const dir of stage.canonicalMoves) {
+      const out = m2.stepBloxorzBlock(stage, st, dir);
+      if (out.kind === "moved") {
+        // Double-check no occupied cell is ever a Red Obstacle ("fragile")
+        for (const cell of m2.getDominoCells(out.next)) {
+          if (stage.grid[cell.r]?.[cell.c] === "fragile") {
+            all1278ObstacleFreeReplay = false;
+          }
+        }
+        st = out.next;
+      } else if (out.kind === "won") {
+        won = true;
+        break;
+      } else {
+        all1278ObstacleFreeReplay = false;
+        break;
+      }
+    }
+    if (!won) {
+      all1278ObstacleFreeReplay = false;
+    }
+  }
   seenEasy.add(JSON.stringify({ g: easy.grid, s: easy.start, e: easy.goal }));
   seenMedium.add(JSON.stringify({ g: medium.grid, s: medium.start, e: medium.goal }));
   seenHard.add(JSON.stringify({ g: hard.grid, s: hard.start, e: hard.goal }));
@@ -345,10 +371,11 @@ for (const d of ALL_DATES) {
 
 kit.assert(
   all426Valid &&
+    all1278ObstacleFreeReplay &&
     seenEasy.size === 426 &&
     seenMedium.size === 426 &&
     seenHard.size === 426,
-  `All 1,278 stages across 426 days (2026-11-01..2027-12-31) are valid & 100% unique (Easy=${seenEasy.size}, Medium=${seenMedium.size}, Hard=${seenHard.size})`
+  `All 1,278 stages across 426 days (2026-11-01..2027-12-31) are valid, 100% unique, & winnable with ZERO Red Obstacle touches (Easy=${seenEasy.size}, Medium=${seenMedium.size}, Hard=${seenHard.size})`
 );
 
 // ---- 6. Stale Legacy 3×3 / 5×5 Override Rejection & Self-Healing -------------
@@ -408,22 +435,34 @@ const studioSrc = fs.readFileSync(
   new URL("../src/components/admin/move-two-studio-tab.tsx", import.meta.url),
   "utf8"
 );
+const shellSrc = fs.readFileSync(
+  new URL("../src/components/game-shell.tsx", import.meta.url),
+  "utf8"
+);
 
 kit.assert(
   gameSrc.includes('data-testid="move-two-difficulty-tabs"') &&
     gameSrc.includes("move-two-diff-") &&
     gameSrc.includes('data-testid="move-two-mute-toggle"') &&
+    gameSrc.includes('data-testid="move-two-secondary-controls"') &&
     gameSrc.includes("ResultShareButtons") &&
-    canvasSrc.includes('data-testid="move-two-3d-block"'),
-  "move-two.tsx & move-two-canvas.tsx wire difficulty tabs, 3D Bloxorz canvas, mute toggle, and ResultShareButtons"
+    canvasSrc.includes('data-testid="move-two-3d-block"') &&
+    canvasSrc.includes('data-testid="move-two-toast"') &&
+    canvasSrc.includes('lineJoin = "round"') &&
+    !canvasSrc.includes('lineJoin = "miter"') &&
+    canvasSrc.includes("#EF4444") &&
+    !canvasSrc.includes("#FB923C") &&
+    shellSrc.includes('data-testid="move-two-help-guide"'),
+  "move-two UI wires flush round corners, crimson Red Obstacles (#EF4444), zero-shift toast, separated Undo/Reset footer, and ? visual tile guide"
 );
 
 kit.assert(
   studioSrc.includes("admin-move-two-clear-all") &&
     studioSrc.includes("admin-move-two-revert-default") &&
     studioSrc.includes("admin-move-two-reroll") &&
+    studioSrc.includes("Red Obstacle") &&
     studioSrc.includes("MoveTwoBloxorzCanvas"),
-  "move-two-studio-tab.tsx wires Clear All, Revert to Default, Reroll Seed, and live 3D Bloxorz preview"
+  "move-two-studio-tab.tsx wires Clear All, Revert to Default, Reroll Seed, Red Obstacle brush, and live 3D Bloxorz preview"
 );
 
 kit.finish();

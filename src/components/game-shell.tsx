@@ -323,6 +323,103 @@ export function GameShell({
                 </li>
               </ul>
             </div>
+          ) : gameSlug === "move-2" ? (
+            <div
+              className="space-y-3 text-sm text-gray-700"
+              data-testid="move-two-help-guide"
+            >
+              <div className="rounded-xl bg-[#FAF9F5] p-3 border border-neutral-300 space-y-1.5 text-xs sm:text-sm">
+                <p className="font-bold text-black">
+                  Roll Upright Into the 1×1 Green Hole
+                </p>
+                <p>
+                  Choose <strong>Easy (6×6)</strong>, <strong>Medium (8×8)</strong>, or{" "}
+                  <strong>Hard (10×10)</strong> — solving <strong>any</strong> board
+                  counts toward your daily streak. Roll your 3D{" "}
+                  <strong>2×1 gold block</strong> with{" "}
+                  <strong>Arrow keys / WASD</strong>, swipes, or the <strong>D-Pad</strong>{" "}
+                  without tipping off an open edge!
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-black uppercase tracking-wider text-neutral-500">
+                  Tiles, Obstacles &amp; Switches
+                </p>
+                <div className="grid grid-cols-1 gap-1.5 text-xs">
+                  <div className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-white shadow-[0_2px_0_#CFCBC0]" />
+                    <div>
+                      <strong className="text-black">Stone Tile:</strong> Safe island
+                      floor. Stepping off an open edge drops you into the void.
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#FEF9C3] flex items-center justify-center">
+                      <span className="h-2.5 w-2.5 border border-[#CA8A04] bg-[#F7DA21]" />
+                    </span>
+                    <div>
+                      <strong className="text-black">Start Tile:</strong> Where your
+                      2×1 block begins (and respawns after a fall).
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-red-200 bg-red-50/50 px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#EF4444] flex items-center justify-center">
+                      <span className="h-2.5 w-2.5 border border-[#7F1D1D] bg-[#B91C1C]" />
+                    </span>
+                    <div>
+                      <strong className="text-red-900">Red Obstacle:</strong>{" "}
+                      <strong>Avoid completely!</strong> Touching a Red Obstacle{" "}
+                      <em>at all</em> (standing or flat) sends you back to Start.
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#E0F2FE] flex items-center justify-center">
+                      <span className="h-2.5 w-2.5 rounded-full border border-black bg-[#2563EB]" />
+                    </span>
+                    <div>
+                      <strong className="text-black">Circle Switch (○):</strong>{" "}
+                      Activates its linked blue bridge on <strong>any touch</strong>{" "}
+                      (standing or lying flat).
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#EDE9FE] flex items-center justify-center font-mono text-[11px] font-black text-[#6D28D9]">
+                      ✕
+                    </span>
+                    <div>
+                      <strong className="text-black">Heavy X Switch (✕):</strong>{" "}
+                      Activates its linked blue bridge{" "}
+                      <strong>only when standing upright (1×1)</strong> directly on it.
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#DBEAFE] shadow-[0_2px_0_#60A5FA]" />
+                    <div>
+                      <strong className="text-black">Blue Bridge:</strong> Retractable
+                      bridge across chasms (dashed outline when closed, solid blue when
+                      open).
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50/50 px-2.5 py-1.5">
+                    <span className="h-5 w-5 shrink-0 rounded-[4px] border-2 border-black bg-[#2ECC71] flex items-center justify-center">
+                      <span className="h-2.5 w-2.5 bg-[#052E16]" />
+                    </span>
+                    <div>
+                      <strong className="text-emerald-950">Green Square Hole:</strong>{" "}
+                      <strong>The Goal!</strong> Stand <strong>upright (1×1)</strong>{" "}
+                      directly over it to drop in and win.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : gameSlug !== "connect-5" ? (
             <GenericHelpBody slug={gameSlug} />
           ) : (

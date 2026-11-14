@@ -74,8 +74,8 @@ const PAINT_TOOLS: ReadonlyArray<{
   },
   {
     id: "fragile",
-    label: "Fragile Orange",
-    swatchClass: "bg-[#FB923C] border-black text-black",
+    label: "Red Obstacle",
+    swatchClass: "bg-[#EF4444] border-black text-white",
   },
   {
     id: "bridge_A",
@@ -795,7 +795,7 @@ export function MoveTwoStudioTab({
                         : tile === "void"
                         ? "bg-neutral-300/45 border-dashed border-neutral-400 text-neutral-400"
                         : tile === "fragile"
-                        ? "bg-[#FB923C] border-[#9A3412] text-black"
+                        ? "bg-[#EF4444] border-[#991B1B] text-white"
                         : tile === "bridge"
                         ? "bg-[#DBEAFE] border-blue-700 text-blue-950"
                         : tile === "soft_switch"
