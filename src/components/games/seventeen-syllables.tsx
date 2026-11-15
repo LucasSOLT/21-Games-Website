@@ -1003,7 +1003,7 @@ function SeventeenSyllablesGameInner({
       copyFeedbackTimerRef.current = setTimeout(() => {
         setResultsCopied(false);
         copyFeedbackTimerRef.current = null;
-      }, 2000);
+      }, 1500);
     }
   }, [buildResultsShareOptions]);
 

@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export const COPIED_FEEDBACK_MS = 2000;
+export const COPIED_FEEDBACK_MS = 1500;
 
 interface ResultShareButtonsProps {
   /** Share-sheet title. */
@@ -28,7 +28,7 @@ interface ResultShareButtonsProps {
  * Universal completion-screen action row used by every game:
  *   - **Share**        → `nativeShareResultsOnly` (navigator.share, NEVER clipboard)
  *   - **Copy results** → `copyResultsOnly`        (clipboard only, NEVER navigator.share),
- *                        "Copied!" checkmark for 2000ms.
+ *                        "Copied!" checkmark for 1500ms.
  */
 export function ResultShareButtons({
   title,

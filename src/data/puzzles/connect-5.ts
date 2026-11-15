@@ -217,7 +217,7 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
   {
     id: "c5-11",
     puzzleNumber: 11,
-    title: "Footsteps Forward",
+    title: "Stride to Cue",
     words: ["FOOT", "STEP", "DOWN", "STAGE", "LIGHT"],
     connections: [
       "FOOTSTEP — sound or mark of a walking stride",
@@ -566,7 +566,7 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
   {
     id: "c5-30",
     puzzleNumber: 30,
-    title: "Headliner",
+    title: "Front Page to Frost",
     words: ["HEAD", "LINE", "BACK", "PACK", "ICE"],
     connections: [
       "HEADLINE — front-page newspaper banner",
@@ -748,7 +748,7 @@ export const CONNECT_5_PUZZLES: Connect5Puzzle[] = [
   {
     id: "c5-40",
     puzzleNumber: 40,
-    title: "Greenhouse",
+    title: "Crystal to Cosmos",
     words: ["GLASS", "HOUSE", "BOAT", "LOAD", "STAR"],
     connections: [
       "GLASS HOUSE — conservatory where no one throws stones",
@@ -1388,6 +1388,237 @@ function toConnect5TitleWord(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 }
 
+const COMMON_COMPOUND_EXPLANATIONS: ReadonlyArray<
+  readonly [wordA: string, wordB: string, explanation: string]
+> = [
+  ["DOG", "HOUSE", "DOGHOUSE — outdoor shelter built for a pet dog"],
+  ["HOUSE", "PARTY", "HOUSE PARTY — lively social gathering hosted at home"],
+  ["PARTY", "LINE", "PARTY LINE — shared telephone circuit or common group stance"],
+  ["LINE", "DANCE", "LINE DANCE — choreographed group dance in synchronized rows"],
+  ["TABLE", "TENNIS", "TABLE TENNIS — fast-paced indoor paddle sport (ping-pong)"],
+  ["TENNIS", "RACKET", "TENNIS RACKET — strung frame used to serve and volley"],
+  ["RACKET", "SPORTS", "RACKET SPORTS — games played with a paddle or strung racket"],
+  ["SPORTS", "BAR", "SPORTS BAR — lively pub broadcasting live games on big screens"],
+  ["DOG", "TAG", "DOG TAG — stamped metal identification disc"],
+  ["DOG", "WOOD", "DOGWOOD — spring-flowering ornamental tree"],
+  ["HOUSE", "WORK", "HOUSEWORK — everyday cleaning and upkeep at home"],
+  ["HOUSE", "PLANT", "HOUSEPLANT — potted greenery grown indoors"],
+  ["PARTY", "HAT", "PARTY HAT — festive paper cone worn at celebrations"],
+  ["PARTY", "GAME", "PARTY GAME — group parlor game played with friends"],
+  ["DANCE", "FLOOR", "DANCE FLOOR — polished area reserved for dancing"],
+  ["FLOOR", "BOARD", "FLOORBOARD — wooden plank laid across floor joists"],
+  ["CAT", "NAP", "CATNAP — brief refreshing daytime snooze"],
+  ["CAT", "WALK", "CATWALK — narrow elevated runway"],
+  ["NAP", "TIME", "NAPTIME — quiet afternoon rest hour"],
+  ["COFFEE", "SHOP", "COFFEE SHOP — cozy neighborhood cafe serving espresso"],
+  ["BOOK", "CLUB", "BOOK CLUB — group of readers discussing a monthly novel"],
+  ["BOOK", "MARK", "BOOKMARK — ribbon or card marking your page"],
+  ["BOOK", "CASE", "BOOKCASE — shelved cabinet for storing books"],
+  ["HOME", "WORK", "HOMEWORK — after-school study assignment"],
+  ["HOME", "TOWN", "HOMETOWN — place where someone grew up"],
+  ["HEART", "BEAT", "HEARTBEAT — steady rhythmic pulse"],
+  ["BEAT", "BOX", "BEATBOX — vocal percussion mimicking drum machines"],
+  ["CAR", "POOL", "CARPOOL — shared daily commute in one vehicle"],
+  ["POOL", "SIDE", "POOLSIDE — lounge deck beside the swimming pool"],
+  ["GAME", "NIGHT", "GAME NIGHT — evening gathering for cards and board games"],
+  ["NIGHT", "FALL", "NIGHTFALL — onset of evening dusk"],
+  ["NIGHT", "LIGHT", "NIGHTLIGHT — soft bedside plug-in lamp"],
+  ["DAY", "DREAM", "DAYDREAM — pleasant wandering thought while awake"],
+  ["DAY", "BREAK", "DAYBREAK — first gleam of morning dawn"],
+  ["BREAK", "FAST", "BREAKFAST — morning meal starting the day"],
+  ["FAST", "BALL", "FASTBALL — high-velocity pitch straight over the plate"],
+  ["FOOT", "BALL", "FOOTBALL — gridiron or pitch team sport"],
+  ["BASKET", "BALL", "BASKETBALL — five-on-five court game played with hoops"],
+  ["HAND", "SHAKE", "HANDSHAKE — clasped-hand greeting or agreement"],
+  ["SNOW", "MAN", "SNOWMAN — three-sphere winter figure with a carrot nose"],
+  ["RAIN", "COAT", "RAINCOAT — waterproof outer jacket"],
+  ["SEA", "SHELL", "SEASHELL — spiral marine shell washed ashore"],
+  ["STAR", "FISH", "STARFISH — five-armed tide-pool echinoderm"],
+  ["MOON", "LIGHT", "MOONLIGHT — silvery glow reflected from the moon"],
+  ["FIRE", "PLACE", "FIREPLACE — brick or stone indoor hearth"],
+  ["AIR", "PORT", "AIRPORT — airfield terminal where flights depart and land"],
+  ["KEY", "BOARD", "KEYBOARD — rowed keys for typing or playing music"],
+  ["DOOR", "BELL", "DOORBELL — chime button beside the front entrance"],
+  ["TREE", "HOUSE", "TREEHOUSE — wooden fort perched among branches"],
+  ["CLUB", "HOUSE", "CLUBHOUSE — gathering lodge for members or teammates"],
+  ["LIGHT", "HOUSE", "LIGHTHOUSE — coastal beacon tower guiding ships"],
+  ["SUN", "SET", "SUNSET — colorful evening sky as the sun dips low"],
+  ["SET", "BACK", "SETBACK — temporary reversal or delay"],
+  ["BACK", "STAGE", "BACKSTAGE — wings and dressing rooms behind the curtain"],
+];
+
+let cachedKnownCompoundBridges: Map<string, string> | null = null;
+
+function getKnownCompoundBridgesMap(): Map<string, string> {
+  if (cachedKnownCompoundBridges) return cachedKnownCompoundBridges;
+  const map = new Map<string, string>();
+  const register = (w1: string, w2: string, conn: string) => {
+    const key = `${w1.trim().toUpperCase()}|${w2.trim().toUpperCase()}`;
+    if (!map.has(key) && conn.trim()) {
+      map.set(key, conn.trim().replace(/^[.,;:\s]+/, ""));
+    }
+  };
+  for (const p of CONNECT_5_PUZZLES) {
+    for (let i = 0; i < 4; i++) {
+      register(p.words[i]!, p.words[i + 1]!, p.connections[i]!);
+    }
+  }
+  for (const [a, b, conn] of EXTRA_COMPOUND_BRIDGES) {
+    register(a, b, conn);
+  }
+  for (const [a, b, conn] of COMMON_COMPOUND_EXPLANATIONS) {
+    register(a, b, conn);
+  }
+  cachedKnownCompoundBridges = map;
+  return map;
+}
+
+/**
+ * Checks whether a Win-Modal connection string actually corresponds to `(w1, w2)`.
+ * Detects stale leftover default explanations (e.g., `"FOOTSTEP — ..."` when words were
+ * manually changed to `DOG -> HOUSE`) while preserving valid custom prose explanations.
+ */
+export function doesConnectionMatchWordPair(
+  conn: string | undefined | null,
+  w1: string,
+  w2: string
+): boolean {
+  const a = (w1 ?? "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  const b = (w2 ?? "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  const cleaned = (conn ?? "").trim().replace(/^[.,;:\s]+/, "");
+  if (!cleaned || !a || !b) return false;
+
+  let head: string | null = null;
+  if (/[—–]/.test(cleaned)) {
+    head = cleaned.split(/[—–]/)[0] ?? null;
+  } else if (/\s+-\s+/.test(cleaned)) {
+    head = cleaned.split(/\s+-\s+/)[0] ?? null;
+  } else if (cleaned.includes(":")) {
+    head = cleaned.split(":")[0] ?? null;
+  }
+
+  if (head !== null) {
+    const headAlpha = head.toUpperCase().replace(/[^A-Z]/g, "");
+    const headUpper = head.toUpperCase();
+    if (headAlpha === a + b) return true;
+    const idxA = headUpper.indexOf(a);
+    const idxB = headUpper.lastIndexOf(b);
+    return idxA !== -1 && idxB !== -1 && idxA < idxB;
+  }
+
+  const upperAlpha = cleaned.toUpperCase().replace(/[^A-Z]/g, "");
+  const upperRaw = cleaned.toUpperCase();
+  if (upperAlpha.includes(a + b)) return true;
+  return upperRaw.includes(a) && upperRaw.includes(b);
+}
+
+/**
+ * Builds a clean, accurate compound-word explanation for `(w1, w2)` using our
+ * curated dictionary first, with a crisp fallback when an unfamiliar pair is entered.
+ */
+export function buildDefaultConnect5Connection(w1: string, w2: string): string {
+  const a = (w1 ?? "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  const b = (w2 ?? "").trim().toUpperCase().replace(/[^A-Z]/g, "");
+  if (!a || !b) return "";
+  const known = getKnownCompoundBridgesMap().get(`${a}|${b}`);
+  if (known) return known;
+  return `${a} ${b} — compound phrase linking ${toConnect5TitleWord(a)} and ${toConnect5TitleWord(b)}`;
+}
+
+/**
+ * Self-heals any Connect 5 puzzle payload whose `connections` contain stale or mismatched
+ * explanations from a prior default puzzle (or stray leading punctuation) or out-of-bounds hints.
+ */
+export function sanitizeConnect5Puzzle(puzzle: Connect5Puzzle): Connect5Puzzle {
+  if (!puzzle || !Array.isArray(puzzle.words) || puzzle.words.length !== 5) {
+    return puzzle;
+  }
+
+  const normalizedWords = puzzle.words.map((w) =>
+    typeof w === "string" ? w.trim().toUpperCase() : ""
+  ) as [string, string, string, string, string];
+  const wordsChanged = normalizedWords.some((w, idx) => w !== puzzle.words[idx]);
+
+  const rawConns = Array.isArray(puzzle.connections)
+    ? puzzle.connections
+    : ["", "", "", ""];
+  let connsChanged = rawConns.length !== 4;
+  const nextConnections = [0, 1, 2, 3].map((idx) => {
+    const w1 = normalizedWords[idx] ?? "";
+    const w2 = normalizedWords[idx + 1] ?? "";
+    const raw = typeof rawConns[idx] === "string" ? rawConns[idx]! : "";
+    const trimmed = raw.trim().replace(/^[.,;:\s]+/, "");
+    const healed = doesConnectionMatchWordPair(trimmed, w1, w2)
+      ? trimmed
+      : buildDefaultConnect5Connection(w1, w2);
+    if (healed !== raw) {
+      connsChanged = true;
+    }
+    return healed;
+  }) as [string, string, string, string];
+
+  const rawHints = Array.isArray(puzzle.revealedHints) ? puzzle.revealedHints : [];
+  const validHints = rawHints.filter(
+    (h) =>
+      h &&
+      Number.isInteger(h.row) &&
+      Number.isInteger(h.col) &&
+      h.row >= 1 &&
+      h.row <= 4 &&
+      h.col >= 0 &&
+      h.col < (normalizedWords[h.row]?.length ?? 0)
+  );
+  const hintsChanged = validHints.length !== rawHints.length;
+
+  if (!wordsChanged && !connsChanged && !hintsChanged) {
+    return puzzle;
+  }
+
+  return {
+    ...puzzle,
+    words: wordsChanged ? normalizedWords : puzzle.words,
+    connections: connsChanged ? nextConnections : puzzle.connections,
+    revealedHints: hintsChanged ? validHints : puzzle.revealedHints,
+  };
+}
+
+const SPOILER_FREE_TITLE_SUFFIXES: readonly string[] = [
+  "Trail",
+  "Cascade",
+  "Relay",
+  "Sequence",
+  "Passage",
+  "Orbit",
+  "Vector",
+  "Current",
+  "Echo",
+  "Compass",
+  "Pathway",
+  "Arc",
+];
+
+function buildSpoilerFreeConnect5Title(
+  words: [string, string, string, string, string],
+  seqIdx: number
+): string {
+  const starter = toConnect5TitleWord(words[0]);
+  const hiddenUpper = words.slice(1).map((w) => w.toUpperCase());
+  for (let offset = 0; offset < SPOILER_FREE_TITLE_SUFFIXES.length; offset++) {
+    const suffix =
+      SPOILER_FREE_TITLE_SUFFIXES[
+        (seqIdx + offset) % SPOILER_FREE_TITLE_SUFFIXES.length
+      ]!;
+    const suffixUpper = suffix.toUpperCase();
+    const overlapsHidden = hiddenUpper.some(
+      (hw) => hw.includes(suffixUpper) || suffixUpper.includes(hw)
+    );
+    if (!overlapsHidden) {
+      return `${starter} ${suffix}`;
+    }
+  }
+  return `${starter} #${seqIdx + 1}`;
+}
+
 const CONNECT_5_AUTHORS: ReadonlyArray<{ author: string; editor: string }> = [
   { author: "SOL Theory", editor: "Daily Editorial" },
   { author: "Puzzle Master", editor: "SOL Theory" },
@@ -1408,7 +1639,7 @@ export function getConnect5PuzzleForDate(
   customOverrides?: Record<string, Connect5Puzzle>
 ): Connect5Puzzle {
   if (customOverrides && customOverrides[dateKey]) {
-    return customOverrides[dateKey];
+    return sanitizeConnect5Puzzle(customOverrides[dateKey]);
   }
 
   const puzzleNumber = getPuzzleNumberForDate(dateKey);
@@ -1449,7 +1680,7 @@ export function getConnect5PuzzleForDate(
   const synthesized: Connect5Puzzle = {
     id: `c5-bank-${dateKey}`,
     puzzleNumber,
-    title: `${toConnect5TitleWord(w1)} via ${toConnect5TitleWord(w3)} to ${toConnect5TitleWord(w5)}`,
+    title: buildSpoilerFreeConnect5Title([w1, w2, w3, w4, w5], seqIdx),
     words: [w1, w2, w3, w4, w5],
     connections: chain.connections,
     revealedHints,

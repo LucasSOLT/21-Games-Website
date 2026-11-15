@@ -31,7 +31,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  buildDefaultConnect5Connection,
   CONNECT_5_PUZZLES,
+  doesConnectionMatchWordPair,
+  sanitizeConnect5Puzzle,
   type Connect5HintCoord,
   type Connect5Puzzle,
 } from "@/data/puzzles/connect-5";
@@ -467,12 +470,60 @@ export default function AdminPage() {
   const handleC5WordChange = (rowIdx: number, rawVal: string) => {
     if (!editPerm.canEdit) return;
     const clean = rawVal.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
+    const prevWords = c5Words;
     const nextWords = [...c5Words] as [string, string, string, string, string];
     nextWords[rowIdx] = clean;
     setC5Words(nextWords);
     setC5Hints((prev) =>
       prev.filter((h) => h.row !== rowIdx || h.col < clean.length)
     );
+    setC5Connections((prevConns) => {
+      const nextConns = [...prevConns] as [string, string, string, string];
+      const adjacentIndices = [rowIdx - 1, rowIdx].filter(
+        (i) => i >= 0 && i < 4
+      );
+      let changed = false;
+      for (const connIdx of adjacentIndices) {
+        const prevW1 = prevWords[connIdx] ?? "";
+        const prevW2 = prevWords[connIdx + 1] ?? "";
+        const nextW1 = nextWords[connIdx] ?? "";
+        const nextW2 = nextWords[connIdx + 1] ?? "";
+        const existing = nextConns[connIdx] ?? "";
+        const matchedPrevPair = doesConnectionMatchWordPair(
+          existing,
+          prevW1,
+          prevW2
+        );
+        const matchesNextPair = doesConnectionMatchWordPair(
+          existing,
+          nextW1,
+          nextW2
+        );
+        if (!existing.trim() || matchedPrevPair || !matchesNextPair) {
+          const replacement =
+            nextW1.length >= 2 && nextW2.length >= 2
+              ? buildDefaultConnect5Connection(nextW1, nextW2)
+              : "";
+          if (replacement !== existing) {
+            nextConns[connIdx] = replacement;
+            changed = true;
+          }
+        }
+      }
+      return changed ? nextConns : prevConns;
+    });
+  };
+
+  const handleAutoFillConnect5Explanations = () => {
+    if (!editPerm.canEdit) return;
+    const filled = [0, 1, 2, 3].map((idx) => {
+      const w1 = c5Words[idx] ?? "";
+      const w2 = c5Words[idx + 1] ?? "";
+      return w1.length >= 2 && w2.length >= 2
+        ? buildDefaultConnect5Connection(w1, w2)
+        : "";
+    }) as [string, string, string, string];
+    setC5Connections(filled);
   };
 
   const buildC5PuzzleObject = (): Connect5Puzzle => {
@@ -480,7 +531,7 @@ export default function AdminPage() {
       w.trim() ? w.trim().toUpperCase() : `WORD${i + 1}`
     ) as [string, string, string, string, string];
 
-    return {
+    return sanitizeConnect5Puzzle({
       id: `c5-custom-${targetDate}-${sanitizedWords.join("-").toLowerCase()}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: c5Title.trim() || "Custom Chain",
@@ -490,7 +541,7 @@ export default function AdminPage() {
       author: c5Author.trim() || "Puzzle Master",
       editor: c5Editor.trim() || "Daily Editor",
       customDate: targetDate,
-    };
+    });
   };
 
   const handleSaveConnect5 = async (playImmediately = false) => {
@@ -1454,9 +1505,23 @@ export default function AdminPage() {
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <label className="block text-xs font-bold uppercase text-gray-600">
-                    Compound Word Explanations (Shown on Win Modal)
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-bold uppercase text-gray-600">
+                      Compound Word Explanations (Shown on Win Modal)
+                    </label>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={!editPerm.canEdit}
+                      onClick={handleAutoFillConnect5Explanations}
+                      data-testid="admin-connect-5-autofill-explanations"
+                      className="font-bold border border-black text-[11px] shrink-0 disabled:opacity-50"
+                    >
+                      <Wand2 className="h-3 w-3 mr-1" />
+                      Auto-Fill Explanations
+                    </Button>
+                  </div>
                   {c5Connections.map((conn, idx) => (
                     <Input
                       key={idx}
@@ -1472,7 +1537,7 @@ export default function AdminPage() {
                         next[idx] = e.target.value;
                         setC5Connections(next);
                       }}
-                      placeholder={`Connection ${idx + 1} -> ${idx + 2}`}
+                      placeholder={`${c5Words[idx] || `WORD${idx + 1}`} ${c5Words[idx + 1] || `WORD${idx + 2}`} — definition`}
                       className="text-xs"
                     />
                   ))}

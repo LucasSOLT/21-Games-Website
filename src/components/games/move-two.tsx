@@ -261,7 +261,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
   useEffect(() => {
     if (!feedback) return;
-    const t = setTimeout(() => setFeedback(null), 1900);
+    const t = setTimeout(() => setFeedback(null), 1500);
     return () => clearTimeout(t);
   }, [feedback]);
 

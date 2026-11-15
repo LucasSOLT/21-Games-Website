@@ -1,9 +1,15 @@
-import type { Connect5Puzzle } from "@/data/puzzles/connect-5";
+import {
+  sanitizeConnect5Puzzle,
+  type Connect5Puzzle,
+} from "@/data/puzzles/connect-5";
 import type {
   TwentyOneJourney,
   TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
-import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
+import {
+  sanitize17SyllablesPuzzle,
+  type SeventeenSyllablesPuzzle,
+} from "@/data/puzzles/17-syllables";
 import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
 import {
   ALL_GAME_SLUGS,
@@ -890,10 +896,17 @@ export async function saveUserCreated21Board(
 }
 
 export function getAdminConnect5Overrides(): Record<string, Connect5Puzzle> {
-  return safeReadJson<Record<string, Connect5Puzzle>>(
+  const raw = safeReadJson<Record<string, Connect5Puzzle>>(
     `${STORAGE_PREFIX}_admin_c5_overrides`,
     {}
   );
+  const out: Record<string, Connect5Puzzle> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v && typeof v === "object") {
+      out[k] = sanitizeConnect5Puzzle(v);
+    }
+  }
+  return out;
 }
 
 export async function fetchRemoteConnect5Override(
@@ -912,8 +925,9 @@ export async function fetchRemoteConnect5Override(
       .maybeSingle();
 
     if (!error && data && data.payload) {
-      const puzzle = data.payload as Connect5Puzzle;
-      if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
+      const rawPuzzle = data.payload as Connect5Puzzle;
+      if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
+        const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
         const current = getAdminConnect5Overrides();
         current[dateKey] = puzzle;
         safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
@@ -1001,7 +1015,7 @@ function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
 
   // If this update contained puzzle data, ensure local storage has it
   if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && payload) {
-    const puzzle = payload as Connect5Puzzle;
+    const puzzle = sanitizeConnect5Puzzle(payload as Connect5Puzzle);
     detail.puzzle = puzzle;
     const current = getAdminConnect5Overrides();
     current[detail.dateKey] = puzzle;
@@ -1013,7 +1027,10 @@ function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
     current[detail.dateKey] = board;
     safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
   } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && payload) {
-    const puzzle = payload as SeventeenSyllablesPuzzle;
+    const puzzle = sanitize17SyllablesPuzzle(
+      payload as SeventeenSyllablesPuzzle,
+      detail.dateKey
+    );
     detail.puzzle = puzzle;
     const current = getAdmin17SyllablesOverrides();
     current[detail.dateKey] = puzzle;
@@ -1169,8 +1186,9 @@ export function initRealtimePuzzleSync(): () => void {
               if (newRow && newRow.game_slug && newRow.puzzle_date && newRow.payload) {
                 const dateKey = String(newRow.puzzle_date);
                 if (newRow.game_slug === "connect-5") {
-                  const puzzle = newRow.payload as Connect5Puzzle;
-                  if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
+                  const rawPuzzle = newRow.payload as Connect5Puzzle;
+                  if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
+                    const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
                     const current = getAdminConnect5Overrides();
                     current[dateKey] = puzzle;
                     safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
@@ -1197,8 +1215,9 @@ export function initRealtimePuzzleSync(): () => void {
                     });
                   }
                 } else if (newRow.game_slug === "17-syllables") {
-                  const puzzle = newRow.payload as SeventeenSyllablesPuzzle;
-                  if (Array.isArray(puzzle.lines) && puzzle.lines.length === 3) {
+                  const rawPuzzle = newRow.payload as SeventeenSyllablesPuzzle;
+                  if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
+                    const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
                     const current = getAdmin17SyllablesOverrides();
                     current[dateKey] = puzzle;
                     safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
@@ -1297,8 +1316,9 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
       if (!dateKey) continue;
 
       if (row.game_slug === "connect-5" && row.payload) {
-        const puzzle = row.payload as Connect5Puzzle;
-        if (Array.isArray(puzzle.words) && puzzle.words.length === 5) {
+        const rawPuzzle = row.payload as Connect5Puzzle;
+        if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
+          const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
           c5Overrides[dateKey] = puzzle;
           c5Changed = true;
           puzzleHashes[`connect-5:${dateKey}`] = computePuzzleContentHash(puzzle);
@@ -1311,8 +1331,9 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
           puzzleHashes[`21-things:${dateKey}`] = computePuzzleContentHash(board);
         }
       } else if (row.game_slug === "17-syllables" && row.payload) {
-        const puzzle = row.payload as SeventeenSyllablesPuzzle;
-        if (Array.isArray(puzzle.lines) && puzzle.lines.length === 3) {
+        const rawPuzzle = row.payload as SeventeenSyllablesPuzzle;
+        if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
+          const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
           s17Overrides[dateKey] = puzzle;
           s17Changed = true;
           puzzleHashes[`17-syllables:${dateKey}`] = computePuzzleContentHash(puzzle);
@@ -1374,9 +1395,10 @@ function resolveDefaultAdminAuthContext(
 
 export async function saveAdminConnect5Override(
   dateKey: string,
-  puzzle: Connect5Puzzle,
+  rawPuzzle: Connect5Puzzle,
   authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
+  const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
   const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
   const current = getAdminConnect5Overrides();
   current[dateKey] = puzzle;
@@ -1628,10 +1650,17 @@ export function getAdmin17SyllablesOverrides(): Record<
   string,
   SeventeenSyllablesPuzzle
 > {
-  return safeReadJson<Record<string, SeventeenSyllablesPuzzle>>(
+  const raw = safeReadJson<Record<string, SeventeenSyllablesPuzzle>>(
     `${STORAGE_PREFIX}_admin_17s_overrides`,
     {}
   );
+  const out: Record<string, SeventeenSyllablesPuzzle> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v && typeof v === "object") {
+      out[k] = sanitize17SyllablesPuzzle(v, k);
+    }
+  }
+  return out;
 }
 
 export async function fetchRemote17SyllablesOverride(
@@ -1650,17 +1679,15 @@ export async function fetchRemote17SyllablesOverride(
       .maybeSingle();
 
     if (!error && data && data.payload) {
-      const puzzle = data.payload as SeventeenSyllablesPuzzle;
-      if (
-        Array.isArray(puzzle.lines) &&
-        puzzle.lines.length === 3 &&
-        Array.isArray(puzzle.chunks) &&
-        puzzle.chunks.length > 0
-      ) {
-        const current = getAdmin17SyllablesOverrides();
-        current[dateKey] = puzzle;
-        safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
-        return puzzle;
+      const rawPuzzle = data.payload as SeventeenSyllablesPuzzle;
+      if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
+        const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
+        if (Array.isArray(puzzle.chunks) && puzzle.chunks.length > 0) {
+          const current = getAdmin17SyllablesOverrides();
+          current[dateKey] = puzzle;
+          safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+          return puzzle;
+        }
       }
     }
   } catch {
@@ -1671,9 +1698,10 @@ export async function fetchRemote17SyllablesOverride(
 
 export async function saveAdmin17SyllablesOverride(
   dateKey: string,
-  puzzle: SeventeenSyllablesPuzzle,
+  rawPuzzle: SeventeenSyllablesPuzzle,
   authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
+  const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
   const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
   const current = getAdmin17SyllablesOverrides();
   current[dateKey] = puzzle;

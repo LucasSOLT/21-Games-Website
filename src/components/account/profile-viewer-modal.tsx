@@ -1324,7 +1324,7 @@ export function LoggedInProfileDashboard({
     setCopiedBoardId(board.id);
     setTimeout(() => {
       setCopiedBoardId((prev) => (prev === board.id ? null : prev));
-    }, 2200);
+    }, 1500);
   };
 
   const handleSignOutClick = async () => {

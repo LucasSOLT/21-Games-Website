@@ -339,7 +339,7 @@ function EightfoldEchoBoard({
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToastMsg(null), 1600);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 1500);
   }, []);
 
   const handleTileTap = useCallback(

@@ -2,8 +2,14 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Check, Link2, Lock, Share2, Sparkles } from "lucide-react";
-import type { Connect5HintCoord, Connect5Puzzle } from "@/data/puzzles/connect-5";
+import { Check, Link2, Lock, Share2, Sparkles, Wand2 } from "lucide-react";
+import {
+  buildDefaultConnect5Connection,
+  doesConnectionMatchWordPair,
+  sanitizeConnect5Puzzle,
+  type Connect5HintCoord,
+  type Connect5Puzzle,
+} from "@/data/puzzles/connect-5";
 import { getLocalDateKey } from "@/lib/daily-engine";
 import { validateConnect5Payload } from "@/lib/seeded-random";
 import { saveCustomPuzzle } from "@/lib/custom-puzzles";
@@ -100,10 +106,57 @@ export function ConnectFiveCreator() {
 
   const updateWord = (rowIdx: number, raw: string) => {
     const clean = raw.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
+    const prevWords = words;
     const next = [...words] as [string, string, string, string, string];
     next[rowIdx] = clean;
     setWords(next);
     setHints((prev) => prev.filter((h) => h.row !== rowIdx || h.col < clean.length));
+    setConnections((prevConns) => {
+      const nextConns = [...prevConns] as [string, string, string, string];
+      const adjacentIndices = [rowIdx - 1, rowIdx].filter(
+        (i) => i >= 0 && i < 4
+      );
+      let changed = false;
+      for (const connIdx of adjacentIndices) {
+        const prevW1 = prevWords[connIdx] ?? "";
+        const prevW2 = prevWords[connIdx + 1] ?? "";
+        const nextW1 = next[connIdx] ?? "";
+        const nextW2 = next[connIdx + 1] ?? "";
+        const existing = nextConns[connIdx] ?? "";
+        const matchedPrevPair = doesConnectionMatchWordPair(
+          existing,
+          prevW1,
+          prevW2
+        );
+        const matchesNextPair = doesConnectionMatchWordPair(
+          existing,
+          nextW1,
+          nextW2
+        );
+        if (!existing.trim() || matchedPrevPair || !matchesNextPair) {
+          const replacement =
+            nextW1.length >= 2 && nextW2.length >= 2
+              ? buildDefaultConnect5Connection(nextW1, nextW2)
+              : "";
+          if (replacement !== existing) {
+            nextConns[connIdx] = replacement;
+            changed = true;
+          }
+        }
+      }
+      return changed ? nextConns : prevConns;
+    });
+  };
+
+  const handleAutoFillExplanations = () => {
+    const filled = [0, 1, 2, 3].map((idx) => {
+      const w1 = words[idx] ?? "";
+      const w2 = words[idx + 1] ?? "";
+      return w1.length >= 2 && w2.length >= 2
+        ? buildDefaultConnect5Connection(w1, w2)
+        : "";
+    }) as [string, string, string, string];
+    setConnections(filled);
   };
 
   const toggleHint = (row: number, col: number) => {
@@ -121,7 +174,7 @@ export function ConnectFiveCreator() {
     setPublishing(true);
     try {
       const id = generateCustomGameId("connect-5");
-      const candidate: Connect5Puzzle = {
+      const candidate: Connect5Puzzle = sanitizeConnect5Puzzle({
         id,
         puzzleNumber: 0,
         title: title.trim() || `${profile.displayName}'s Chain`,
@@ -143,7 +196,7 @@ export function ConnectFiveCreator() {
         revealedHints: hints.filter(
           (h) => h.row >= 1 && h.row <= 4 && h.col >= 0 && h.col < (words[h.row]?.length ?? 0)
         ),
-      };
+      });
 
       const check = validateConnect5Payload(candidate);
       if (!check.valid) {
@@ -237,7 +290,7 @@ export function ConnectFiveCreator() {
                   const ok = await copyToClipboard(created.blurbWithUrl);
                   if (ok) {
                     setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
+                    setTimeout(() => setCopied(false), 1500);
                   }
                 }}
               >
@@ -271,6 +324,22 @@ export function ConnectFiveCreator() {
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. Sun to Storm"
               />
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase text-neutral-600">
+                5-Word Chain &amp; Win Explanations
+              </span>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={handleAutoFillExplanations}
+                className="font-bold border border-black text-[11px] shrink-0"
+              >
+                <Wand2 className="h-3 w-3 mr-1" />
+                Auto-Fill Explanations
+              </Button>
             </div>
 
             <div className="space-y-3">

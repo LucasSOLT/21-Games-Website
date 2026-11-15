@@ -294,8 +294,8 @@ const shareButtonsSrc = fs.readFileSync(
 kit.assert(
   shareButtonsSrc.includes("nativeShareResultsOnly") &&
     shareButtonsSrc.includes("copyResultsOnly") &&
-    shareButtonsSrc.includes("COPIED_FEEDBACK_MS = 2000"),
-  "ResultShareButtons implements decoupled nativeShareResultsOnly + copyResultsOnly (2000ms)"
+    shareButtonsSrc.includes("COPIED_FEEDBACK_MS = 1500"),
+  "ResultShareButtons implements decoupled nativeShareResultsOnly + copyResultsOnly (1500ms)"
 );
 
 for (const [slug, relFile] of GAME_COMPONENT_FILES) {

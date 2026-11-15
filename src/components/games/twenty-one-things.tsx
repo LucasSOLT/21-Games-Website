@@ -993,7 +993,7 @@ function TwentyOneThingsBoardView({
           setJourneyResultsCopied(false);
         }
         journeyCopyTimerRef.current = null;
-      }, 2000);
+      }, 1500);
     }
   };
 
@@ -1777,7 +1777,7 @@ function TwentyOneThingsBoardView({
                             setCreatorLinkCopied(false);
                           }
                           creatorCopyTimerRef.current = null;
-                        }, 2000);
+                        }, 1500);
                       }
                     }}
                     className={cn(

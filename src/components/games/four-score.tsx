@@ -242,7 +242,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     setShaking(true);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
-    errorTimerRef.current = setTimeout(() => setErrorMsg(null), 2400);
+    errorTimerRef.current = setTimeout(() => setErrorMsg(null), 1500);
     shakeTimerRef.current = setTimeout(() => setShaking(false), 450);
   }, []);
 

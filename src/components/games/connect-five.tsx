@@ -23,7 +23,10 @@ import {
   Sparkles,
   Trophy,
 } from "lucide-react";
-import type { Connect5Puzzle } from "@/data/puzzles/connect-5";
+import {
+  sanitizeConnect5Puzzle,
+  type Connect5Puzzle,
+} from "@/data/puzzles/connect-5";
 import { getConnect5PuzzleForDate, getLocalDateKey } from "@/lib/daily-engine";
 import {
   buildCustomGameShareUrl,
@@ -153,7 +156,8 @@ function loadInitialBoardState(
   customPuzzle?: Connect5Puzzle
 ): InitialBoardState {
   if (customPuzzle) {
-    const base = createInitialGrid(customPuzzle);
+    const sanitizedCustom = sanitizeConnect5Puzzle(customPuzzle);
+    const base = createInitialGrid(sanitizedCustom);
     const firstOpen = findFirstOpenCell(
       base.grid,
       base.locked,
@@ -161,7 +165,7 @@ function loadInitialBoardState(
       1
     );
     return {
-      puzzle: customPuzzle,
+      puzzle: sanitizedCustom,
       grid: base.grid,
       locked: base.locked,
       slashed: base.slashed,
@@ -174,16 +178,31 @@ function loadInitialBoardState(
   }
 
   const overrides = getAdminConnect5Overrides();
-  const resolved = getConnect5PuzzleForDate(activeDateKey, overrides);
+  const resolved = sanitizeConnect5Puzzle(
+    getConnect5PuzzleForDate(activeDateKey, overrides)
+  );
   const base = createInitialGrid(resolved);
   const saved = getConnect5Progress(activeDateKey, resolved.id);
   const expectedHash = computePuzzleContentHash(resolved);
+  const isSolvedForCurrentWords =
+    Boolean(saved) &&
+    saved!.status === "won" &&
+    resolved.words.every((word, r) => saved!.grid[r]?.join("") === word);
 
   if (
     saved &&
     isSavedGridCompatible(saved, resolved) &&
-    (!saved.puzzleHash || saved.puzzleHash === expectedHash)
+    (!saved.puzzleHash ||
+      saved.puzzleHash === expectedHash ||
+      isSolvedForCurrentWords)
   ) {
+    if (saved.puzzleHash && saved.puzzleHash !== expectedHash && isSolvedForCurrentWords) {
+      saveConnect5Progress({
+        ...saved,
+        puzzleId: resolved.id,
+        puzzleHash: expectedHash,
+      });
+    }
     const mergedLocked = base.locked.map((row, r) =>
       row.map((isLock, c) => isLock || Boolean(saved.revealedByHint?.[r]?.[c]))
     );
@@ -304,7 +323,7 @@ function ConnectFiveCustomLoader({
       }
       setState({
         loading: false,
-        puzzle: {
+        puzzle: sanitizeConnect5Puzzle({
           ...checked.puzzle,
           id: record.id,
           puzzleNumber: 0,
@@ -312,7 +331,7 @@ function ConnectFiveCustomLoader({
           editor: record.creatorHandle
             ? `@${record.creatorHandle.replace(/^@+/, "")}`
             : checked.puzzle.editor || "SOL GaMES",
-        },
+        }),
       });
     }
     void load();
@@ -440,7 +459,8 @@ function ConnectFiveBoard({
   }, [elapsedSeconds]);
 
   const applyRemotePuzzleIfChanged = useCallback(
-    (remotePuzzle: Connect5Puzzle) => {
+    (rawRemotePuzzle: Connect5Puzzle) => {
+      const remotePuzzle = sanitizeConnect5Puzzle(rawRemotePuzzle);
       const remoteHash = computePuzzleContentHash(remotePuzzle);
       const currentHash = computePuzzleContentHash(puzzle);
       const wordsChanged =
@@ -449,6 +469,22 @@ function ConnectFiveBoard({
         remotePuzzle.connections.join("|") !== puzzle.connections.join("|");
 
       if (remoteHash !== currentHash || wordsChanged || connectionsChanged) {
+        if (!wordsChanged && (status === "won" || isBufferingWinRef.current)) {
+          setPuzzle(remotePuzzle);
+          saveConnect5Progress({
+            dateKey: activeDateKey,
+            puzzleId: remotePuzzle.id,
+            grid,
+            slashed,
+            revealedByHint: locked,
+            elapsedSeconds: elapsedSecondsRef.current,
+            hintsUsed,
+            status: "won",
+            puzzleHash: remoteHash,
+          });
+          return;
+        }
+
         clearConnect5Progress(activeDateKey);
         const base = createInitialGrid(remotePuzzle);
         const firstOpen = findFirstOpenCell(
@@ -490,7 +526,7 @@ function ConnectFiveBoard({
         });
       }
     },
-    [activeDateKey, puzzle]
+    [activeDateKey, grid, hintsUsed, locked, puzzle, slashed, status]
   );
 
   // Fetch remote Supabase daily_puzzles override if configured and listen to live updates
@@ -663,7 +699,7 @@ function ConnectFiveBoard({
         if (notQuiteTimeoutRef.current) clearTimeout(notQuiteTimeoutRef.current);
         notQuiteTimeoutRef.current = setTimeout(() => {
           setNotQuiteBanner(false);
-        }, 3800);
+        }, 1500);
       }
     },
     [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom]
@@ -1167,7 +1203,7 @@ function ConnectFiveBoard({
           setResultsCopied(false);
         }
         copyTimeoutRef.current = null;
-      }, 2000);
+      }, 1500);
     }
   };
 

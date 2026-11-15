@@ -1293,7 +1293,7 @@ function SixPicsCreator() {
                   const ok = await copyToClipboard(created.blurbWithUrl);
                   if (ok) {
                     setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
+                    setTimeout(() => setCopied(false), 1500);
                   }
                 }}
               >

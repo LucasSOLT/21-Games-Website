@@ -158,8 +158,20 @@ function isSeventeenSyllablesPayload(p: unknown): p is SeventeenSyllablesPuzzle 
     !o.lines.every((l) => typeof l === "string" && l.trim().length > 0) ||
     !Array.isArray(o.chunks) ||
     o.chunks.length === 0 ||
+    !o.chunks.every((c) => typeof c === "string" && c.trim().length > 0) ||
     typeof o.theme !== "string"
   ) {
+    return false;
+  }
+  const linesAlpha = (o.lines as string[])
+    .join("")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  const chunksAlpha = (o.chunks as string[])
+    .join("")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  if (!linesAlpha || linesAlpha !== chunksAlpha) {
     return false;
   }
   return validateHaikuStructure(o.lines as [string, string, string]).isValid;

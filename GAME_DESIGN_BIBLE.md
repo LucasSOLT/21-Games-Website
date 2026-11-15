@@ -10,9 +10,10 @@
 
 ## 0. Global Architectural Directives (Platform-Wide Rules)
 
-### 0.1 Strict NYT Games Minimalist Aesthetic
+### 0.1 Strict NYT Games Minimalist Aesthetic & `1.5s` (`1500ms`) Transient Popup Flash Rule
 - Every screen, header, modal, keyboard, and transition across the entire platform must feel **smart, creative, flat, and minimalistic—just like NYT Games**.
 - Never clutter the UI or overwhelm the user. Keep typography crisp (`Roboto Slab` / editorial serif headlines + `Inter` UI + `JetBrains Mono` counters), spacing generous, and status bars ultra-clean.
+- **Universal `1.5s` (`1500ms`) Popup / Toast Flash Duration**: Whenever a transient popup message, check-puzzle toast, error banner, or clipboard feedback badge appears across any game or studio (`<Toaster duration={1500}>`, `useToast` `TOAST_DURATION_MS = 1500`, Connect 5 `"Not quite"` banner, Four Score error banner, Move Two canvas toast, Eightfold Echo `+5s` toast, and `"Copied!"` pills), flash it briefly for **`1.5 seconds` (`1500ms`)** and dismiss cleanly.
 
 ### 0.2 Unified AI Integration (Google AI Studio Free Tier + OpenRouter)
 - Provide a unified AI helper service (`src/lib/ai-helper.ts` + CLI/script runners for batch generation and client/admin helper hooks) supporting **both**:
@@ -31,7 +32,7 @@
 
 ### 0.4 Zero-Day / Zero-Breakage Self-Healing Architecture
 - **Per-Game React Error Boundary (`<GameErrorBoundary>`)**: Wrap every individual game component in a dedicated React Error Boundary with an instant **"Reset / Reload Puzzle State"** recovery button so a corrupted `localStorage` state or runtime glitch can never crash the page.
-- **Strict Payload Schema Validation**: Validate every puzzle payload (from Supabase, `localStorage`, custom share links, or static banks) with strict runtime schema validators before rendering.
+- **Strict Payload Schema Validation & Runtime Self-Healing**: Validate every puzzle payload (from Supabase, `localStorage`, custom share links, or static banks) with strict runtime schema validators before rendering, and self-heal partial/stale manual overrides on read (`sanitizeConnect5Puzzle` heals mismatched `connections` against `words`; `sanitize17SyllablesPuzzle` rebuilds `chunks` whenever joined chunk letters do not match all 3 haiku `lines`).
 - **Deterministic Date-Seeded Fallback (`seed = YYYY-MM-DD`)**: If a Supabase fetch, override, or scheduled batch is ever missing or malformed for any daily game on any date (`past`, `today`, or `future`), automatically fall back to a deterministic date-seeded generator (`hash(gameSlug + ":" + dateKey)`) in the client so a player **never** sees a blank screen, 404, or missing daily puzzle.
 - **Zero Broken Images**: Use inline code-generated SVGs and `<ImageWithFallback>` components so broken image icons are impossible.
 
@@ -50,7 +51,7 @@
 - **Custom creator gates**: `17 Syllables` and `21 Things` custom creators (`?mode=create`) require a signed-in, non-banned account; every user-authored field (incl. theme/creator name) passes Tier-1 moderation.
 - **Database (Supabase `trwyrfhicbnfhlbiztau`, migrations `20261111000001`, `20261111000002`, `20261112000001`, `20261112000002`)**: RLS on every table (`daily_puzzles`, `user_profiles`, `twenty_one_boards`, `twenty_one_responses`, `twenty_one_journeys`, `custom_puzzles`, `one_win_submissions`); `anon` has SELECT only on public puzzle/community tables (+ bounded moderated INSERT on `twenty_one_responses`, `twenty_one_journeys`, and `one_win_submissions`) and **no access at all to `user_profiles`** (no email enumeration). `authenticated` users read/update only their own profile, and **column-level grants** limit what they can write to `display_name, handle, avatar_color, connect5_stats, twenty_one_stats, all_game_stats, recent_picks, created_board_ids, updated_at` (INSERT additionally `id, email`); `role`, `is_banned`, `banned_*`, `email`, `id`, `created_at` are not API-writable. The `enforce_user_profile_security()` trigger is the second layer: it classifies callers from `auth.role()`, the `request.jwt.claims` JSON GUC, the legacy GUC, `auth.uid()`, and `session_user` — **never `current_user`** (always the owner inside `SECURITY DEFINER`) — and only `service_role` or a JWT-less non-API session (migrations / SQL editor / GoTrue) bypasses it, raising `42501` on any unauthorized `INSERT` or `UPDATE`.
 - **New-table rule**: any new table must enable RLS and define explicit grants + policies in the *same* migration — Supabase's default privileges (plus migration `20261111000001`'s `alter default privileges`) hand `anon` SELECT and `authenticated` SELECT/INSERT/UPDATE on every new `public` table, so a table without RLS would be wide open.
-- **Universal Completion Share Invariant**: Every completion screen across all 9 countdown games renders two distinct actions: **Share** (`nativeShareResultsOnly` — calls `navigator.share({ title, text: fullTextWithUrl })` with no separate `url` property so iOS/macOS Messages retains emojis + score + link, and never writes to clipboard) and **Copy results** (`copyResultsOnly` — writes to clipboard only with `"Copied!"` feedback for `2000ms`, and never invokes `navigator.share`).
+- **Universal Completion Share Invariant**: Every completion screen across all 9 countdown games renders two distinct actions: **Share** (`nativeShareResultsOnly` — calls `navigator.share({ title, text: fullTextWithUrl })` with no separate `url` property so iOS/macOS Messages retains emojis + score + link, and never writes to clipboard) and **Copy results** (`copyResultsOnly` — writes to clipboard only with `"Copied!"` feedback for `1500ms`, and never invokes `navigator.share`).
 - **Verification (must stay green)**: `scripts/test-step2-5-auth-lockdown.ts`, `scripts/verify-auth-security-lockdown.ts`, `scripts/test-step2-5-escalation.ts`, `npm test` (`CP1–CP10`), and `npm run generate-batch -- --dry-run`.
 
 ---
@@ -214,9 +215,13 @@
   - Post-game ending screen transitions into a **`2×3` grid** displaying all 6 uncovered images, their numbered names (`1. Ocean`), per-image score badges (`6/6 pts`, `0/6 pts`), 6-tile emoji receipt (`🟩` `5–6 pts`, `🟨` `3–4 pts`, `🟧` `1–2 pts`, `⬜` `0 pts`), and decoupled **Share** + **Copy results** buttons.
   - Every image renders through `<ImageWithFallback>` supporting uploaded `data:image/*` photos, external/Supabase URLs, AND rich inline SVG illustrated scene cards so broken images are impossible.
 
-### Game #5 — `Connect 5` (LIVE — Enhanced with Splash, Moderation & Error Boundary)
+### Game #5 — `Connect 5` (LIVE — Enhanced with Splash, Moderation, Self-Healing Connections & Error Boundary)
 - **Route**: `/games/connect-5` | **Archive**: `/games/connect-5/archive`
-- **Core Loop**: 5-row variable-length compound word chain (`Row 1` shown & locked, `Rows 2–5` have pre-revealed hint letters, custom QWERTY keyboard, smart Backspace, automatic check on last box with `"Not quite"` + diagonal slashes `/` on wrong letters and direct type-to-overwrite).
+- **Core Loop**: 5-row variable-length compound word chain (`Row 1` shown & locked, `Rows 2–5` have pre-revealed hint letters, custom QWERTY keyboard, smart Backspace, automatic check on last box with `1.5s` `"Not quite"` flash + diagonal slashes `/` on wrong letters and direct type-to-overwrite).
+- **Spoiler-Free Overarching Titles & Self-Healing Win-Screen Connections**:
+  - **Spoiler-Free Chain Titles**: Neither static `CONNECT_5_PUZZLES` nor post-66-day synthesized chains (`buildSpoilerFreeConnect5Title`) may ever include hidden answer words `words[1..4]` inside `title`.
+  - **Runtime Self-Healing Connections (`sanitizeConnect5Puzzle`)**: Every Connect 5 payload loaded from Supabase `daily_puzzles`, `localStorage`, or `?b=` custom links verifies each `connections[i]` against `(words[i], words[i+1])` (`doesConnectionMatchWordPair`). If an editor updated the 5 words in `/admin` while leaving stale explanations from the previous default puzzle, `sanitizeConnect5Puzzle` automatically replaces any mismatched or empty `connections[i]` via `buildDefaultConnect5Connection(w1, w2)` — while preserving already-completed wins (`status === "won"`) when `words` are unchanged.
+  - **`/admin` & Creator Mode Auto-Sync**: Editing any word in `/admin` or `ConnectFiveCreator` automatically refreshes any adjacent `connections` entry that no longer matches `(words[i], words[i+1])`, offers a 1-click **"Auto-Fill Explanations"** helper, and runs `sanitizeConnect5Puzzle` before saving.
 - **New Enhancements**:
   - Wrap in `<GameSplashScreen>` and `<GameErrorBoundary>`.
   - Enable authenticated **Creator Mode (`Create & Share`)** with compact `?b=c5-xxxxxxxx` short links, native share sheet, and Tier 1/Tier 2 moderation.

@@ -17,10 +17,18 @@ const { nativeShareResultsOnly, copyResultsOnly } = await import(
 const { PuzzleCheckRevealModal } = await import(
   "@/components/games/puzzle-check-reveal-modal"
 );
-const { CONNECT_5_PUZZLES } = await import("@/data/puzzles/connect-5");
-const { SEVENTEEN_SYLLABLES_PUZZLES, buildStructuredHaikuLines } = await import(
-  "@/data/puzzles/17-syllables"
-);
+const {
+  CONNECT_5_PUZZLES,
+  doesConnectionMatchWordPair,
+  getConnect5PuzzleForDate,
+  sanitizeConnect5Puzzle,
+} = await import("@/data/puzzles/connect-5");
+const {
+  SEVENTEEN_SYLLABLES_PUZZLES,
+  buildStructuredHaikuLines,
+  sanitize17SyllablesPuzzle,
+} = await import("@/data/puzzles/17-syllables");
+const { getPuzzleSource } = await import("@/lib/puzzle-sources");
 
 let passedCount = 0;
 let failedCount = 0;
@@ -435,6 +443,141 @@ assert(
   syllablesSource.includes("checkRevealModalOpen") &&
     syllablesSource.includes("bg-blue-600 text-white border-blue-600"),
   "seventeen-syllables.tsx highlights LifeBuoy icon with active blue style when modal is open"
+);
+
+// ----------------------------------------------------------------------------
+// Group 6: Self-Healing Overrides, Spoiler-Free Titles & 1.5s Popup Flash
+// ----------------------------------------------------------------------------
+console.log("\n--- Group 6: Self-Healing Overrides & 1.5s Popup Flash ---");
+
+const bowserBoogieRaw = {
+  id: "c5-custom-2026-11-15-dog-house-party-line-dance",
+  puzzleNumber: 76,
+  title: "Bowser Boogie",
+  words: ["DOG", "HOUSE", "PARTY", "LINE", "DANCE"] as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ],
+  connections: [
+    "FOOTSTEP — sound or mark of a walking stride",
+    "STEP DOWN — descend a stair or yield a title",
+    "DOWNSTAGE — toward the front of a theater platform",
+    "STAGELIGHT — bright theatrical spotlight",
+  ] as [string, string, string, string],
+  revealedHints: [
+    { row: 1, col: 0 },
+    { row: 3, col: 0 },
+  ],
+  author: "Steve Huff",
+  editor: "Daily Editorial",
+  customDate: "2026-11-15",
+};
+
+const healedBowser = sanitizeConnect5Puzzle(bowserBoogieRaw);
+assert(
+  healedBowser.connections[0].startsWith("DOGHOUSE —") &&
+    healedBowser.connections[1].startsWith("HOUSE PARTY —") &&
+    healedBowser.connections[2].startsWith("PARTY LINE —") &&
+    healedBowser.connections[3].startsWith("LINE DANCE —"),
+  "sanitizeConnect5Puzzle heals stale FOOTSTEP..STAGELIGHT connections on 'Bowser Boogie' to DOGHOUSE / HOUSE PARTY / PARTY LINE / LINE DANCE"
+);
+
+const paddlesRaw = {
+  ...bowserBoogieRaw,
+  title: "Games with paddles!",
+  words: ["TABLE", "TENNIS", "RACKET", "SPORTS", "BAR"] as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ],
+  connections: [
+    "TABLE TENNIS — Indoor ping-pong",
+    "TENNIS RACKET — Strung paddle",
+    ".RACKET SPORTS — Any game involving a paddle or racket",
+    "SPORTS BAR — Pub with TVs",
+  ] as [string, string, string, string],
+};
+const healedPaddles = sanitizeConnect5Puzzle(paddlesRaw);
+assert(
+  healedPaddles.connections[2] ===
+    "RACKET SPORTS — Any game involving a paddle or racket",
+  "sanitizeConnect5Puzzle strips stray leading period while preserving valid custom explanation"
+);
+
+let allScheduleSpoilerFreeAndMatched = true;
+let scheduleFailDetail = "";
+for (let offset = 0; offset < 420; offset++) {
+  const dk = new Date(Date.UTC(2026, 10, 5 + offset)).toISOString().slice(0, 10);
+  const p = getConnect5PuzzleForDate(dk);
+  const titleUpper = p.title.toUpperCase();
+  for (let r = 1; r < 5; r++) {
+    const hw = p.words[r]!;
+    if (hw.length >= 3 && titleUpper.includes(hw)) {
+      allScheduleSpoilerFreeAndMatched = false;
+      scheduleFailDetail = `${dk} title "${p.title}" contains hidden word "${hw}"`;
+      break;
+    }
+  }
+  for (let i = 0; i < 4; i++) {
+    if (!doesConnectionMatchWordPair(p.connections[i], p.words[i]!, p.words[i + 1]!)) {
+      allScheduleSpoilerFreeAndMatched = false;
+      scheduleFailDetail = `${dk} bridge ${i} mismatch: "${p.connections[i]}" vs ${p.words[i]}+${p.words[i + 1]}`;
+      break;
+    }
+  }
+  if (!allScheduleSpoilerFreeAndMatched) break;
+}
+assert(
+  allScheduleSpoilerFreeAndMatched,
+  "All 66 static + 354 synthesized Connect 5 puzzles have matching connections and zero hidden-word title spoilers",
+  scheduleFailDetail
+);
+
+const novemberWindsRaw = {
+  id: "17s-custom-2026-11-20",
+  puzzleNumber: 20,
+  dateKey: "2026-11-20",
+  theme: "November Winds",
+  author: "Lucas",
+  lines: [
+    "Cranes fly in the mist",
+    "Autumn whispers through the reeds",
+    "Sun sets in the west",
+  ] as [string, string, string],
+  chunks: ["CRANES", "FLY", "IN", "THE", "MIST"],
+};
+const s17Source = getPuzzleSource("17-syllables");
+assert(
+  s17Source !== null && s17Source.validate(novemberWindsRaw) === false,
+  "Raw 2026-11-20 17-Syllables payload with Line-1-only chunks is rejected before self-healing"
+);
+const healedNovWinds = sanitize17SyllablesPuzzle(novemberWindsRaw, "2026-11-20");
+assert(
+  s17Source !== null &&
+    s17Source.validate(healedNovWinds) === true &&
+    healedNovWinds.puzzleNumber === 81 &&
+    healedNovWinds.chunks.length >= 14,
+  "sanitize17SyllablesPuzzle rebuilds full 3-line chunks and sets puzzleNumber #81 for 2026-11-20"
+);
+
+const useToastSrc = fs.readFileSync(
+  path.resolve("src/hooks/use-toast.ts"),
+  "utf8"
+);
+const toasterSrc = fs.readFileSync(
+  path.resolve("src/components/ui/toaster.tsx"),
+  "utf8"
+);
+assert(
+  useToastSrc.includes("TOAST_DURATION_MS = 1500") &&
+    toasterSrc.includes("duration={TOAST_DURATION_MS}") &&
+    connect5Source.includes("}, 1500);"),
+  "Global Toaster and Connect 5 transient popups flash for ~1.5 seconds (1500ms)"
 );
 
 console.log("\n=======================================================");

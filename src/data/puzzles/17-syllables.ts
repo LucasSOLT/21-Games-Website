@@ -1197,6 +1197,65 @@ const HAIKU_AUTHORS: readonly string[] = [
 const SYNTHESIZED_17_CACHE = new Map<string, SeventeenSyllablesPuzzle>();
 
 /**
+ * Self-heals any 17 Syllables puzzle payload whose `chunks` array is missing lines or
+ * fails to match all letters in `lines` (e.g., partial manual override payloads), and
+ * aligns `puzzleNumber` / `dateKey` when resolving a scheduled daily date.
+ */
+export function sanitize17SyllablesPuzzle(
+  puzzle: SeventeenSyllablesPuzzle,
+  scheduledDateKey?: string
+): SeventeenSyllablesPuzzle {
+  if (!puzzle || !Array.isArray(puzzle.lines) || puzzle.lines.length !== 3) {
+    return puzzle;
+  }
+
+  const linesAlpha = puzzle.lines
+    .join("")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+  const rawChunks = Array.isArray(puzzle.chunks) ? puzzle.chunks : [];
+  const chunksAlpha = rawChunks
+    .map((c) => (typeof c === "string" ? c : ""))
+    .join("")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
+
+  const needsChunkHeal = !linesAlpha || chunksAlpha !== linesAlpha;
+  const healedChunks = needsChunkHeal
+    ? puzzle.customWordChunks && Object.keys(puzzle.customWordChunks).length > 0
+      ? buildStructuredHaikuLines(puzzle.lines, puzzle.customWordChunks).flatMap(
+          (l) => l.words.flatMap((w) => w.chunks)
+        )
+      : sliceHaikuIntoChunks(puzzle.lines, 16)
+    : puzzle.chunks;
+
+  const effectiveDateKey =
+    scheduledDateKey && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDateKey)
+      ? scheduledDateKey
+      : undefined;
+  const expectedPuzzleNum =
+    effectiveDateKey && puzzle.puzzleNumber !== 0
+      ? getPuzzleNumberForDate(effectiveDateKey)
+      : puzzle.puzzleNumber;
+  const nextDateKey = effectiveDateKey ?? puzzle.dateKey;
+
+  if (
+    !needsChunkHeal &&
+    expectedPuzzleNum === puzzle.puzzleNumber &&
+    nextDateKey === puzzle.dateKey
+  ) {
+    return puzzle;
+  }
+
+  return {
+    ...puzzle,
+    dateKey: nextDateKey,
+    puzzleNumber: expectedPuzzleNum,
+    chunks: healedChunks,
+  };
+}
+
+/**
  * Returns a deterministic, [5, 7, 5] validated, non-repeating 17 Syllables puzzle for any dateKey.
  * - For `0 <= diff < 66` (`diff = daysBetweenDateKeys(ROTATION_ANCHOR, dateKey)`), returns `SEVENTEEN_SYLLABLES_PUZZLES[diff]`.
  * - For all other dates in 2026–2027 and beyond, deterministically constructs and caches a unique
@@ -1207,7 +1266,7 @@ export function get17SyllablesPuzzleForDate(
   customOverrides?: Record<string, SeventeenSyllablesPuzzle>
 ): SeventeenSyllablesPuzzle {
   if (customOverrides && customOverrides[dateKey]) {
-    return customOverrides[dateKey];
+    return sanitize17SyllablesPuzzle(customOverrides[dateKey], dateKey);
   }
 
   const puzzleNumber = getPuzzleNumberForDate(dateKey);

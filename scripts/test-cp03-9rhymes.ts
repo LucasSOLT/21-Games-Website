@@ -181,7 +181,7 @@ for (const needle of [
 kit.assert(!comp.includes('data-testid="nine-starter-badge"'), "redundant top-right rhyme badge removed");
 const btns = fs.readFileSync("src/components/games/result-share-buttons.tsx", "utf8");
 kit.assert(btns.includes("nativeShareResultsOnly") && btns.includes("copyResultsOnly"), "Share + Copy use split helpers");
-kit.assert(btns.includes("Copy results") && btns.includes("Share") && btns.includes("2000"), "Share/Copy labels + 2000ms");
+kit.assert(btns.includes("Copy results") && btns.includes("Share") && btns.includes("1500"), "Share/Copy labels + 1500ms");
 const page = fs.readFileSync("src/app/games/9-rhymes/page.tsx", "utf8");
 kit.assert(page.includes("GameErrorBoundary") && page.includes("Suspense"), "page wraps boundary + Suspense");
 const admin = fs.readFileSync("src/app/admin/page.tsx", "utf8");

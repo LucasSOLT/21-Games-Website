@@ -4,7 +4,8 @@ import * as React from "react"
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 3
-const TOAST_REMOVE_DELAY = 4000
+export const TOAST_DURATION_MS = 1500
+const TOAST_REMOVE_DELAY = 300
 
 type ToasterToast = ToastProps & {
   id: string
@@ -31,8 +32,18 @@ interface State {
 }
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+const toastAutoDismissTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+const clearAutoDismissTimer = (toastId: string) => {
+  const timer = toastAutoDismissTimeouts.get(toastId)
+  if (timer) {
+    clearTimeout(timer)
+    toastAutoDismissTimeouts.delete(toastId)
+  }
+}
 
 const addToRemoveQueue = (toastId: string) => {
+  clearAutoDismissTimer(toastId)
   if (toastTimeouts.has(toastId)) {
     return
   }
@@ -44,6 +55,7 @@ const addToRemoveQueue = (toastId: string) => {
       toastId: toastId,
     })
   }, TOAST_REMOVE_DELAY)
+  timeout.unref?.()
 
   toastTimeouts.set(toastId, timeout)
 }
@@ -89,11 +101,14 @@ export const reducer = (state: State, action: Action): State => {
     }
     case "REMOVE_TOAST":
       if (action.toastId === undefined) {
+        toastAutoDismissTimeouts.forEach((timer) => clearTimeout(timer))
+        toastAutoDismissTimeouts.clear()
         return {
           ...state,
           toasts: [],
         }
       }
+      clearAutoDismissTimer(action.toastId)
       return {
         ...state,
         toasts: state.toasts.filter((t) => t.id !== action.toastId),
@@ -116,6 +131,7 @@ type Toast = Omit<ToasterToast, "id">
 
 function toast({ ...props }: Toast) {
   const id = genId()
+  const durationMs = props.duration ?? TOAST_DURATION_MS
 
   const update = (props: ToasterToast) =>
     dispatch({
@@ -128,6 +144,7 @@ function toast({ ...props }: Toast) {
     type: "ADD_TOAST",
     toast: {
       ...props,
+      duration: durationMs,
       id,
       open: true,
       onOpenChange: (open) => {
@@ -135,6 +152,13 @@ function toast({ ...props }: Toast) {
       },
     },
   })
+
+  const autoDismissTimer = setTimeout(() => {
+    toastAutoDismissTimeouts.delete(id)
+    dismiss()
+  }, durationMs)
+  autoDismissTimer.unref?.()
+  toastAutoDismissTimeouts.set(id, autoDismissTimer)
 
   return {
     id: id,

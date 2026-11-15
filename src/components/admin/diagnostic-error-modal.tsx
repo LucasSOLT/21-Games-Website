@@ -108,7 +108,7 @@ export function DiagnosticErrorModal({
         description:
           "Preloaded diagnostic payload copied to clipboard. Ready to paste and send to the developer.",
       });
-      setTimeout(() => setCopied(false), 2500);
+      setTimeout(() => setCopied(false), 1500);
     } else {
       toast({
         title: "Copy Failed",
