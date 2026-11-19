@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,10 @@ interface EightfoldEchoStudioTabProps {
   canEdit: boolean;
   editReason?: string;
   syncVersion?: number;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
 }
 
@@ -38,6 +42,10 @@ export function EightfoldEchoStudioTab({
   canEdit,
   editReason,
   syncVersion = 0,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
 }: EightfoldEchoStudioTabProps) {
   const initialPuzzle = useMemo<EightfoldEchoPuzzle>(() => {
@@ -67,6 +75,12 @@ export function EightfoldEchoStudioTab({
   }, [targetDate, initialPuzzle]);
 
   const [draft, setDraft] = useState<EightfoldEchoPuzzle>(initialPuzzle);
+  const [author, setAuthor] = useState<string>(
+    initialPuzzle.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    initialPuzzle.editor || defaultEditor || "Daily Editorial"
+  );
   const [previewDifficulty, setPreviewDifficulty] = useState<EchoDifficulty>("easy");
   const [rerollCount, setRerollCount] = useState(0);
   const [seedInput, setSeedInput] = useState(initialPuzzle.seed ?? `date:${targetDate}`);
@@ -76,9 +90,39 @@ export function EightfoldEchoStudioTab({
   if (prevInitial !== initialPuzzle) {
     setPrevInitial(initialPuzzle);
     setDraft(initialPuzzle);
+    setAuthor(initialPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(initialPuzzle.editor || defaultEditor || "Daily Editorial");
     setSeedInput(initialPuzzle.seed ?? `date:${targetDate}`);
     setErrors([]);
   }
+
+  const liveDraft = useMemo<EightfoldEchoPuzzle>(() => {
+    const easyStage = getEchoStage(draft, "easy");
+    const hardStage = getEchoStage(draft, "hard");
+    return {
+      ...draft,
+      id: `8e-admin-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: draft.title.trim() || "Harmonic Resonance",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
+      tiles: hardStage.tiles,
+      solution: hardStage.solution,
+      stages: {
+        easy: easyStage,
+        hard: hardStage,
+      },
+      customDate: targetDate,
+    };
+  }, [author, defaultAuthor, defaultEditor, draft, editorName, targetDate]);
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(liveDraft);
+  }, [liveDraft]);
 
   const handleReroll = () => {
     const next = rerollCount + 1;
@@ -92,10 +136,13 @@ export function EightfoldEchoStudioTab({
     });
     setDraft(nextPuzzle);
     setErrors([]);
+    onDirty?.();
   };
 
   const handleClearAll = () => {
     setSeedInput("");
+    setAuthor("");
+    setEditorName("");
     setDraft((prev) => ({
       ...prev,
       title: "",
@@ -103,12 +150,16 @@ export function EightfoldEchoStudioTab({
       tiles: prev.tiles.map((t) => ({ ...t, customSvgUrl: "" })),
     }));
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRevertDefault = () => {
     setDraft(defaultPuzzle);
+    setAuthor(defaultPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(defaultPuzzle.editor || defaultEditor || "Daily Editorial");
     setSeedInput(defaultPuzzle.seed ?? `date:${targetDate}`);
     setErrors([]);
+    onDirty?.();
   };
 
   const handleApplySeed = () => {
@@ -121,6 +172,7 @@ export function EightfoldEchoStudioTab({
     });
     setDraft(nextPuzzle);
     setErrors([]);
+    onDirty?.();
   };
 
   const activeStage = useMemo(
@@ -145,8 +197,8 @@ export function EightfoldEchoStudioTab({
       id: `8e-admin-${targetDate}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: draft.title.trim() || "Harmonic Resonance",
-      author: "SOL Theory",
-      editor: "Daily Editorial",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
       tiles: hardStage.tiles,
       solution: hardStage.solution,
       stages: {
@@ -175,7 +227,7 @@ export function EightfoldEchoStudioTab({
       details: [
         `Easy verified: 0 ambiguous steps, ${countStartNearMissDecoys(easyStage)} 2-change near-miss decoys`,
         `Hard verified: ${solveEightfoldEcho(hardStage.tiles).ambiguousSteps} lookahead steps`,
-        `Seed: ${candidate.seed ?? "custom"}`,
+        `Author: ${candidate.author} · Editor: ${candidate.editor}`,
       ],
       playImmediately,
     });
@@ -305,7 +357,7 @@ export function EightfoldEchoStudioTab({
           </p>
         </div>
 
-        {/* Right: Seed, Title, & 0 → 8 Rule Walkthrough */}
+        {/* Right: Seed, Title, Attribution, & 0 → 8 Rule Walkthrough */}
         <div className="md:col-span-7 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -313,8 +365,12 @@ export function EightfoldEchoStudioTab({
               <Input
                 value={draft.title}
                 disabled={!canEdit}
-                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                onChange={(e) => {
+                  setDraft({ ...draft, title: e.target.value });
+                  onDirty?.();
+                }}
                 maxLength={60}
+                className="text-base sm:text-sm"
               />
             </div>
             <div>
@@ -323,7 +379,11 @@ export function EightfoldEchoStudioTab({
                 <Input
                   value={seedInput}
                   disabled={!canEdit}
-                  onChange={(e) => setSeedInput(e.target.value)}
+                  onChange={(e) => {
+                    setSeedInput(e.target.value);
+                    onDirty?.();
+                  }}
+                  className="text-base sm:text-sm"
                 />
                 <Button
                   type="button"
@@ -335,6 +395,34 @@ export function EightfoldEchoStudioTab({
                   Generate
                 </Button>
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">Author</label>
+              <Input
+                value={author}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  setAuthor(e.target.value);
+                  onDirty?.();
+                }}
+                placeholder={defaultAuthor}
+                className="text-base sm:text-sm"
+                data-testid="admin-eightfold-echo-author"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">Editor</label>
+              <Input
+                value={editorName}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  setEditorName(e.target.value);
+                  onDirty?.();
+                }}
+                placeholder={defaultEditor}
+                className="text-base sm:text-sm"
+                data-testid="admin-eightfold-echo-editor"
+              />
             </div>
           </div>
 

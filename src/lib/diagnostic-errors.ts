@@ -11,7 +11,7 @@
 
 import { isInitialGameMaster } from "@/lib/user-auth";
 import { isSupabaseConfigured, supabaseUrl } from "@/lib/supabase";
-import { getLocalDateKey } from "@/lib/daily-engine";
+import { getLocalDateKey } from "@/lib/date-keys";
 import type { PlayableGameSlug } from "@/lib/games-config";
 
 // ============================================================================
@@ -311,7 +311,7 @@ export interface DiagnosticReport {
   userRole: string | null;
   supabaseUrl: string;
   isOnline: boolean;
-  action: "save" | "fetch" | "sync" | "subscribe" | "validate" | "unknown";
+  action: "save" | "delete" | "fetch" | "sync" | "subscribe" | "validate" | "unknown";
   rawError: DiagnosticReportRawError;
   environment: DiagnosticReportEnvironment;
 }
@@ -321,7 +321,7 @@ export interface DiagnosticContext {
   targetDate?: string;
   userEmail?: string | null;
   userRole?: string | null;
-  action?: "save" | "fetch" | "sync" | "subscribe" | "validate" | "unknown";
+  action?: "save" | "delete" | "fetch" | "sync" | "subscribe" | "validate" | "unknown";
   puzzlePayload?: unknown;
   customMessage?: string;
   forcedErrorCode?: DiagnosticErrorCode;

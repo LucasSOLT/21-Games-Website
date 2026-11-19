@@ -220,6 +220,7 @@ export function SixPicsEditor({
             onChange={(e) => onChange({ ...value, themeAnswer: e.target.value })}
             placeholder="e.g., Hawaii"
             maxLength={48}
+            className="text-base sm:text-sm"
             data-testid="six-pics-theme-input"
           />
         </div>
@@ -231,6 +232,7 @@ export function SixPicsEditor({
             onChange={(e) => onChange({ ...value, title: e.target.value })}
             placeholder="Six Hidden Pictures"
             maxLength={50}
+            className="text-base sm:text-sm"
           />
         </div>
       </div>
@@ -373,7 +375,7 @@ export function SixPicsEditor({
                       onChange={(e) => updateRow(idx, { caption: e.target.value })}
                       placeholder={`Answer #${idx + 1} (e.g., Volcano)`}
                       maxLength={50}
-                      className="h-8 text-xs font-semibold"
+                      className="h-9 sm:h-8 text-base sm:text-sm font-semibold"
                     />
                     <Button
                       type="button"
@@ -382,7 +384,7 @@ export function SixPicsEditor({
                       disabled={!row.caption.trim() || generatingIdx !== null}
                       onClick={() => void handleAutoAliasesForRow(idx)}
                       title="Auto-generate accepted synonyms for this picture"
-                      className="h-8 px-2 border border-black bg-[#f4d621]/35 hover:bg-[#f4d621]/70 text-[10px] font-bold shrink-0"
+                      className="h-9 sm:h-8 px-2 border border-black bg-[#f4d621]/35 hover:bg-[#f4d621]/70 text-[10px] font-bold shrink-0"
                     >
                       <Sparkles className="h-3 w-3" />
                     </Button>
@@ -392,14 +394,14 @@ export function SixPicsEditor({
                     onChange={(e) => updateRow(idx, { aliasesCsv: e.target.value })}
                     placeholder="Accepted synonyms (comma-separated)"
                     maxLength={240}
-                    className="h-7 text-[11px]"
+                    className="h-9 sm:h-8 text-base sm:text-sm"
                   />
                   <Input
                     value={row.hint ?? ""}
                     onChange={(e) => updateRow(idx, { hint: e.target.value })}
                     placeholder="Optional hint for players (e.g., Erupting mountain)"
                     maxLength={140}
-                    className="h-7 text-[11px]"
+                    className="h-9 sm:h-8 text-base sm:text-sm"
                     data-testid={`six-pics-hint-input-${idx}`}
                   />
                   {hasUploadedDataPhoto ? (
@@ -411,7 +413,7 @@ export function SixPicsEditor({
                       value={row.imageUrl}
                       onChange={(e) => updateRow(idx, { imageUrl: e.target.value })}
                       placeholder="Or paste external image URL (optional)"
-                      className="h-7 text-[11px]"
+                      className="h-9 sm:h-8 text-base sm:text-sm"
                     />
                   )}
                 </div>

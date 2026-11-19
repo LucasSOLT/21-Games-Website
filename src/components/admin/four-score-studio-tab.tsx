@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,10 @@ interface FourScoreStudioTabProps {
   canEdit: boolean;
   editReason?: string;
   syncVersion?: number;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
 }
 
@@ -31,6 +35,10 @@ export function FourScoreStudioTab({
   canEdit,
   editReason,
   syncVersion = 0,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
 }: FourScoreStudioTabProps) {
   const initialPuzzle = useMemo<FourScorePuzzle>(() => {
@@ -60,6 +68,12 @@ export function FourScoreStudioTab({
   }, [targetDate, initialPuzzle]);
 
   const [title, setTitle] = useState(initialPuzzle.title);
+  const [author, setAuthor] = useState<string>(
+    initialPuzzle.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    initialPuzzle.editor || defaultEditor || "Daily Editorial"
+  );
   const [digitsCsv, setDigitsCsv] = useState(initialPuzzle.digits.join(", "));
   const [opsCsv, setOpsCsv] = useState(initialPuzzle.operators.join(", "));
   const [rerollCount, setRerollCount] = useState(0);
@@ -69,6 +83,8 @@ export function FourScoreStudioTab({
   if (prevInitial !== initialPuzzle) {
     setPrevInitial(initialPuzzle);
     setTitle(initialPuzzle.title);
+    setAuthor(initialPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(initialPuzzle.editor || defaultEditor || "Daily Editorial");
     setDigitsCsv(initialPuzzle.digits.join(", "));
     setOpsCsv(initialPuzzle.operators.join(", "));
     setErrors([]);
@@ -99,6 +115,42 @@ export function FourScoreStudioTab({
     [parsedDigits, parsedOps]
   );
 
+  const liveDraft = useMemo<FourScorePuzzle>(
+    () => ({
+      id: `4s-admin-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: title.trim() || "Exact Eighty",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
+      target: FOUR_SCORE_TARGET,
+      digits: parsedDigits,
+      operators: parsedOps,
+      canonicalEquation: liveSolve.canonicalEquation
+        ? `${liveSolve.canonicalEquation} = ${FOUR_SCORE_TARGET}`
+        : "",
+      customDate: targetDate,
+    }),
+    [
+      author,
+      defaultAuthor,
+      defaultEditor,
+      editorName,
+      liveSolve.canonicalEquation,
+      parsedDigits,
+      parsedOps,
+      targetDate,
+      title,
+    ]
+  );
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(liveDraft);
+  }, [liveDraft]);
+
   const handleReroll = () => {
     const next = rerollCount + 1;
     setRerollCount(next);
@@ -111,20 +163,27 @@ export function FourScoreStudioTab({
     setDigitsCsv(nextPuzzle.digits.join(", "));
     setOpsCsv(nextPuzzle.operators.join(", "));
     setErrors([]);
+    onDirty?.();
   };
 
   const handleClearAll = () => {
     setTitle("");
+    setAuthor("");
+    setEditorName("");
     setDigitsCsv("");
     setOpsCsv("");
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRevertDefault = () => {
     setTitle(defaultPuzzle.title);
+    setAuthor(defaultPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(defaultPuzzle.editor || defaultEditor || "Daily Editorial");
     setDigitsCsv(defaultPuzzle.digits.join(", "));
     setOpsCsv(defaultPuzzle.operators.join(", "));
     setErrors([]);
+    onDirty?.();
   };
 
   const handlePublish = (playImmediately: boolean) => {
@@ -132,8 +191,8 @@ export function FourScoreStudioTab({
       id: `4s-admin-${targetDate}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: title.trim() || "Exact Eighty",
-      author: "SOL Theory",
-      editor: "Daily Editorial",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
       target: FOUR_SCORE_TARGET,
       digits: parsedDigits,
       operators: parsedOps,
@@ -162,6 +221,7 @@ export function FourScoreStudioTab({
       details: [
         `${candidate.digits.length} tiles & ${candidate.operators.length} operators`,
         `Solver verified: ${candidate.canonicalEquation}`,
+        `Author: ${candidate.author} · Editor: ${candidate.editor}`,
       ],
       playImmediately,
     });
@@ -222,14 +282,46 @@ export function FourScoreStudioTab({
         </p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div>
           <label className="block text-xs font-bold mb-1">Title</label>
           <Input
             value={title}
             disabled={!canEdit}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              onDirty?.();
+            }}
             maxLength={50}
+            className="text-base sm:text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold mb-1">Author</label>
+          <Input
+            value={author}
+            disabled={!canEdit}
+            onChange={(e) => {
+              setAuthor(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultAuthor}
+            className="text-base sm:text-sm"
+            data-testid="admin-four-score-author"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold mb-1">Editor</label>
+          <Input
+            value={editorName}
+            disabled={!canEdit}
+            onChange={(e) => {
+              setEditorName(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultEditor}
+            className="text-base sm:text-sm"
+            data-testid="admin-four-score-editor"
           />
         </div>
         <div>
@@ -239,8 +331,12 @@ export function FourScoreStudioTab({
           <Input
             value={digitsCsv}
             disabled={!canEdit}
-            onChange={(e) => setDigitsCsv(e.target.value)}
+            onChange={(e) => {
+              setDigitsCsv(e.target.value);
+              onDirty?.();
+            }}
             placeholder="3, 7, 5, 1"
+            className="text-base sm:text-sm"
           />
         </div>
         <div>
@@ -250,8 +346,12 @@ export function FourScoreStudioTab({
           <Input
             value={opsCsv}
             disabled={!canEdit}
-            onChange={(e) => setOpsCsv(e.target.value)}
+            onChange={(e) => {
+              setOpsCsv(e.target.value);
+              onDirty?.();
+            }}
             placeholder="+, ×, ×, x²"
+            className="text-base sm:text-sm"
           />
         </div>
       </div>

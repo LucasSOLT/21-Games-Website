@@ -140,12 +140,14 @@ export function SolGamesLogo({
 
   if (variant === "wordmark") {
     const wordmarkHeight = size ?? 28;
+    const numericHeight = Number(wordmarkHeight) || 28;
+    const computedWidth = Math.round((numericHeight * 160) / 48);
     return (
       <svg
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 160 48"
         height={wordmarkHeight}
-        width="auto"
+        width={computedWidth}
         fill="none"
         role="img"
         aria-label={title}
@@ -160,12 +162,14 @@ export function SolGamesLogo({
 
   // Default: "full" horizontal lockup
   const fullHeight = size ?? 42;
+  const numericFullHeight = Number(fullHeight) || 42;
+  const computedFullWidth = Math.round((numericFullHeight * 212) / 48);
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 212 48"
       height={fullHeight}
-      width="auto"
+      width={computedFullWidth}
       fill="none"
       role="img"
       aria-label={title}

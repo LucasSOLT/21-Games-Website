@@ -43,7 +43,14 @@ import {
   type SixPicsImageOutcome,
   type SixPicsPuzzle,
 } from "@/data/puzzles/6-pics";
-import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
+import { getDailyPuzzleForGame } from "@/lib/daily-engine";
+import { useLiveLocalDateKey } from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playRevealSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import {
   copyToClipboard,
   formatCustomGameBlurb,
@@ -69,6 +76,7 @@ import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ResultShareButtons } from "./result-share-buttons";
+import { WinFlourish } from "./win-flourish";
 import {
   SixPicsEditor,
   emptySixPicsEditorState,
@@ -222,13 +230,15 @@ function SixPicsJigsawStage({
                     }
                   : undefined
               }
-              className={cn(canTap && "cursor-pointer focus:outline-none")}
+              className={cn(
+                "transition-[opacity,transform] duration-250 ease-out motion-reduce:transition-none",
+                canTap && "cursor-pointer focus:outline-none"
+              )}
               style={{
                 pointerEvents: isOpen ? "none" : "auto",
                 opacity: isOpen ? 0 : 1,
                 transform: isOpen ? "scale(0.92)" : "scale(1)",
                 transformOrigin: `${piece.center[0]}px ${piece.center[1]}px`,
-                transition: "opacity 260ms ease-out, transform 260ms ease-out",
               }}
             >
               <path
@@ -340,7 +350,7 @@ function SixPicsRouter() {
 /* ------------------------------------------------------------------------ */
 
 function SixPicsDaily({ dateParam }: { dateParam: string | null }) {
-  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const todayKey = useLiveLocalDateKey();
   const dateKey =
     isValidDateKey(dateParam) && dateParam <= todayKey ? dateParam : todayKey;
   const [syncVersion, setSyncVersion] = useState(0);
@@ -379,6 +389,7 @@ function SixPicsDaily({ dateParam }: { dateParam: string | null }) {
 /* ------------------------------------------------------------------------ */
 
 function SixPicsCustomLoader({ customId }: { customId: string }) {
+  const todayKey = useLiveLocalDateKey();
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "missing" }
@@ -428,7 +439,7 @@ function SixPicsCustomLoader({ customId }: { customId: string }) {
         gameSlug="6-pics"
         gameTitle="6 Pics"
         puzzleNumber={0}
-        dateKey={getLocalDateKey()}
+        dateKey={todayKey}
         author="Friend"
       >
         <div className="max-w-md mx-auto text-center space-y-4 py-16">
@@ -452,7 +463,7 @@ function SixPicsCustomLoader({ customId }: { customId: string }) {
       key={state.puzzle.id}
       puzzle={state.puzzle}
       puzzleHash={computePuzzleContentHash(state.puzzle)}
-      dateKey={getLocalDateKey()}
+      dateKey={todayKey}
       isCustom
       creatorHandle={state.handle}
       customId={customId}
@@ -494,6 +505,7 @@ function SixPicsBoard({
   customId,
 }: SixPicsBoardProps) {
   const router = useRouter();
+  const liveTodayKey = useLiveLocalDateKey();
 
   const saved = useMemo<SavedSixPicsProgressV2 | null>(() => {
     if (isCustom) return null;
@@ -533,6 +545,8 @@ function SixPicsBoard({
 
   const finished = outcomes.length >= SIX_PICS_COUNT && !awaitingAdvance;
   const totalScore = useMemo(() => totalScoreForSixPics(outcomes), [outcomes]);
+  const isCompleted = finished && totalScore > 0;
+  const prevCompletedRef = useRef(isCompleted);
   const namedCount = useMemo(
     () => outcomes.filter((o) => o.solved && o.points > 0).length,
     [outcomes]
@@ -562,12 +576,33 @@ function SixPicsBoard({
     []
   );
 
-  // Focus the Next button when an image finishes so Enter advances effortlessly.
+  // Auto-clear transient wrong-guess / piece-reveal notices after 1500ms.
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(null), 1500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
+  // Play victory chime when transitioning into completed summary.
+  useEffect(() => {
+    if (!prevCompletedRef.current && isCompleted) {
+      playWinChimeSfx();
+    }
+    prevCompletedRef.current = isCompleted;
+  }, [isCompleted]);
+
+  // Focus the Next button when an image finishes; only auto-focus guess input on desktop fine-pointer devices.
   useEffect(() => {
     if (awaitingAdvance) {
       nextButtonRef.current?.focus();
     } else if (splashDismissed && !finished) {
-      guessInputRef.current?.focus();
+      if (
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: fine)").matches
+      ) {
+        guessInputRef.current?.focus();
+      }
     }
   }, [awaitingAdvance, splashDismissed, finished, activeImageIndex]);
 
@@ -632,6 +667,7 @@ function SixPicsBoard({
     (pieceIndex: number) => {
       if (finished || awaitingAdvance) return;
       if (currentRevealedPieces.includes(pieceIndex)) return;
+      playTapSfx();
       setConfirmingPass(false);
       setSelectedPieceIndex((prev) => (prev === pieceIndex ? null : pieceIndex));
     },
@@ -644,6 +680,7 @@ function SixPicsBoard({
       setSelectedPieceIndex(null);
       return;
     }
+    playRevealSfx();
     const pieceToOpen = selectedPieceIndex;
     const nextRevealed = [...currentRevealedPieces, pieceToOpen];
     setCurrentRevealedPieces(nextRevealed);
@@ -666,6 +703,7 @@ function SixPicsBoard({
 
       const match = matchSixPicsImageGuess(trimmed, currentClue);
       if (match.matched) {
+        playRevealSfx();
         const pts = scoreForSixPicsImage(true, extraPiecesRemovedOnCurrent);
         const outcome: SixPicsImageOutcome = {
           revealedPieces: [...currentRevealedPieces],
@@ -684,6 +722,7 @@ function SixPicsBoard({
       }
 
       // Free wrong guess: shake + helpful feedback, zero point penalty, zero auto-reveal.
+      playErrorSfx();
       setWrongGuesses((prev) =>
         prev.some((w) => w.toLowerCase() === trimmed.toLowerCase())
           ? prev
@@ -713,6 +752,7 @@ function SixPicsBoard({
 
   const commitPass = useCallback(() => {
     if (finished || awaitingAdvance) return;
+    playErrorSfx();
     const outcome: SixPicsImageOutcome = {
       revealedPieces: [...currentRevealedPieces],
       extraPiecesRemoved: extraPiecesRemovedOnCurrent,
@@ -730,6 +770,7 @@ function SixPicsBoard({
   const handlePassClick = useCallback(() => {
     if (finished || awaitingAdvance) return;
     if (remainingCoveredCount > 0 && !confirmingPass) {
+      playTapSfx();
       setConfirmingPass(true);
       return;
     }
@@ -738,6 +779,9 @@ function SixPicsBoard({
 
   const advanceToNextPicture = useCallback(() => {
     const nextIdx = activeImageIndex + 1;
+    if (nextIdx < SIX_PICS_COUNT) {
+      playTapSfx();
+    }
     setAwaitingAdvance(false);
     setWrongGuesses([]);
     setGuessInput("");
@@ -767,9 +811,12 @@ function SixPicsBoard({
     [puzzle.puzzleNumber, puzzle.themeAnswer, outcomes, isCustom, creatorHandle]
   );
 
+  const isArchive = !isCustom && dateKey !== liveTodayKey;
   const shareUrl =
     isCustom && customId
       ? `https://21games.ai/games/6-pics?b=${customId}`
+      : isArchive
+      ? `https://21games.ai/games/6-pics?date=${dateKey}`
       : "https://21games.ai/games/6-pics";
 
   const hasSavedProgress =
@@ -778,20 +825,31 @@ function SixPicsBoard({
 
   if (!splashDismissed) {
     return (
-      <GameSplashScreen
+      <GameShell
         gameSlug="6-pics"
         gameTitle="6 Pics"
-        tagline="Use today's theme and uncover as few puzzle pieces as possible to name all 6 hidden pictures."
-        theme={puzzle.themeAnswer}
-        author={puzzle.author}
         puzzleNumber={puzzle.puzzleNumber}
         dateKey={dateKey}
-        showCreate
-        isCompletedToday={isDateCompleted("6-pics", dateKey) || finished}
-        hasSavedProgress={hasSavedProgress}
-        onPlay={() => setSplashDismissed(true)}
-        onCreate={() => router.push("/games/6-pics?mode=create")}
-      />
+        author={puzzle.author}
+      >
+        <GameSplashScreen
+          gameSlug="6-pics"
+          gameTitle="6 Pics"
+          tagline="Use today's theme and uncover as few puzzle pieces as possible to name all 6 hidden pictures."
+          theme={puzzle.themeAnswer}
+          author={puzzle.author}
+          puzzleNumber={puzzle.puzzleNumber}
+          dateKey={dateKey}
+          showCreate
+          isCompletedToday={isDateCompleted("6-pics", dateKey) || finished}
+          hasSavedProgress={hasSavedProgress}
+          onPlay={() => {
+            playTapSfx();
+            setSplashDismissed(true);
+          }}
+          onCreate={() => router.push("/games/6-pics?mode=create")}
+        />
+      </GameShell>
     );
   }
 
@@ -803,10 +861,11 @@ function SixPicsBoard({
       dateKey={dateKey}
       author={puzzle.author}
     >
+      <WinFlourish active={isCompleted} />
       <div className="max-w-xl mx-auto px-2.5 sm:px-4 py-1.5 sm:py-2 space-y-3.5">
         {!finished ? (
           /* ================================================================
-           * GAMEPLAY: Visible Theme + Guess/Confirm Bar + 6-Piece Jigsaw Stage
+           * GAMEPLAY: Visible Theme + 6-Piece Jigsaw Stage + Guess/Confirm Bar
            * ================================================================ */
           <div className="space-y-3" data-testid="six-pics-gameplay">
             {/* Overarching Theme + Running Score Banner */}
@@ -846,7 +905,7 @@ function SixPicsBoard({
                     key={idx}
                     data-testid={`six-pics-step-${idx}`}
                     className={cn(
-                      "h-7 rounded-lg border-2 text-[11px] font-black flex items-center justify-center transition-all",
+                      "h-7 rounded-lg border-2 text-[11px] font-black flex items-center justify-center transition-all motion-reduce:transition-none",
                       done
                         ? done.solved
                           ? "bg-emerald-100 border-black text-emerald-950"
@@ -875,13 +934,24 @@ function SixPicsBoard({
               </div>
             )}
 
+            {/* Jigsaw-Covered Picture Stage (Above Guess Input so mobile keyboard rises underneath) */}
+            <SixPicsJigsawStage
+              clue={currentClue}
+              imageIndex={activeImageIndex}
+              revealedPieces={currentRevealedPieces}
+              fullyUncovered={awaitingAdvance}
+              currentWorth={currentWorth}
+              selectedPieceIndex={selectedPieceIndex}
+              onSelectPiece={handleSelectPiece}
+            />
+
             {/* Guess Input OR Post-Solve Full Reveal Interstitial */}
             {!awaitingAdvance ? (
               <form
                 onSubmit={submitGuess}
                 className={cn(
                   "rounded-2xl border-2 border-black bg-white p-3 space-y-2.5 shadow-[3px_3px_0px_#000]",
-                  shaking && "animate-bounce border-red-600"
+                  shaking && "animate-bounce motion-reduce:animate-none border-red-600"
                 )}
               >
                 <div className="flex gap-2">
@@ -892,7 +962,7 @@ function SixPicsBoard({
                     placeholder={`Name Picture #${activeImageIndex + 1}…`}
                     maxLength={48}
                     aria-label={`Name picture ${activeImageIndex + 1}`}
-                    className="border-2 border-black font-semibold"
+                    className="border-2 border-black font-semibold text-base sm:text-sm"
                     data-testid="six-pics-guess-input"
                   />
                   <Button
@@ -916,7 +986,7 @@ function SixPicsBoard({
                     }
                     onClick={handleConfirmRevealPiece}
                     className={cn(
-                      "h-8 px-3 text-xs font-black border-2 transition-colors",
+                      "h-8 px-3 text-xs font-black border-2 transition-colors motion-reduce:transition-none",
                       selectedPieceIndex !== null && remainingCoveredCount > 0
                         ? "border-black bg-[#f4d621] hover:bg-[#f4d621]/85 text-black shadow-[2px_2px_0px_#000]"
                         : "border-neutral-300 bg-neutral-100 text-neutral-400 cursor-not-allowed disabled:opacity-100"
@@ -970,9 +1040,9 @@ function SixPicsBoard({
                   )}
                 </div>
 
-                <div className="min-h-[18px] flex items-center">
+                <div className="min-h-[18px] flex items-center" aria-live="polite">
                   {feedback ? (
-                    <p className="text-xs font-bold text-amber-800 leading-snug">
+                    <p role="status" className="text-xs font-bold text-amber-800 leading-snug">
                       {feedback}
                     </p>
                   ) : selectedPieceIndex !== null ? (
@@ -982,7 +1052,7 @@ function SixPicsBoard({
                     </p>
                   ) : (
                     <p className="text-[11px] text-neutral-500 leading-snug">
-                      Tap any covered puzzle piece below, then press Confirm? (-1 pt per piece: 6 pts → 1 pt). Wrong guesses are free!
+                      Tap any covered puzzle piece above, then press Confirm? (-1 pt per piece: 6 pts → 1 pt). Wrong guesses are free!
                     </p>
                   )}
                 </div>
@@ -1030,17 +1100,6 @@ function SixPicsBoard({
                 </Button>
               </div>
             )}
-
-            {/* Jigsaw-Covered Picture Stage */}
-            <SixPicsJigsawStage
-              clue={currentClue}
-              imageIndex={activeImageIndex}
-              revealedPieces={currentRevealedPieces}
-              fullyUncovered={awaitingAdvance}
-              currentWorth={currentWorth}
-              selectedPieceIndex={selectedPieceIndex}
-              onSelectPiece={handleSelectPiece}
-            />
 
             {wrongGuesses.length > 0 && !awaitingAdvance && (
               <div className="flex flex-wrap gap-1.5 items-center text-xs">
@@ -1160,6 +1219,7 @@ function SixPicsBoard({
 
 function SixPicsCreator() {
   const { profile, isAuthenticated, openAccountModal } = useAuth();
+  const liveTodayKey = useLiveLocalDateKey();
   const [editor, setEditor] = useState<SixPicsEditorState>(emptySixPicsEditorState);
   const [errors, setErrors] = useState<string[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -1175,7 +1235,7 @@ function SixPicsCreator() {
     gameSlug: "6-pics" as const,
     gameTitle: "6 Pics",
     puzzleNumber: 0,
-    dateKey: getLocalDateKey(),
+    dateKey: liveTodayKey,
     author: profile?.displayName ?? "You",
   };
 

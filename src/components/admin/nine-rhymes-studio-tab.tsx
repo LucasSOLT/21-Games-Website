@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Shuffle, RotateCcw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   NINE_RHYMES_CLUE_COUNT,
   USABLE_RHYME_FAMILIES,
@@ -28,6 +29,10 @@ interface NineRhymesStudioTabProps {
   editReason?: string;
   aiConfig?: AIHelperConfig;
   syncVersion?: number;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
 }
 
@@ -38,24 +43,43 @@ export function NineRhymesStudioTab({
   editReason,
   aiConfig,
   syncVersion = 0,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
 }: NineRhymesStudioTabProps) {
-  const initial = useMemo(() => {
+  const resolvedInitial = useMemo(() => {
     void syncVersion;
-    const resolved = getDailyPuzzleForGame<NineRhymesPuzzle>(
+    return getDailyPuzzleForGame<NineRhymesPuzzle>(
       "9-rhymes",
       targetDate,
       getAdminOverridesForGame("9-rhymes")
-    );
-    return resolved ? puzzleToEditorState(resolved.puzzle) : emptyNineRhymesEditorState();
+    )?.puzzle ?? null;
   }, [targetDate, syncVersion]);
 
-  const defaultState = useMemo(() => {
-    const resolved = getDailyPuzzleForGame<NineRhymesPuzzle>("9-rhymes", targetDate, {});
-    return resolved ? puzzleToEditorState(resolved.puzzle) : initial;
-  }, [targetDate, initial]);
+  const initial = useMemo(
+    () => (resolvedInitial ? puzzleToEditorState(resolvedInitial) : emptyNineRhymesEditorState()),
+    [resolvedInitial]
+  );
+
+  const resolvedDefault = useMemo(
+    () => getDailyPuzzleForGame<NineRhymesPuzzle>("9-rhymes", targetDate, {})?.puzzle ?? null,
+    [targetDate]
+  );
+
+  const defaultState = useMemo(
+    () => (resolvedDefault ? puzzleToEditorState(resolvedDefault) : initial),
+    [resolvedDefault, initial]
+  );
 
   const [editor, setEditor] = useState<NineRhymesEditorState>(initial);
+  const [author, setAuthor] = useState<string>(
+    resolvedInitial?.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    resolvedInitial?.editor || defaultEditor || "Daily Editorial"
+  );
   const [rerollCount, setRerollCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -65,8 +89,60 @@ export function NineRhymesStudioTab({
   if (prevInitial !== initial) {
     setPrevInitial(initial);
     setEditor(initial);
+    setAuthor(resolvedInitial?.author || defaultAuthor || "SOL Theory");
+    setEditorName(resolvedInitial?.editor || defaultEditor || "Daily Editorial");
     setErrors([]);
   }
+
+  const liveDraft = useMemo<NineRhymesPuzzle>(() => {
+    const cleanAuthor = author.trim() || defaultAuthor || "SOL Theory";
+    const cleanEditor = editorName.trim() || defaultEditor || "Daily Editorial";
+    const parsed = draftToPuzzle({
+      id: `9r-admin-${targetDate}`,
+      title: editor.title,
+      starterWord: editor.starterWord,
+      rows: editor.rows,
+      creatorName: cleanAuthor,
+    });
+    if (parsed.puzzle) {
+      return {
+        ...parsed.puzzle,
+        puzzleNumber: getPuzzleNumberForDate(targetDate),
+        author: cleanAuthor,
+        editor: cleanEditor,
+        customDate: targetDate,
+      };
+    }
+    return {
+      id: `9r-admin-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: editor.title.trim() || "9 Rhymes Draft",
+      starterWord: editor.starterWord.trim().toLowerCase() || "day",
+      author: cleanAuthor,
+      editor: cleanEditor,
+      clues: Array.from({ length: 9 }, (_, i) => {
+        const row = editor.rows[i];
+        return {
+          answer: (row?.answer ?? "").trim().toLowerCase(),
+          altSpellings: (row?.altSpellings ?? "")
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean),
+          sentence: row?.sentence ?? "",
+          hint: row?.hint ?? "",
+        };
+      }),
+      customDate: targetDate,
+    };
+  }, [author, defaultAuthor, defaultEditor, editor, editorName, targetDate]);
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(liveDraft);
+  }, [liveDraft]);
 
   const handleReroll = () => {
     const next = rerollCount + 1;
@@ -78,29 +154,44 @@ export function NineRhymesStudioTab({
     });
     setEditor(puzzleToEditorState(puzzle));
     setErrors([]);
+    onDirty?.();
   };
 
   const handleClearAll = () => {
     setEditor(emptyNineRhymesEditorState());
+    setAuthor("");
+    setEditorName("");
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRevertDefault = () => {
     setEditor(defaultState);
+    setAuthor(resolvedDefault?.author || defaultAuthor || "SOL Theory");
+    setEditorName(resolvedDefault?.editor || defaultEditor || "Daily Editorial");
     setErrors([]);
+    onDirty?.();
   };
 
   const buildPuzzle = (): NineRhymesPuzzle | null => {
+    const cleanAuthor = author.trim() || defaultAuthor || "SOL Theory";
+    const cleanEditor = editorName.trim() || defaultEditor || "Daily Editorial";
     const { puzzle, errors: e } = draftToPuzzle({
       id: `9r-admin-${targetDate}`,
       title: editor.title,
       starterWord: editor.starterWord,
       rows: editor.rows,
-      creatorName: "SOL Theory",
+      creatorName: cleanAuthor,
     });
     setErrors(e);
     if (!puzzle) return null;
-    return { ...puzzle, puzzleNumber: getPuzzleNumberForDate(targetDate), customDate: targetDate, editor: "Daily Editorial" };
+    return {
+      ...puzzle,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      customDate: targetDate,
+      author: cleanAuthor,
+      editor: cleanEditor,
+    };
   };
 
   const handlePublish = (playImmediately: boolean) => {
@@ -120,6 +211,7 @@ export function NineRhymesStudioTab({
       details: [
         `Starter word: ${puzzle.starterWord}`,
         `${NINE_RHYMES_CLUE_COUNT} perfect rhymes`,
+        `Author: ${puzzle.author} · Editor: ${puzzle.editor}`,
       ],
       playImmediately,
     });
@@ -166,8 +258,50 @@ export function NineRhymesStudioTab({
         <p className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-300 rounded-lg p-2">{editReason}</p>
       )}
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+            Author
+          </label>
+          <Input
+            disabled={!canEdit}
+            value={author}
+            onChange={(e) => {
+              setAuthor(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultAuthor}
+            className="text-base sm:text-sm"
+            data-testid="admin-9-rhymes-author"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+            Editor
+          </label>
+          <Input
+            disabled={!canEdit}
+            value={editorName}
+            onChange={(e) => {
+              setEditorName(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultEditor}
+            className="text-base sm:text-sm"
+            data-testid="admin-9-rhymes-editor"
+          />
+        </div>
+      </div>
+
       <fieldset disabled={!canEdit} className="contents">
-        <NineRhymesEditor value={editor} onChange={setEditor} aiConfig={aiConfig} />
+        <NineRhymesEditor
+          value={editor}
+          onChange={(next) => {
+            setEditor(next);
+            onDirty?.();
+          }}
+          aiConfig={aiConfig}
+        />
       </fieldset>
 
       {errors.length > 0 && (

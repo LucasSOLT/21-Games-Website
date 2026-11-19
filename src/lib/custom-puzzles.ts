@@ -29,11 +29,23 @@ export interface CustomPuzzleRecord<P = Record<string, unknown>> {
   createdAt: string;
 }
 
+export interface CustomPuzzleSummary {
+  id: string;
+  gameSlug: CustomLinkGameSlug;
+  title: string;
+  creatorId: string | null;
+  creatorName: string;
+  creatorHandle: string;
+  shareUrl: string;
+  createdAt: string;
+}
+
 export type SaveCustomPuzzleResult<P> =
   | { ok: true; record: CustomPuzzleRecord<P>; shareUrl: string; synced: boolean }
   | { ok: false; error: string };
 
 const LOCAL_KEY = "solgames_v1_custom_puzzles";
+const MINE_LOCAL_KEY = "solgames_v1_custom_puzzles_mine";
 const MAX_LOCAL_RECORDS = 100;
 
 function readLocal(): CustomPuzzleRecord[] {
@@ -65,6 +77,98 @@ function writeLocal(records: CustomPuzzleRecord[]): void {
     );
   } catch {
     // storage full / blocked: Supabase remains the source of truth
+  }
+}
+
+export function getMyCreatedCustomPuzzles(): CustomPuzzleSummary[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(MINE_LOCAL_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s): s is CustomPuzzleSummary =>
+        typeof s === "object" &&
+        s !== null &&
+        typeof (s as CustomPuzzleSummary).id === "string" &&
+        isValidCustomGameId((s as CustomPuzzleSummary).id) &&
+        typeof (s as CustomPuzzleSummary).gameSlug === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function recordMineSummary(summary: CustomPuzzleSummary): void {
+  if (typeof window === "undefined") return;
+  try {
+    const existing = getMyCreatedCustomPuzzles().filter((s) => s.id !== summary.id);
+    const merged = [summary, ...existing]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, MAX_LOCAL_RECORDS);
+    window.localStorage.setItem(MINE_LOCAL_KEY, JSON.stringify(merged));
+    window.dispatchEvent(
+      new CustomEvent("solgames:custom-puzzle-created", { detail: summary })
+    );
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+/** Fetches all custom puzzles authored by `creatorId` from Supabase and merges into local summary store. */
+export async function syncMyCustomPuzzlesFromCloud(
+  creatorId: string
+): Promise<CustomPuzzleSummary[]> {
+  const localMine = getMyCreatedCustomPuzzles();
+  if (!creatorId) return localMine;
+  const supabase = getSupabaseClient();
+  if (!supabase) return localMine;
+
+  try {
+    const { data, error } = await supabase
+      .from("custom_puzzles")
+      .select("id, game_slug, title, creator_id, creator_name, creator_handle, created_at")
+      .eq("creator_id", creatorId)
+      .order("created_at", { ascending: false })
+      .limit(60);
+
+    if (error || !Array.isArray(data)) return localMine;
+
+    const byId = new Map<string, CustomPuzzleSummary>();
+    for (const item of localMine) {
+      byId.set(item.id, item);
+    }
+    for (const row of data) {
+      const id = String(row.id ?? "");
+      const slug = getGameSlugFromCustomId(id);
+      if (!slug || slug !== row.game_slug) continue;
+      byId.set(id, {
+        id,
+        gameSlug: slug,
+        title: String(row.title ?? `${slug} Puzzle`),
+        creatorId: row.creator_id ? String(row.creator_id) : creatorId,
+        creatorName: String(row.creator_name ?? ""),
+        creatorHandle: String(row.creator_handle ?? ""),
+        shareUrl: buildCustomGameShareUrl(slug, id),
+        createdAt: String(row.created_at ?? new Date().toISOString()),
+      });
+    }
+
+    const merged = Array.from(byId.values())
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, MAX_LOCAL_RECORDS);
+
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(MINE_LOCAL_KEY, JSON.stringify(merged));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    return merged;
+  } catch {
+    return localMine;
   }
 }
 
@@ -130,7 +234,6 @@ export async function saveCustomPuzzle<P extends Record<string, unknown>>(
 
   const shareUrl = buildCustomGameShareUrl(input.gameSlug, id);
   if (shareUrl.length >= MAX_CUSTOM_SHARE_URL_LENGTH) {
-    // Never expected on 21games.ai; guards against unusually long preview origins.
     console.warn(`[custom-puzzles] share link is ${shareUrl.length} chars`);
   }
 
@@ -147,6 +250,16 @@ export async function saveCustomPuzzle<P extends Record<string, unknown>>(
 
   // Local copy first: the link works on this device even if the network call fails.
   writeLocal([...readLocal().filter((r) => r.id !== id), record]);
+  recordMineSummary({
+    id,
+    gameSlug: input.gameSlug,
+    title: input.title,
+    creatorId: record.creatorId,
+    creatorName: record.creatorName,
+    creatorHandle: record.creatorHandle,
+    shareUrl,
+    createdAt: record.createdAt,
+  });
 
   let synced = false;
   const supabase = getSupabaseClient();

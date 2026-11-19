@@ -2,7 +2,7 @@
 
 import React from "react";
 import { GameLogo } from "@/components/game-logo";
-import { formatLongDate, getLocalDateKey } from "@/lib/daily-engine";
+import { formatLongDate, getLocalDateKey } from "@/lib/date-keys";
 import { Play, RotateCcw, Award, PlusCircle, Sparkles, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 

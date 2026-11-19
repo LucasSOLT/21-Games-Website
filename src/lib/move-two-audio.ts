@@ -10,35 +10,24 @@
  */
 
 import type { MoveTwoPosture } from "@/lib/generators/move-two-generator";
+import {
+  LEGACY_MOVE_TWO_MUTE_KEY,
+  isGameSfxMuted,
+  setGameSfxMuted,
+  subscribeGameSfxMute,
+} from "@/lib/game-sfx";
 
-export const MOVE_TWO_MUTE_STORAGE_KEY = "solgames_move2_muted";
+export const MOVE_TWO_MUTE_STORAGE_KEY = LEGACY_MOVE_TWO_MUTE_KEY;
+export { subscribeGameSfxMute };
 
 let sharedAudioCtx: AudioContext | null = null;
-let memoryMutedFallback = false;
 
 export function isMoveTwoMuted(): boolean {
-  if (typeof window === "undefined") {
-    return memoryMutedFallback;
-  }
-  try {
-    return window.localStorage.getItem(MOVE_TWO_MUTE_STORAGE_KEY) === "1";
-  } catch {
-    return memoryMutedFallback;
-  }
+  return isGameSfxMuted();
 }
 
 export function setMoveTwoMuted(muted: boolean): void {
-  memoryMutedFallback = muted;
-  if (typeof window === "undefined") return;
-  try {
-    if (muted) {
-      window.localStorage.setItem(MOVE_TWO_MUTE_STORAGE_KEY, "1");
-    } else {
-      window.localStorage.removeItem(MOVE_TWO_MUTE_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore storage quota / privacy mode errors
-  }
+  setGameSfxMuted(muted);
 }
 
 function getAudioContext(): AudioContext | null {

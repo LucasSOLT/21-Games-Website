@@ -54,6 +54,29 @@
 - **Universal Completion Share Invariant**: Every completion screen across all 9 countdown games renders two distinct actions: **Share** (`nativeShareResultsOnly` — calls `navigator.share({ title, text: fullTextWithUrl })` with no separate `url` property so iOS/macOS Messages retains emojis + score + link, and never writes to clipboard) and **Copy results** (`copyResultsOnly` — writes to clipboard only with `"Copied!"` feedback for `1500ms`, and never invokes `navigator.share`).
 - **Verification (must stay green)**: `scripts/test-step2-5-auth-lockdown.ts`, `scripts/verify-auth-security-lockdown.ts`, `scripts/test-step2-5-escalation.ts`, `npm test` (`CP1–CP10`), and `npm run generate-batch -- --dry-run`.
 
+### 0.7 Site-Wide Audit Directives (Branding, Smart Hub, Daily Sweep, Audio/Visual Polish, Fair-Play Streaks, Admin Studio & CSS Resilience)
+- **Brand Naming Hierarchy**: Lead with **`21 Games`** (`by SOL Theory`) across browser `<title>` tags (`<Game> · 21 Games` / `21 Games · Smart Games. Daily Rituals.`), OpenGraph/Twitter link previews, and PWA app name, while retaining the iconic **`<SolGamesLogo>`** (`[21] SOL GaMES · BY SOL THEORY`) tile wordmark in headers.
+- **CSS & Deployment-Skew Resilience (Zero Unstyled Screen Guarantee)**:
+  - Ensure compiled CSS works on older Safari/iOS WebKit (`< iOS 16.4`) as well as modern browsers by compiling/flattening Tailwind v4 `@layer` rules + `color-mix(in oklab)` / transform fallbacks, scanning `./src/lib/**/*.{ts,tsx}` in `tailwind.config.ts`, setting explicit SVG fallback `width`/`height` attributes, and running a client stylesheet/chunk integrity guard (`CssIntegrityGuard`) + `must-revalidate` HTML headers so stale tabs across Vercel deploys seamlessly reload instead of ever rendering raw black text and giant unstyled SVGs.
+- **Homepage Smart Hub & `21 → 1` Countdown Cards**:
+  - **Returning Players**: Land directly above the fold on a compact **"Today's 21 → 1 Daily Sweep (`X / 9`)"** progress header + 9-game countdown grid.
+  - **First-Time Visitors**: See a streamlined Hero featuring a live interactive 9-game preview stage (replacing `"Demo video coming soon"` and heavy multi-MB hero PNGs) + an updated 9-game `"How It Works"` modal.
+  - **Stateful `<GameCard>`s & `9-for-9` Daily Sweep**: Display `#21 → #1` countdown badges and live `✓ Solved Today` / `In Progress` status + scores on every homepage `GameCard`. Keep individual post-game win screens clean (no `"Up Next"` banner on individual wins), and unlock a special **"🏆 9-for-9 Daily Sweep!"** celebration & combined emoji share receipt when all 9 daily games are completed.
+- **Cross-Game Audio, Win Flourishes & Visual `?` Guides**:
+  - Extend subtle, satisfying synthesized Web Audio SFX (`src/lib/game-sfx.ts`: tile clicks, snaps, reveals, win chimes) + a shared persistent Mute toggle across all 9 games.
+  - Trigger crisp, non-invasive win flourishes (NYT-style tile wave / subtle star burst, respecting `prefers-reduced-motion`) across all 9 games.
+  - Upgrade the 5 plain-text `?` How-to-Play modals (`Eightfold Echo`, `Four Score`, `9 Rhymes`, `6 Pics`, `1 Win`) into visual tile/example guides matching `Move Two`'s quality, and keep the platform light-mode (`#FCFCFD` `theme-color`).
+- **Fair-Play Timers, `"Reveal Entire Puzzle"`, and Strict Daily Streaks**:
+  - Automatically pause active game timers (`17 Syllables`, `Eightfold Echo`, `Connect 5`) when the browser tab is hidden/locked or when `?` Help / Stats / Settings / Check modals are open.
+  - Using `"Reveal Entire Puzzle"` in `Connect 5` or `17 Syllables` ends the board as **Revealed** and must **never** award a daily win streak or `"Fastest Solve"` record.
+  - Reset `currentStreak` to `0` after missed days (`todayKey` enforced), and count **only same-day daily solves** (`dateKey === todayKey`, `!isCustom`) toward live streaks so archive backfills and `/admin` future test-plays never inflate or break live streaks.
+- **`/admin` Studio Safety & Role Access**:
+  - Allow promoted `"Admin (Editor)"` accounts (`isAdminOrGameMaster`) into `/admin` for future-date authoring (`puzzle_date > today`), add editable `Author` / `Editor` attribution inputs across all 9 studio tabs, provide an in-modal **"Playable Preview"** sandbox before publishing live, add a true **"Unpublish Override"** button (deleting the Supabase override to restore the default bank), and guard against unsaved changes.
+- **Rich Link Previews, Full-Screen PWA & Cloud Profile Sync**:
+  - Redesign `public/og-image.png` (showing all 9 `21 → 1` games accurately) + ship dedicated per-game OpenGraph/Twitter preview cards for all 9 `/games/<slug>` routes.
+  - Ship full-screen iOS/Android PWA support (`manifest.ts`, properly masked `apple-touch-icon.png`, `favicon.ico`, offline static asset caching, `robots.ts`, `sitemap.ts`, and branded `not-found.tsx`).
+  - Sync per-date completion sets (`60-day` archive checkmarks), `1 Win` personal history, and all 5 `"Create Your Own"` games (`21 Things`, `17 Syllables`, `9 Rhymes`, `6 Pics`, `Connect 5`) to cloud user profiles in `/account`.
+
 ---
 
 ## 1. Platform Vision & The `21 → 1` Countdown Lineup (Part A: Q1–Q4 — ALL 9 LIVE)

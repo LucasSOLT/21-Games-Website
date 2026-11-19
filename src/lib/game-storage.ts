@@ -1,23 +1,22 @@
-import {
-  sanitizeConnect5Puzzle,
-  type Connect5Puzzle,
-} from "@/data/puzzles/connect-5";
+import type { Connect5Puzzle } from "@/data/puzzles/connect-5";
 import type {
   TwentyOneJourney,
   TwentyOneThingsBoard,
 } from "@/data/puzzles/21-things";
-import {
-  sanitize17SyllablesPuzzle,
-  type SeventeenSyllablesPuzzle,
-} from "@/data/puzzles/17-syllables";
-import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
+import type { SeventeenSyllablesPuzzle } from "@/data/puzzles/17-syllables";
+import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/date-keys";
 import {
   ALL_GAME_SLUGS,
   GAME_PROGRESS_PREFIX,
   type AllGameSlug,
   type PlayableGameSlug,
 } from "@/lib/games-config";
-import { getPuzzleSource } from "@/lib/puzzle-sources";
+import {
+  isGenericOverrideSlugLight,
+  sanitize17SyllablesPuzzle,
+  sanitizeConnect5Puzzle,
+  validateLightOverridePayload,
+} from "@/lib/puzzle-sanitizers";
 import { getSupabaseClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
@@ -44,6 +43,8 @@ export interface GameStats {
   bestTimeSeconds: number | null;
   totalTimeSeconds: number;
   completedDates: string[];
+  /** Same-day daily solves (`dateKey === todayKey`) eligible for live `currentStreak`. */
+  streakDates?: string[];
   distribution: Record<string, number>;
 }
 
@@ -106,6 +107,7 @@ export interface Connect5SavedProgress {
   elapsedSeconds: number;
   hintsUsed: number;
   status: "playing" | "won";
+  wasRevealed?: boolean;
   completedAt?: string;
   puzzleHash?: string;
 }
@@ -141,6 +143,7 @@ export interface SeventeenSyllablesSavedProgress {
   stars: number;
   elapsedSeconds: number;
   status: "playing" | "won";
+  wasRevealed?: boolean;
   completedAt?: string;
   puzzleHash?: string;
 }
@@ -180,12 +183,25 @@ export const DEFAULT_STATS: GameStats = {
   bestTimeSeconds: null,
   totalTimeSeconds: 0,
   completedDates: [],
+  streakDates: [],
   distribution: {},
 };
 
+function sanitizeSortedDateArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return Array.from(
+    new Set(
+      input
+        .filter((d): d is string => typeof d === "string")
+        .map((d) => d.trim())
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    )
+  ).sort((a, b) => a.localeCompare(b));
+}
+
 export function recomputeStreakFromCompletedDates(
   completedDates: string[],
-  todayKey?: string
+  todayKey: string = getLocalDateKey()
 ): {
   currentStreak: number;
   maxStreak: number;
@@ -201,14 +217,7 @@ export function recomputeStreakFromCompletedDates(
     };
   }
 
-  const uniqueSorted = Array.from(
-    new Set(
-      completedDates
-        .filter((d): d is string => typeof d === "string")
-        .map((d) => d.trim())
-        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-    )
-  ).sort((a, b) => a.localeCompare(b));
+  const uniqueSorted = sanitizeSortedDateArray(completedDates);
 
   if (uniqueSorted.length === 0) {
     return {
@@ -222,7 +231,7 @@ export function recomputeStreakFromCompletedDates(
   let maxStreak = 1;
   let run = 1;
   for (let i = 1; i < uniqueSorted.length; i++) {
-    const diff = daysBetweenDateKeys(uniqueSorted[i - 1], uniqueSorted[i]);
+    const diff = daysBetweenDateKeys(uniqueSorted[i - 1]!, uniqueSorted[i]!);
     if (diff === 1) {
       run += 1;
       if (run > maxStreak) {
@@ -233,7 +242,7 @@ export function recomputeStreakFromCompletedDates(
     }
   }
 
-  const lastCompletedDate = uniqueSorted[uniqueSorted.length - 1];
+  const lastCompletedDate = uniqueSorted[uniqueSorted.length - 1]!;
   let currentStreak = run;
 
   if (todayKey && /^\d{4}-\d{2}-\d{2}$/.test(todayKey.trim())) {
@@ -244,7 +253,7 @@ export function recomputeStreakFromCompletedDates(
     if (datesUpToToday.length === 0) {
       currentStreak = 0;
     } else {
-      const lastUpToToday = datesUpToToday[datesUpToToday.length - 1];
+      const lastUpToToday = datesUpToToday[datesUpToToday.length - 1]!;
       const gapFromToday = daysBetweenDateKeys(lastUpToToday, normalizedToday);
       if (gapFromToday > 1) {
         currentStreak = 0;
@@ -252,8 +261,8 @@ export function recomputeStreakFromCompletedDates(
         let streakUpToToday = 1;
         for (let i = datesUpToToday.length - 1; i > 0; i--) {
           const diff = daysBetweenDateKeys(
-            datesUpToToday[i - 1],
-            datesUpToToday[i]
+            datesUpToToday[i - 1]!,
+            datesUpToToday[i]!
           );
           if (diff === 1) {
             streakUpToToday += 1;
@@ -274,35 +283,46 @@ export function recomputeStreakFromCompletedDates(
   };
 }
 
-export function normalizeGameStats(raw?: Partial<GameStats> | null): GameStats {
+export function normalizeGameStats(
+  raw?: Partial<GameStats> | null,
+  todayKey: string = getLocalDateKey()
+): GameStats {
   if (!raw || typeof raw !== "object") {
     return {
       ...DEFAULT_STATS,
       completedDates: [],
+      streakDates: [],
       distribution: {},
     };
   }
 
-  const dates = Array.isArray(raw.completedDates)
-    ? Array.from(
-        new Set(
-          raw.completedDates
-            .filter((d): d is string => typeof d === "string")
-            .map((d) => d.trim())
-            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-        )
-      ).sort((a, b) => a.localeCompare(b))
-    : [];
+  const dates = sanitizeSortedDateArray(raw.completedDates).filter(
+    (d) => d.localeCompare(todayKey) <= 0
+  );
+  const explicitStreakDates = Array.isArray(raw.streakDates)
+    ? sanitizeSortedDateArray(raw.streakDates).filter(
+        (d) => d.localeCompare(todayKey) <= 0
+      )
+    : dates;
 
+  const rawLast = raw.lastCompletedDateKey ?? raw.lastCompletedDate ?? null;
   const streakInfo =
-    dates.length > 0
-      ? recomputeStreakFromCompletedDates(dates)
+    explicitStreakDates.length > 0
+      ? recomputeStreakFromCompletedDates(explicitStreakDates, todayKey)
       : {
-          currentStreak: Math.max(0, Number(raw.currentStreak ?? 0) || 0),
+          currentStreak:
+            rawLast &&
+            /^\d{4}-\d{2}-\d{2}$/.test(rawLast) &&
+            daysBetweenDateKeys(rawLast, todayKey) >= 0 &&
+            daysBetweenDateKeys(rawLast, todayKey) <= 1
+              ? Math.max(0, Number(raw.currentStreak ?? 0) || 0)
+              : 0,
           maxStreak: Math.max(0, Number(raw.maxStreak ?? 0) || 0),
-          lastCompletedDate:
-            raw.lastCompletedDateKey ?? raw.lastCompletedDate ?? null,
+          lastCompletedDate: rawLast,
         };
+
+  const allDatesInfo =
+    dates.length > 0 ? recomputeStreakFromCompletedDates(dates, todayKey) : null;
 
   const won = Math.max(
     Number(raw.won ?? 0) || 0,
@@ -314,14 +334,11 @@ export function normalizeGameStats(raw?: Partial<GameStats> | null): GameStats {
     Number(raw.maxStreak ?? 0) || 0,
     streakInfo.maxStreak
   );
-  const currentStreak =
-    dates.length > 0
-      ? streakInfo.currentStreak
-      : Math.max(0, Number(raw.currentStreak ?? 0) || 0);
+  const currentStreak = streakInfo.currentStreak;
   const lastDate =
+    allDatesInfo?.lastCompletedDate ??
     streakInfo.lastCompletedDate ??
-    raw.lastCompletedDateKey ??
-    raw.lastCompletedDate ??
+    rawLast ??
     null;
   const bestTimeSeconds =
     typeof raw.bestTimeSeconds === "number" && raw.bestTimeSeconds > 0
@@ -350,22 +367,36 @@ export function normalizeGameStats(raw?: Partial<GameStats> | null): GameStats {
     bestTimeSeconds,
     totalTimeSeconds,
     completedDates: dates,
+    streakDates: explicitStreakDates,
     distribution,
   };
 }
 
 export function mergeTwoGameStats(
   a: Partial<GameStats> | GameStats,
-  b: Partial<GameStats> | GameStats
+  b: Partial<GameStats> | GameStats,
+  todayKey: string = getLocalDateKey()
 ): GameStats {
-  const normA = normalizeGameStats(a);
-  const normB = normalizeGameStats(b);
+  const normA = normalizeGameStats(a, todayKey);
+  const normB = normalizeGameStats(b, todayKey);
 
   const mergedDates = Array.from(
     new Set([...normA.completedDates, ...normB.completedDates])
   ).sort((x, y) => x.localeCompare(y));
 
-  const streakInfo = recomputeStreakFromCompletedDates(mergedDates);
+  const mergedStreakDates = Array.from(
+    new Set([...(normA.streakDates ?? []), ...(normB.streakDates ?? [])])
+  ).sort((x, y) => x.localeCompare(y));
+
+  const streakInfo = recomputeStreakFromCompletedDates(
+    mergedStreakDates,
+    todayKey
+  );
+  const allDatesInfo =
+    mergedDates.length > 0
+      ? recomputeStreakFromCompletedDates(mergedDates, todayKey)
+      : null;
+
   const mergedWins = Math.max(
     normA.won,
     normA.wins,
@@ -385,10 +416,11 @@ export function mergeTwoGameStats(
     streakInfo.maxStreak
   );
   const mergedCurrentStreak =
-    mergedDates.length > 0
+    mergedStreakDates.length > 0
       ? streakInfo.currentStreak
       : Math.max(normA.currentStreak, normB.currentStreak);
   const lastDate =
+    allDatesInfo?.lastCompletedDate ??
     streakInfo.lastCompletedDate ??
     normA.lastCompletedDateKey ??
     normB.lastCompletedDateKey ??
@@ -433,6 +465,7 @@ export function mergeTwoGameStats(
     bestTimeSeconds,
     totalTimeSeconds,
     completedDates: mergedDates,
+    streakDates: mergedStreakDates,
     distribution: mergedDistribution,
   };
 }
@@ -464,11 +497,103 @@ export function setGameStats(
   }
 }
 
+export interface DailySweepStatus {
+  dateKey: string;
+  completedSlugs: AllGameSlug[];
+  remainingSlugs: AllGameSlug[];
+  completedCount: number;
+  totalCount: number;
+  isSweepComplete: boolean;
+}
+
+export function getDailySweepStatus(
+  dateKey: string = getLocalDateKey()
+): DailySweepStatus {
+  const completedSlugs: AllGameSlug[] = [];
+  const remainingSlugs: AllGameSlug[] = [];
+  for (const slug of ALL_GAME_SLUGS) {
+    if (isDateCompleted(slug, dateKey)) {
+      completedSlugs.push(slug);
+    } else {
+      remainingSlugs.push(slug);
+    }
+  }
+  return {
+    dateKey,
+    completedSlugs,
+    remainingSlugs,
+    completedCount: completedSlugs.length,
+    totalCount: ALL_GAME_SLUGS.length,
+    isSweepComplete: completedSlugs.length === ALL_GAME_SLUGS.length,
+  };
+}
+
+/**
+ * Records a revealed puzzle attempt ("Reveal Entire Puzzle" in Connect 5 / 17 Syllables).
+ * Increments `played` and `distribution.revealed` WITHOUT awarding a daily win streak,
+ * Archive completion checkmark, or "Fastest Solve" bestTimeSeconds.
+ */
+export function recordGameRevealed(
+  gameSlug: PlayableGameSlug,
+  dateKey: string = getLocalDateKey()
+): GameStats {
+  const todayKey = getLocalDateKey();
+  const current = getGameStats(gameSlug);
+  if (
+    dateKey.localeCompare(todayKey) > 0 ||
+    current.completedDates.includes(dateKey)
+  ) {
+    return current;
+  }
+  const revealedMarkerKey = `${STORAGE_PREFIX}_revealed_${gameSlug}_${dateKey}`;
+  if (typeof window !== "undefined") {
+    try {
+      if (window.localStorage.getItem(revealedMarkerKey) === "1") {
+        return current;
+      }
+      window.localStorage.setItem(revealedMarkerKey, "1");
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  const nextDistribution = {
+    ...current.distribution,
+    revealed: (current.distribution.revealed ?? 0) + 1,
+  };
+  const updated: GameStats = {
+    ...current,
+    played: current.played + 1,
+    distribution: nextDistribution,
+  };
+  setGameStats(gameSlug, updated);
+  return updated;
+}
+
+export interface RecordGameWinOptions {
+  isCustom?: boolean;
+  isRevealed?: boolean;
+  todayKey?: string;
+  distributionMutator?: (distribution: Record<string, number>) => void;
+}
+
 export function recordGameWin(
   gameSlug: PlayableGameSlug,
   dateKey: string = getLocalDateKey(),
-  elapsedSeconds: number = 0
+  elapsedSeconds: number = 0,
+  options?: RecordGameWinOptions
 ): GameStats {
+  if (options?.isCustom) {
+    return getGameStats(gameSlug);
+  }
+  if (options?.isRevealed) {
+    return recordGameRevealed(gameSlug, dateKey);
+  }
+
+  const todayKey = options?.todayKey ?? getLocalDateKey();
+  if (dateKey.localeCompare(todayKey) > 0) {
+    return getGameStats(gameSlug);
+  }
+
   const current = getGameStats(gameSlug);
   if (current.completedDates.includes(dateKey)) {
     return current;
@@ -477,9 +602,25 @@ export function recordGameWin(
   const nextDates = Array.from(
     new Set([...current.completedDates, dateKey])
   ).sort((a, b) => a.localeCompare(b));
-  const streakInfo = recomputeStreakFromCompletedDates(nextDates);
+
+  const isSameDayDaily = dateKey === todayKey;
+  const baseStreakDates = current.streakDates ?? current.completedDates;
+  const nextStreakDates = isSameDayDaily
+    ? Array.from(new Set([...baseStreakDates, dateKey])).sort((a, b) =>
+        a.localeCompare(b)
+      )
+    : [...baseStreakDates];
+
+  const streakInfo = recomputeStreakFromCompletedDates(
+    nextStreakDates,
+    todayKey
+  );
+  const allDatesInfo = recomputeStreakFromCompletedDates(nextDates, todayKey);
   const nextWon = Math.max(current.won + 1, nextDates.length);
   const nextPlayed = Math.max(current.played + 1, nextWon);
+
+  const nextDistribution: Record<string, number> = { ...current.distribution };
+  options?.distributionMutator?.(nextDistribution);
 
   const updated: GameStats = {
     played: nextPlayed,
@@ -487,8 +628,10 @@ export function recordGameWin(
     wins: nextWon,
     currentStreak: streakInfo.currentStreak,
     maxStreak: Math.max(current.maxStreak, streakInfo.maxStreak),
-    lastCompletedDateKey: streakInfo.lastCompletedDate ?? dateKey,
-    lastCompletedDate: streakInfo.lastCompletedDate ?? dateKey,
+    lastCompletedDateKey:
+      allDatesInfo.lastCompletedDate ?? streakInfo.lastCompletedDate ?? dateKey,
+    lastCompletedDate:
+      allDatesInfo.lastCompletedDate ?? streakInfo.lastCompletedDate ?? dateKey,
     bestTimeSeconds:
       elapsedSeconds > 0
         ? current.bestTimeSeconds === null
@@ -497,7 +640,8 @@ export function recordGameWin(
         : current.bestTimeSeconds,
     totalTimeSeconds: current.totalTimeSeconds + Math.max(0, elapsedSeconds),
     completedDates: nextDates,
-    distribution: { ...current.distribution },
+    streakDates: nextStreakDates,
+    distribution: nextDistribution,
   };
 
   setGameStats(gameSlug, updated);
@@ -507,6 +651,22 @@ export function recordGameWin(
     dateKey,
     stats: updated,
   });
+
+  if (isSameDayDaily && typeof window !== "undefined") {
+    try {
+      const sweep = getDailySweepStatus(todayKey);
+      if (sweep.isSweepComplete) {
+        window.dispatchEvent(
+          new CustomEvent("solgames:daily-sweep-unlocked", {
+            detail: { dateKey: todayKey, triggeredBy: gameSlug },
+          })
+        );
+      }
+    } catch {
+      // Ignore event dispatch errors
+    }
+  }
+
   return updated;
 }
 
@@ -516,6 +676,39 @@ export function isDateCompleted(
 ): boolean {
   const stats = getGameStats(gameSlug);
   return stats.completedDates.includes(dateKey);
+}
+
+export function clearAllLocalUserGameData(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    const prefixes = [
+      `${STORAGE_PREFIX}_stats_`,
+      `${STORAGE_PREFIX}_revealed_`,
+      `${STORAGE_PREFIX}_c5_progress_`,
+      `${STORAGE_PREFIX}_17s_progress_`,
+      `${STORAGE_PREFIX}_21t_progress_`,
+      `${STORAGE_PREFIX}_21t_my_journeys`,
+      `${STORAGE_PREFIX}_user_21boards`,
+      "solgames_v1_1w_history",
+      "solgames_v1_custom_puzzles_mine",
+      ...Object.values(GAME_PROGRESS_PREFIX).filter((p): p is string =>
+        Boolean(p)
+      ),
+    ];
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && prefixes.some((prefix) => k.startsWith(prefix))) {
+        keysToRemove.push(k);
+      }
+    }
+    for (const k of keysToRemove) {
+      window.localStorage.removeItem(k);
+    }
+    window.dispatchEvent(new CustomEvent("solgames:stats-updated"));
+  } catch {
+    // Ignore private-mode storage errors
+  }
 }
 
 // ============================================================================
@@ -573,14 +766,17 @@ export function clear17SyllablesProgress(dateKey: string): void {
 export function record17SyllablesWin(
   dateKey: string,
   stars: number,
-  elapsedSeconds: number
+  elapsedSeconds: number,
+  options?: { isCustom?: boolean; isRevealed?: boolean }
 ): GameStats {
-  const stats = recordGameWin("17-syllables", dateKey, elapsedSeconds);
   const starKey = `stars_${stars.toFixed(1)}`;
-  const currentCount = stats.distribution[starKey] ?? 0;
-  stats.distribution[starKey] = currentCount + 1;
-  setGameStats("17-syllables", stats);
-  return stats;
+  return recordGameWin("17-syllables", dateKey, elapsedSeconds, {
+    isCustom: options?.isCustom,
+    isRevealed: options?.isRevealed,
+    distributionMutator: (dist) => {
+      dist[starKey] = (dist[starKey] ?? 0) + 1;
+    },
+  });
 }
 
 // ============================================================================
@@ -895,18 +1091,37 @@ export async function saveUserCreated21Board(
   });
 }
 
+let cachedC5OverridesRaw: string | null | undefined = undefined;
+let cachedC5OverridesVal: Record<string, Connect5Puzzle> = {};
+
 export function getAdminConnect5Overrides(): Record<string, Connect5Puzzle> {
-  const raw = safeReadJson<Record<string, Connect5Puzzle>>(
-    `${STORAGE_PREFIX}_admin_c5_overrides`,
-    {}
-  );
-  const out: Record<string, Connect5Puzzle> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (v && typeof v === "object") {
-      out[k] = sanitizeConnect5Puzzle(v);
+  if (typeof window !== "undefined") {
+    try {
+      const rawStr = window.localStorage.getItem(
+        `${STORAGE_PREFIX}_admin_c5_overrides`
+      );
+      if (rawStr === cachedC5OverridesRaw) {
+        return { ...cachedC5OverridesVal };
+      }
+      cachedC5OverridesRaw = rawStr;
+      if (!rawStr) {
+        cachedC5OverridesVal = {};
+        return {};
+      }
+      const parsed = JSON.parse(rawStr) as Record<string, Connect5Puzzle>;
+      const out: Record<string, Connect5Puzzle> = {};
+      for (const [k, v] of Object.entries(parsed || {})) {
+        if (v && typeof v === "object") {
+          out[k] = sanitizeConnect5Puzzle(v);
+        }
+      }
+      cachedC5OverridesVal = out;
+      return { ...out };
+    } catch {
+      return {};
     }
   }
-  return out;
+  return {};
 }
 
 export async function fetchRemoteConnect5Override(
@@ -975,7 +1190,6 @@ export function broadcastPuzzleUpdate(detail: Record<string, unknown>): void {
 
   if (typeof window === "undefined") return;
 
-  // 1. Post to BroadcastChannel for other open tabs
   if (typeof BroadcastChannel !== "undefined") {
     try {
       if (!broadcastChannelInstance) {
@@ -987,7 +1201,6 @@ export function broadcastPuzzleUpdate(detail: Record<string, unknown>): void {
     }
   }
 
-  // 2. Storage fallback for tabs/browsers without BroadcastChannel
   try {
     safeWriteJson(`${STORAGE_PREFIX}_puzzles_broadcast_ping`, {
       ...detail,
@@ -997,7 +1210,6 @@ export function broadcastPuzzleUpdate(detail: Record<string, unknown>): void {
     // Ignore storage quota errors
   }
 
-  // 3. Local DOM CustomEvent for current tab
   try {
     window.dispatchEvent(
       new CustomEvent("solgames:puzzles-updated", { detail })
@@ -1007,42 +1219,72 @@ export function broadcastPuzzleUpdate(detail: Record<string, unknown>): void {
   }
 }
 
+function removeLocalOverrideEntry(gameSlug: string, dateKey: string): void {
+  if (gameSlug === "connect-5") {
+    const current = getAdminConnect5Overrides();
+    if (dateKey in current) {
+      delete current[dateKey];
+      safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
+    }
+  } else if (gameSlug === "21-things") {
+    const current = getAdmin21ThingsOverrides();
+    if (dateKey in current) {
+      delete current[dateKey];
+      safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
+    }
+  } else if (gameSlug === "17-syllables") {
+    const current = getAdmin17SyllablesOverrides();
+    if (dateKey in current) {
+      delete current[dateKey];
+      safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+    }
+  } else if (isGenericOverrideSlug(gameSlug)) {
+    clearGenericOverride(gameSlug, dateKey);
+  }
+}
+
 function handleReceivedPuzzleUpdate(detail: Record<string, unknown>): void {
   if (!detail) return;
   puzzlesStoreRevision += 1;
 
-  const payload = detail.payload ?? detail.puzzle ?? detail.board;
-
-  // If this update contained puzzle data, ensure local storage has it
-  if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && payload) {
-    const puzzle = sanitizeConnect5Puzzle(payload as Connect5Puzzle);
-    detail.puzzle = puzzle;
-    const current = getAdminConnect5Overrides();
-    current[detail.dateKey] = puzzle;
-    safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
-  } else if (detail.gameSlug === "21-things" && typeof detail.dateKey === "string" && payload) {
-    const board = payload as TwentyOneThingsBoard;
-    detail.board = board;
-    const current = getAdmin21ThingsOverrides();
-    current[detail.dateKey] = board;
-    safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
-  } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && payload) {
-    const puzzle = sanitize17SyllablesPuzzle(
-      payload as SeventeenSyllablesPuzzle,
-      detail.dateKey
-    );
-    detail.puzzle = puzzle;
-    const current = getAdmin17SyllablesOverrides();
-    current[detail.dateKey] = puzzle;
-    safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
-  } else if (
-    isGenericOverrideSlug(detail.gameSlug) &&
-    typeof detail.dateKey === "string" &&
-    payload
+  if (
+    detail.deleted === true &&
+    typeof detail.gameSlug === "string" &&
+    typeof detail.dateKey === "string"
   ) {
-    // Countdown games #9 .. #1 share one generic, validated override cache.
-    if (cacheGenericOverride(detail.gameSlug, detail.dateKey, payload)) {
-      detail.puzzle = payload;
+    removeLocalOverrideEntry(detail.gameSlug, detail.dateKey);
+  } else {
+    const payload = detail.payload ?? detail.puzzle ?? detail.board;
+
+    if (detail.gameSlug === "connect-5" && typeof detail.dateKey === "string" && payload) {
+      const puzzle = sanitizeConnect5Puzzle(payload as Connect5Puzzle);
+      detail.puzzle = puzzle;
+      const current = getAdminConnect5Overrides();
+      current[detail.dateKey] = puzzle;
+      safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
+    } else if (detail.gameSlug === "21-things" && typeof detail.dateKey === "string" && payload) {
+      const board = payload as TwentyOneThingsBoard;
+      detail.board = board;
+      const current = getAdmin21ThingsOverrides();
+      current[detail.dateKey] = board;
+      safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
+    } else if (detail.gameSlug === "17-syllables" && typeof detail.dateKey === "string" && payload) {
+      const puzzle = sanitize17SyllablesPuzzle(
+        payload as SeventeenSyllablesPuzzle,
+        detail.dateKey
+      );
+      detail.puzzle = puzzle;
+      const current = getAdmin17SyllablesOverrides();
+      current[detail.dateKey] = puzzle;
+      safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+    } else if (
+      isGenericOverrideSlug(detail.gameSlug) &&
+      typeof detail.dateKey === "string" &&
+      payload
+    ) {
+      if (cacheGenericOverride(detail.gameSlug, detail.dateKey, payload)) {
+        detail.puzzle = payload;
+      }
     }
   }
 
@@ -1084,6 +1326,7 @@ function setupCrossTabSync(): void {
 
 export let activeRealtimeChannel: RealtimeChannel | null = null;
 let realtimeChannelInitialized = false;
+let realtimeSocketAttached = false;
 let realtimeChannelUnsubscribe: (() => void) | null = null;
 
 export function getActiveRealtimeChannel(): RealtimeChannel | null {
@@ -1095,9 +1338,10 @@ export function broadcastRemotePuzzleUpdate(detail: {
   dateKey: string;
   hash?: string;
   payload?: unknown;
+  deleted?: boolean;
 }): void {
   if (!activeRealtimeChannel && typeof window !== "undefined" && isSupabaseConfigured) {
-    initRealtimePuzzleSync();
+    initRealtimePuzzleSync({ enableRealtimeSocket: true });
   }
   if (activeRealtimeChannel) {
     try {
@@ -1109,6 +1353,7 @@ export function broadcastRemotePuzzleUpdate(detail: {
           dateKey: detail.dateKey,
           hash: detail.hash,
           payload: detail.payload,
+          deleted: detail.deleted,
         },
       });
     } catch {
@@ -1117,22 +1362,30 @@ export function broadcastRemotePuzzleUpdate(detail: {
   }
 }
 
-export function initRealtimePuzzleSync(): () => void {
+export function initRealtimePuzzleSync(options?: {
+  enableRealtimeSocket?: boolean;
+}): () => void {
   if (typeof window === "undefined") {
     return () => {};
   }
+
+  const wantsSocket =
+    options?.enableRealtimeSocket === true ||
+    window.location.pathname.startsWith("/admin");
+
   if (realtimeChannelInitialized && realtimeChannelUnsubscribe) {
+    if (wantsSocket && !realtimeSocketAttached) {
+      attachSupabaseRealtimeSocket();
+    }
     return realtimeChannelUnsubscribe;
   }
 
-  // 1. Setup BroadcastChannel and storage listeners for cross-tab communication
   setupCrossTabSync();
 
-  // 2. Setup focus & visibility change listeners (throttled to at most once every 10 seconds)
-  let lastVisibilitySync = 0;
+  let lastVisibilitySync = Date.now();
   const handleWakeupSync = () => {
     const now = Date.now();
-    if (now - lastVisibilitySync < 10000) return;
+    if (now - lastVisibilitySync < 60_000) return;
     lastVisibilitySync = now;
     void syncAllRemoteDailyPuzzles();
   };
@@ -1145,134 +1398,22 @@ export function initRealtimePuzzleSync(): () => void {
   };
   document.addEventListener("visibilitychange", handleVisibility);
 
-  // 3. Setup Supabase Realtime channel if Supabase is configured
-  if (isSupabaseConfigured) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const channel = supabase
-          .channel("daily_puzzles_live", {
-            config: {
-              broadcast: { self: false },
-            },
-          })
-          .on(
-            "broadcast",
-            { event: "puzzle_updated" },
-            (eventPayload: { payload?: Record<string, unknown> } | Record<string, unknown>) => {
-              const broadcastData =
-                eventPayload && typeof eventPayload === "object" && "payload" in eventPayload && eventPayload.payload
-                  ? (eventPayload.payload as Record<string, unknown>)
-                  : (eventPayload as Record<string, unknown>);
-              if (broadcastData && typeof broadcastData === "object") {
-                handleReceivedPuzzleUpdate(broadcastData);
-              }
-            }
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "daily_puzzles",
-            },
-            (payload) => {
-              const newRow = payload.new as {
-                game_slug?: string;
-                puzzle_date?: string;
-                payload?: unknown;
-              } | null;
-
-              if (newRow && newRow.game_slug && newRow.puzzle_date && newRow.payload) {
-                const dateKey = String(newRow.puzzle_date);
-                if (newRow.game_slug === "connect-5") {
-                  const rawPuzzle = newRow.payload as Connect5Puzzle;
-                  if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
-                    const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
-                    const current = getAdminConnect5Overrides();
-                    current[dateKey] = puzzle;
-                    safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
-                    broadcastPuzzleUpdate({
-                      gameSlug: "connect-5",
-                      dateKey,
-                      hash: computePuzzleContentHash(puzzle),
-                      puzzle,
-                      source: "realtime",
-                    });
-                  }
-                } else if (newRow.game_slug === "21-things") {
-                  const board = newRow.payload as TwentyOneThingsBoard;
-                  if (Array.isArray(board.items) && board.items.length === 21) {
-                    const current = getAdmin21ThingsOverrides();
-                    current[dateKey] = board;
-                    safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
-                    broadcastPuzzleUpdate({
-                      gameSlug: "21-things",
-                      dateKey,
-                      hash: computePuzzleContentHash(board),
-                      board,
-                      source: "realtime",
-                    });
-                  }
-                } else if (newRow.game_slug === "17-syllables") {
-                  const rawPuzzle = newRow.payload as SeventeenSyllablesPuzzle;
-                  if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
-                    const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
-                    const current = getAdmin17SyllablesOverrides();
-                    current[dateKey] = puzzle;
-                    safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
-                    broadcastPuzzleUpdate({
-                      gameSlug: "17-syllables",
-                      dateKey,
-                      hash: computePuzzleContentHash(puzzle),
-                      puzzle,
-                      source: "realtime",
-                    });
-                  }
-                } else if (
-                  isGenericOverrideSlug(newRow.game_slug) &&
-                  cacheGenericOverride(newRow.game_slug, dateKey, newRow.payload)
-                ) {
-                  broadcastPuzzleUpdate({
-                    gameSlug: newRow.game_slug,
-                    dateKey,
-                    hash: computePuzzleContentHash(newRow.payload),
-                    puzzle: newRow.payload,
-                    source: "realtime",
-                  });
-                }
-              } else {
-                // If row payload missing or event was DELETE, trigger full resync
-                void syncAllRemoteDailyPuzzles();
-              }
-            }
-          );
-
-        activeRealtimeChannel = channel;
-        channel.subscribe();
-
-        realtimeChannelInitialized = true;
-        realtimeChannelUnsubscribe = () => {
-          try {
-            void supabase.removeChannel(channel);
-          } catch {
-            // Ignore channel cleanup errors
-          }
-          activeRealtimeChannel = null;
-          window.removeEventListener("focus", handleWakeupSync);
-          document.removeEventListener("visibilitychange", handleVisibility);
-          realtimeChannelInitialized = false;
-          realtimeChannelUnsubscribe = null;
-        };
-        return realtimeChannelUnsubscribe;
-      } catch {
-        // Fallback to local polling/focus sync
-      }
-    }
+  if (wantsSocket) {
+    attachSupabaseRealtimeSocket();
   }
 
   realtimeChannelInitialized = true;
   realtimeChannelUnsubscribe = () => {
+    if (activeRealtimeChannel && isSupabaseConfigured) {
+      try {
+        const supabase = getSupabaseClient();
+        if (supabase) void supabase.removeChannel(activeRealtimeChannel);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    activeRealtimeChannel = null;
+    realtimeSocketAttached = false;
     window.removeEventListener("focus", handleWakeupSync);
     document.removeEventListener("visibilitychange", handleVisibility);
     realtimeChannelInitialized = false;
@@ -1281,24 +1422,157 @@ export function initRealtimePuzzleSync(): () => void {
   return realtimeChannelUnsubscribe;
 }
 
+function attachSupabaseRealtimeSocket(): void {
+  if (realtimeSocketAttached || !isSupabaseConfigured) return;
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const channel = supabase
+      .channel("daily_puzzles_live", {
+        config: {
+          broadcast: { self: false },
+        },
+      })
+      .on(
+        "broadcast",
+        { event: "puzzle_updated" },
+        (eventPayload: { payload?: Record<string, unknown> } | Record<string, unknown>) => {
+          const broadcastData =
+            eventPayload && typeof eventPayload === "object" && "payload" in eventPayload && eventPayload.payload
+              ? (eventPayload.payload as Record<string, unknown>)
+              : (eventPayload as Record<string, unknown>);
+          if (broadcastData && typeof broadcastData === "object") {
+            handleReceivedPuzzleUpdate(broadcastData);
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "daily_puzzles",
+        },
+        (payload) => {
+          const newRow = payload.new as {
+            game_slug?: string;
+            puzzle_date?: string;
+            payload?: unknown;
+          } | null;
+
+          if (newRow && newRow.game_slug && newRow.puzzle_date && newRow.payload) {
+            const dateKey = String(newRow.puzzle_date);
+            if (newRow.game_slug === "connect-5") {
+              const rawPuzzle = newRow.payload as Connect5Puzzle;
+              if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
+                const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
+                const current = getAdminConnect5Overrides();
+                current[dateKey] = puzzle;
+                safeWriteJson(`${STORAGE_PREFIX}_admin_c5_overrides`, current);
+                broadcastPuzzleUpdate({
+                  gameSlug: "connect-5",
+                  dateKey,
+                  hash: computePuzzleContentHash(puzzle),
+                  puzzle,
+                  source: "realtime",
+                });
+              }
+            } else if (newRow.game_slug === "21-things") {
+              const board = newRow.payload as TwentyOneThingsBoard;
+              if (Array.isArray(board.items) && board.items.length === 21) {
+                const current = getAdmin21ThingsOverrides();
+                current[dateKey] = board;
+                safeWriteJson(`${STORAGE_PREFIX}_admin_21t_overrides`, current);
+                broadcastPuzzleUpdate({
+                  gameSlug: "21-things",
+                  dateKey,
+                  hash: computePuzzleContentHash(board),
+                  board,
+                  source: "realtime",
+                });
+              }
+            } else if (newRow.game_slug === "17-syllables") {
+              const rawPuzzle = newRow.payload as SeventeenSyllablesPuzzle;
+              if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
+                const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
+                const current = getAdmin17SyllablesOverrides();
+                current[dateKey] = puzzle;
+                safeWriteJson(`${STORAGE_PREFIX}_admin_17s_overrides`, current);
+                broadcastPuzzleUpdate({
+                  gameSlug: "17-syllables",
+                  dateKey,
+                  hash: computePuzzleContentHash(puzzle),
+                  puzzle,
+                  source: "realtime",
+                });
+              }
+            } else if (
+              isGenericOverrideSlug(newRow.game_slug) &&
+              cacheGenericOverride(newRow.game_slug, dateKey, newRow.payload)
+            ) {
+              broadcastPuzzleUpdate({
+                gameSlug: newRow.game_slug,
+                dateKey,
+                hash: computePuzzleContentHash(newRow.payload),
+                puzzle: newRow.payload,
+                source: "realtime",
+              });
+            }
+          } else {
+            void syncAllRemoteDailyPuzzles({ force: true, includeFutureAdmin: true });
+          }
+        }
+      );
+
+    activeRealtimeChannel = channel;
+    realtimeSocketAttached = true;
+    channel.subscribe();
+  } catch {
+    // Non-fatal fallback
+  }
+}
+
+let lastRemoteDailySyncMs = 0;
+
 /**
- * Fetches all daily puzzles from Supabase `public.daily_puzzles` (Connect 5, 21 Things, 17 Syllables),
- * updates local storage override caches, and dispatches "solgames:puzzles-updated" via BroadcastChannel.
- * This ensures that puzzle edits made by Game Masters on any device immediately
- * synchronize across all browser sessions upon page load or refresh.
+ * Fetches published daily puzzle overrides from Supabase `public.daily_puzzles`.
+ * On public visitor routes, scopes queries to `puzzle_date <= tomorrow` (preventing
+ * future answer leaks and 200-row payload bloat) with a 60s throttle.
  */
-export async function syncAllRemoteDailyPuzzles(): Promise<void> {
+export async function syncAllRemoteDailyPuzzles(options?: {
+  force?: boolean;
+  includeFutureAdmin?: boolean;
+}): Promise<void> {
   if (!isSupabaseConfigured) return;
+  const now = Date.now();
+  const isAdminView =
+    options?.includeFutureAdmin === true ||
+    (typeof window !== "undefined" && window.location.pathname.startsWith("/admin"));
+
+  if (!options?.force && !isAdminView && now - lastRemoteDailySyncMs < 60_000) {
+    return;
+  }
+  lastRemoteDailySyncMs = now;
+
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("daily_puzzles")
       .select("game_slug, puzzle_date, payload, updated_at")
-      .order("puzzle_date", { ascending: false })
-      .limit(200);
+      .order("puzzle_date", { ascending: false });
 
+    if (!isAdminView) {
+      const tomorrowUtc = new Date(Date.now() + 36 * 3600 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      query = query.lte("puzzle_date", tomorrowUtc).limit(90);
+    } else {
+      query = query.limit(200);
+    }
+
+    const { data, error } = await query;
     if (error || !Array.isArray(data)) return;
 
     const c5Overrides = getAdminConnect5Overrides();
@@ -1319,32 +1593,51 @@ export async function syncAllRemoteDailyPuzzles(): Promise<void> {
         const rawPuzzle = row.payload as Connect5Puzzle;
         if (Array.isArray(rawPuzzle.words) && rawPuzzle.words.length === 5) {
           const puzzle = sanitizeConnect5Puzzle(rawPuzzle);
-          c5Overrides[dateKey] = puzzle;
-          c5Changed = true;
-          puzzleHashes[`connect-5:${dateKey}`] = computePuzzleContentHash(puzzle);
+          const nextHash = computePuzzleContentHash(puzzle);
+          const prevHash = c5Overrides[dateKey]
+            ? computePuzzleContentHash(c5Overrides[dateKey])
+            : null;
+          if (nextHash !== prevHash) {
+            c5Overrides[dateKey] = puzzle;
+            c5Changed = true;
+          }
+          puzzleHashes[`connect-5:${dateKey}`] = nextHash;
         }
       } else if (row.game_slug === "21-things" && row.payload) {
         const board = row.payload as TwentyOneThingsBoard;
         if (Array.isArray(board.items) && board.items.length === 21) {
-          t21Overrides[dateKey] = board;
-          t21Changed = true;
-          puzzleHashes[`21-things:${dateKey}`] = computePuzzleContentHash(board);
+          const nextHash = computePuzzleContentHash(board);
+          const prevHash = t21Overrides[dateKey]
+            ? computePuzzleContentHash(t21Overrides[dateKey])
+            : null;
+          if (nextHash !== prevHash) {
+            t21Overrides[dateKey] = board;
+            t21Changed = true;
+          }
+          puzzleHashes[`21-things:${dateKey}`] = nextHash;
         }
       } else if (row.game_slug === "17-syllables" && row.payload) {
         const rawPuzzle = row.payload as SeventeenSyllablesPuzzle;
         if (Array.isArray(rawPuzzle.lines) && rawPuzzle.lines.length === 3) {
           const puzzle = sanitize17SyllablesPuzzle(rawPuzzle, dateKey);
-          s17Overrides[dateKey] = puzzle;
-          s17Changed = true;
-          puzzleHashes[`17-syllables:${dateKey}`] = computePuzzleContentHash(puzzle);
+          const nextHash = computePuzzleContentHash(puzzle);
+          const prevHash = s17Overrides[dateKey]
+            ? computePuzzleContentHash(s17Overrides[dateKey])
+            : null;
+          if (nextHash !== prevHash) {
+            s17Overrides[dateKey] = puzzle;
+            s17Changed = true;
+          }
+          puzzleHashes[`17-syllables:${dateKey}`] = nextHash;
         }
       } else if (isGenericOverrideSlug(row.game_slug) && row.payload) {
-        if (cacheGenericOverride(row.game_slug, dateKey, row.payload)) {
+        const existing = getAdminOverridesForGame(row.game_slug)[dateKey];
+        const nextHash = computePuzzleContentHash(row.payload);
+        const prevHash = existing ? computePuzzleContentHash(existing) : null;
+        if (nextHash !== prevHash && cacheGenericOverride(row.game_slug, dateKey, row.payload)) {
           genericChanged = true;
-          puzzleHashes[`${row.game_slug}:${dateKey}`] = computePuzzleContentHash(
-            row.payload
-          );
         }
+        puzzleHashes[`${row.game_slug}:${dateKey}`] = nextHash;
       }
     }
 
@@ -1646,21 +1939,43 @@ export async function saveAdmin21ThingsOverride(
 
 export const saveAdmin21BoardOverride = saveAdmin21ThingsOverride;
 
+let cached17sOverridesRaw: string | null | undefined = undefined;
+let cached17sOverridesVal: Record<string, SeventeenSyllablesPuzzle> = {};
+
 export function getAdmin17SyllablesOverrides(): Record<
   string,
   SeventeenSyllablesPuzzle
 > {
-  const raw = safeReadJson<Record<string, SeventeenSyllablesPuzzle>>(
-    `${STORAGE_PREFIX}_admin_17s_overrides`,
-    {}
-  );
-  const out: Record<string, SeventeenSyllablesPuzzle> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (v && typeof v === "object") {
-      out[k] = sanitize17SyllablesPuzzle(v, k);
+  if (typeof window !== "undefined") {
+    try {
+      const rawStr = window.localStorage.getItem(
+        `${STORAGE_PREFIX}_admin_17s_overrides`
+      );
+      if (rawStr === cached17sOverridesRaw) {
+        return { ...cached17sOverridesVal };
+      }
+      cached17sOverridesRaw = rawStr;
+      if (!rawStr) {
+        cached17sOverridesVal = {};
+        return {};
+      }
+      const parsed = JSON.parse(rawStr) as Record<
+        string,
+        SeventeenSyllablesPuzzle
+      >;
+      const out: Record<string, SeventeenSyllablesPuzzle> = {};
+      for (const [k, v] of Object.entries(parsed || {})) {
+        if (v && typeof v === "object") {
+          out[k] = sanitize17SyllablesPuzzle(v, k);
+        }
+      }
+      cached17sOverridesVal = out;
+      return { ...out };
+    } catch {
+      return {};
     }
   }
-  return out;
+  return {};
 }
 
 export async function fetchRemote17SyllablesOverride(
@@ -1803,22 +2118,12 @@ export async function saveAdmin17SyllablesOverride(
 }
 
 // ============================================================================
-// Generic (all 9 games) override cache, remote fetch & admin save
+// Generic (all 9 games) override cache, remote fetch, admin save & unpublish
 // ============================================================================
-
-const LEGACY_OVERRIDE_SLUGS: ReadonlySet<string> = new Set([
-  "connect-5",
-  "21-things",
-  "17-syllables",
-]);
 
 /** True for any registered game slug that is NOT one of the 3 legacy typed override stores. */
 export function isGenericOverrideSlug(slug: unknown): slug is AllGameSlug {
-  return (
-    typeof slug === "string" &&
-    !LEGACY_OVERRIDE_SLUGS.has(slug) &&
-    getPuzzleSource(slug) !== null
-  );
+  return isGenericOverrideSlugLight(slug);
 }
 
 function genericOverrideKey(slug: string): string {
@@ -1844,8 +2149,9 @@ export function cacheGenericOverride(
   dateKey: string,
   payload: unknown
 ): boolean {
-  const source = getPuzzleSource(gameSlug);
-  if (!source || !source.validate(payload)) return false;
+  if (!isGenericOverrideSlugLight(gameSlug) || !validateLightOverridePayload(gameSlug, payload)) {
+    return false;
+  }
   const current = getAdminOverridesForGame(gameSlug);
   current[dateKey] = payload;
   safeWriteJson(genericOverrideKey(gameSlug), current);
@@ -1864,6 +2170,9 @@ export async function fetchRemoteOverrideForGame(
   gameSlug: string,
   dateKey: string
 ): Promise<unknown | null> {
+  if (gameSlug === "connect-5") return fetchRemoteConnect5Override(dateKey);
+  if (gameSlug === "21-things") return fetchRemote21ThingsOverride(dateKey);
+  if (gameSlug === "17-syllables") return fetchRemote17SyllablesOverride(dateKey);
   if (!isSupabaseConfigured) return null;
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -1880,8 +2189,9 @@ export async function fetchRemoteOverrideForGame(
           ? data.payload
           : null;
       }
-      const source = getPuzzleSource(gameSlug);
-      return source && source.validate(data.payload) ? data.payload : null;
+      return validateLightOverridePayload(gameSlug, data.payload)
+        ? data.payload
+        : null;
     }
   } catch {
     // Fall back to local overrides / bank
@@ -1907,8 +2217,7 @@ export async function saveAdminOverrideForGame(
   meta: GenericOverrideMeta,
   authContext?: AdminSaveAuthContext
 ): Promise<SaveAdminOverrideResult> {
-  const source = getPuzzleSource(gameSlug);
-  if (!source || !source.validate(payload)) {
+  if (!validateLightOverridePayload(gameSlug, payload)) {
     return {
       ok: false,
       remotePersisted: false,
@@ -2005,6 +2314,85 @@ export async function saveAdminOverrideForGame(
   };
 }
 
+/**
+ * Unpublishes (deletes) a custom daily puzzle override from both Supabase `public.daily_puzzles`
+ * and local override caches so the date cleanly reverts to the default curated bank.
+ */
+export async function deleteAdminOverrideForGame(
+  gameSlug: AllGameSlug,
+  dateKey: string,
+  authContext?: AdminSaveAuthContext
+): Promise<SaveAdminOverrideResult> {
+  const resolvedAuth = resolveDefaultAdminAuthContext(authContext);
+  let remotePersisted = false;
+  let remoteError: string | undefined;
+  let rawError: unknown;
+  let diagnosticReport: DiagnosticReport | undefined;
+
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from("daily_puzzles")
+          .delete()
+          .eq("game_slug", gameSlug)
+          .eq("puzzle_date", dateKey);
+        if (error) {
+          rawError = error;
+          remoteError = error.message;
+          diagnosticReport = classifyDiagnosticError(error, {
+            gameSlug,
+            targetDate: dateKey,
+            action: "delete",
+            userEmail: resolvedAuth.userEmail,
+            userRole: resolvedAuth.userRole,
+          });
+          return {
+            ok: false,
+            remotePersisted: false,
+            error: remoteError,
+            rawError,
+            diagnosticReport,
+          };
+        }
+        remotePersisted = true;
+      } catch (err: unknown) {
+        rawError = err;
+        remoteError =
+          err instanceof Error
+            ? err.message
+            : `Failed to delete ${gameSlug} override from Supabase.`;
+        diagnosticReport = classifyDiagnosticError(err, {
+          gameSlug,
+          targetDate: dateKey,
+          action: "delete",
+          userEmail: resolvedAuth.userEmail,
+          userRole: resolvedAuth.userRole,
+        });
+        return {
+          ok: false,
+          remotePersisted: false,
+          error: remoteError,
+          rawError,
+          diagnosticReport,
+        };
+      }
+    }
+  }
+
+  removeLocalOverrideEntry(gameSlug, dateKey);
+  broadcastPuzzleUpdate({ gameSlug, dateKey, deleted: true });
+  if (remotePersisted) {
+    broadcastRemotePuzzleUpdate({ gameSlug, dateKey, deleted: true });
+  }
+
+  return {
+    ok: true,
+    remotePersisted,
+  };
+}
+
 // ============================================================================
 // Generic per-date progress + scored-completion helpers (9 Rhymes, 6 Pics, …)
 // ============================================================================
@@ -2039,28 +2427,29 @@ export function clearGameProgress(gameSlug: AllGameSlug, dateKey: string): void 
 
 /**
  * Records a finished score-based puzzle (any score counts as a completed day for streaks).
- * Also maintains `distribution`: `score_<x.x>` buckets, `score_total_x10` (sum of score*10),
- * `flawless` (perfect scores) so Q4 stats (average score, flawless count) can be derived.
+ * Atomically updates `distribution`: `score_<x.x>` buckets, `score_total_x10` (sum of score*10),
+ * `flawless` (perfect scores) before firing profile sync listeners.
  */
 export function recordScoredCompletion(
   gameSlug: AllGameSlug,
   dateKey: string,
   score: number,
   maxScore: number,
-  elapsedSeconds: number = 0
+  elapsedSeconds: number = 0,
+  options?: { isCustom?: boolean; isRevealed?: boolean }
 ): GameStats {
-  const before = getGameStats(gameSlug as PlayableGameSlug);
-  if (before.completedDates.includes(dateKey)) return before;
-  const stats = recordGameWin(gameSlug as PlayableGameSlug, dateKey, elapsedSeconds);
   const bucket = `score_${score.toFixed(1)}`;
-  stats.distribution[bucket] = (stats.distribution[bucket] ?? 0) + 1;
-  stats.distribution.score_total_x10 =
-    (stats.distribution.score_total_x10 ?? 0) + Math.round(score * 10);
-  if (score >= maxScore) {
-    stats.distribution.flawless = (stats.distribution.flawless ?? 0) + 1;
-  }
-  setGameStats(gameSlug as PlayableGameSlug, stats);
-  return stats;
+  return recordGameWin(gameSlug as PlayableGameSlug, dateKey, elapsedSeconds, {
+    isCustom: options?.isCustom,
+    isRevealed: options?.isRevealed,
+    distributionMutator: (dist) => {
+      dist[bucket] = (dist[bucket] ?? 0) + 1;
+      dist.score_total_x10 = (dist.score_total_x10 ?? 0) + Math.round(score * 10);
+      if (score >= maxScore) {
+        dist.flawless = (dist.flawless ?? 0) + 1;
+      }
+    },
+  });
 }
 
 // ============================================================================

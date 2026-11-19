@@ -852,3 +852,55 @@ export function get21ThingsBoardForDate(
   return synthesized;
 }
 
+
+/**
+ * Encodes a custom user-created 21 Things board into a compact URL-safe token
+ * using universal `globalThis.btoa` (Node 18+ & all browsers) without bundling Node `Buffer`.
+ */
+export function encodeShareable21Board(board: {
+  id: string;
+  title: string;
+  creatorName: string;
+  creatorBio?: string;
+  items: string[];
+}): string {
+  try {
+    const json = JSON.stringify({
+      i: board.id,
+      t: board.title,
+      c: board.creatorName,
+      b: board.creatorBio ?? "",
+      x: board.items.slice(0, 21),
+    });
+    return globalThis.btoa(encodeURIComponent(json));
+  } catch {
+    return "";
+  }
+}
+
+export function decodeShareable21Board(
+  token: string
+): TwentyOneThingsBoard | null {
+  try {
+    const raw = decodeURIComponent(globalThis.atob(token));
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.x) || parsed.x.length !== 21) {
+      return null;
+    }
+    const creatorName = String(parsed.c || "Friend");
+    return {
+      id: String(parsed.i || `custom-${Date.now()}`),
+      puzzleNumber: 0,
+      title: String(parsed.t || `${creatorName}'s 21 Things`),
+      creatorName,
+      creatorHandle: `@${creatorName.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+      creatorBio: String(
+        parsed.b || "Narrow these 21 things down to the 1 you resonate with most."
+      ),
+      items: parsed.x.map((s: unknown) => String(s)),
+      sampleJourneys: [],
+    };
+  } catch {
+    return null;
+  }
+}

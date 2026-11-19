@@ -10,7 +10,7 @@ import {
   type Connect5HintCoord,
   type Connect5Puzzle,
 } from "@/data/puzzles/connect-5";
-import { getLocalDateKey } from "@/lib/daily-engine";
+import { getLocalDateKey } from "@/lib/date-keys";
 import { validateConnect5Payload } from "@/lib/seeded-random";
 import { saveCustomPuzzle } from "@/lib/custom-puzzles";
 import {

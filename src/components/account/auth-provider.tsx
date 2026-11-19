@@ -8,6 +8,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import dynamic from "next/dynamic";
 import {
   canAccessPuzzleStudio,
   initializeAuthSession,
@@ -29,11 +30,22 @@ import {
   initRealtimePuzzleSync,
   syncAllRemoteDailyPuzzles,
 } from "@/lib/game-storage";
-import {
-  ProfileViewerModal,
-  SetNewPasswordModal,
-} from "@/components/account/profile-viewer-modal";
-import { getSupabaseClient } from "@/lib/supabase";
+
+const LazyProfileViewerModal = dynamic(
+  () =>
+    import("@/components/account/profile-viewer-modal").then(
+      (m) => m.ProfileViewerModal
+    ),
+  { ssr: false }
+);
+
+const LazySetNewPasswordModal = dynamic(
+  () =>
+    import("@/components/account/profile-viewer-modal").then(
+      (m) => m.SetNewPasswordModal
+    ),
+  { ssr: false }
+);
 
 export type AccountModalTab = "signin" | "signup" | "profile";
 
@@ -83,7 +95,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let isMounted = true;
 
-    // Bootstrap global daily puzzles from Supabase and initialize Realtime / cross-tab sync
     void syncAllRemoteDailyPuzzles();
     const unsubscribeRealtime = initRealtimePuzzleSync();
 
@@ -101,27 +112,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       });
 
-    const unsubscribe = subscribeToAuthChanges((nextProfile) => {
-      if (!isMounted) return;
-      setProfile(nextProfile);
-    });
-
-    const supabase = getSupabaseClient();
-    let authListener: { subscription: { unsubscribe: () => void } } | null = null;
-    if (supabase) {
-      const { data } = supabase.auth.onAuthStateChange((event) => {
-        if (event === "PASSWORD_RECOVERY") {
-          setIsRecoveryOpen(true);
-        }
-      });
-      authListener = data;
-    }
+    const unsubscribe = subscribeToAuthChanges(
+      (nextProfile) => {
+        if (!isMounted) return;
+        setProfile(nextProfile);
+      },
+      {
+        onPasswordRecovery: () => {
+          if (isMounted) {
+            setIsRecoveryOpen(true);
+          }
+        },
+      }
+    );
 
     return () => {
       isMounted = false;
       unsubscribeRealtime();
       unsubscribe();
-      authListener?.subscription.unsubscribe();
     };
   }, []);
 
@@ -261,14 +269,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={value}>
       {children}
-      <ProfileViewerModal />
-      <SetNewPasswordModal
-        open={isRecoveryOpen}
-        onOpenChange={setIsRecoveryOpen}
-        onSuccess={() => {
-          void handleRefreshProfile();
-        }}
-      />
+      {isModalOpen && <LazyProfileViewerModal />}
+      {isRecoveryOpen && (
+        <LazySetNewPasswordModal
+          open={isRecoveryOpen}
+          onOpenChange={setIsRecoveryOpen}
+          onSuccess={() => {
+            void handleRefreshProfile();
+          }}
+        />
+      )}
     </AuthContext.Provider>
   );
 }

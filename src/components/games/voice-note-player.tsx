@@ -188,7 +188,7 @@ function VoiceNotePlayerInner({
         type="button"
         onClick={() => void togglePlay()}
         aria-label={playing ? "Pause voice note" : "Play voice note"}
-        className="h-7 w-7 rounded-full border-2 border-black bg-[#F9D423] hover:bg-[#F9D423]/85 text-black flex items-center justify-center shrink-0 transition-transform active:scale-95"
+        className="h-7 w-7 rounded-full border-2 border-black bg-[#F9D423] hover:bg-[#F9D423]/85 text-black flex items-center justify-center shrink-0 transition-transform active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
       >
         {playing ? (
           <Pause className="h-3.5 w-3.5 fill-black" />
@@ -197,11 +197,33 @@ function VoiceNotePlayerInner({
         )}
       </button>
 
-      <Volume2 className="h-3.5 w-3.5 text-neutral-700 shrink-0" />
+      <div
+        aria-hidden="true"
+        className="inline-flex items-end gap-0.5 h-3.5 shrink-0"
+      >
+        {[0, 1, 2].map((barIdx) => (
+          <span
+            key={barIdx}
+            style={{ animationDelay: `${barIdx * 120}ms` }}
+            className={cn(
+              "w-0.5 rounded-full bg-neutral-800 transition-all motion-reduce:animate-none motion-reduce:transition-none",
+              playing
+                ? barIdx === 1
+                  ? "h-3.5 animate-pulse"
+                  : "h-2.5 animate-pulse"
+                : barIdx === 1
+                ? "h-2.5"
+                : "h-1.5"
+            )}
+          />
+        ))}
+      </div>
+
+      <Volume2 className="sr-only" />
 
       <div className="w-24 sm:w-32 h-2 rounded-full bg-neutral-200 overflow-hidden border border-black/20">
         <div
-          className="h-full bg-black transition-[width] duration-100"
+          className="h-full bg-black transition-[width] duration-100 motion-reduce:transition-none motion-reduce:animate-none"
           style={{ width: `${progressPct}%` }}
         />
       </div>

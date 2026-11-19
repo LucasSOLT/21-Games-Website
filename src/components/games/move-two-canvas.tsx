@@ -88,6 +88,30 @@ function drawFloatingSlab(
   drawPolygon(ctx, [t00, t10, t11, t01], colors.top, stroke, lw);
 }
 
+function drawMiniPairLabel(
+  ctx: CanvasRenderingContext2D,
+  pt: Point2D,
+  label: string,
+  scale: number,
+  fillHex: string,
+  haloHex: string = "#FFFFFF"
+): void {
+  if (!label || scale < 15) return;
+  ctx.save();
+  const fontPx = Math.max(8, Math.round(scale * 0.24));
+  ctx.font = `900 ${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = haloHex;
+  ctx.lineWidth = Math.max(2.2, fontPx * 0.28);
+  ctx.strokeText(label, pt.x, pt.y);
+  ctx.fillStyle = fillHex;
+  ctx.fillText(label, pt.x, pt.y);
+  ctx.restore();
+}
+
 function drawRetractedBridgeGhost(
   ctx: CanvasRenderingContext2D,
   fit: BoardViewportFit,
@@ -115,13 +139,16 @@ function drawRetractedBridgeGhost(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  if (bridgeId && fit.scale >= 22) {
+  if (bridgeId && fit.scale >= 15) {
     const center = projectPoint3D({ c: c + 0.5, r: r + 0.5, z: -0.02 }, fit);
-    ctx.fillStyle = "rgba(37, 99, 235, 0.65)";
-    ctx.font = `700 ${Math.max(9, Math.round(fit.scale * 0.24))}px ui-monospace, monospace`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(bridgeId, center.x, center.y);
+    drawMiniPairLabel(
+      ctx,
+      center,
+      bridgeId,
+      fit.scale,
+      "#1D4ED8",
+      "rgba(250, 249, 245, 0.92)"
+    );
   }
   ctx.restore();
 }
@@ -223,7 +250,8 @@ function drawSwitchInlay(
   fit: BoardViewportFit,
   c: number,
   r: number,
-  kind: "soft" | "heavy"
+  kind: "soft" | "heavy",
+  bridgeId: string | null = null
 ): void {
   // Raised metallic press plate
   const pad = 0.16;
@@ -300,6 +328,14 @@ function drawSwitchInlay(
     ctx.stroke();
     ctx.restore();
   }
+
+  if (bridgeId && fit.scale >= 15) {
+    const badgePt = projectPoint3D(
+      { c: c + 0.8, r: r + 0.2, z: zPlate + 0.02 },
+      fit
+    );
+    drawMiniPairLabel(ctx, badgePt, bridgeId, fit.scale, "#171717", "#FFFFFF");
+  }
 }
 
 function drawStartInlay(
@@ -321,7 +357,8 @@ function drawBridgeSlats(
   ctx: CanvasRenderingContext2D,
   fit: BoardViewportFit,
   c: number,
-  r: number
+  r: number,
+  bridgeId: string | null = null
 ): void {
   ctx.save();
   ctx.strokeStyle = "rgba(29, 78, 216, 0.38)";
@@ -334,6 +371,10 @@ function drawBridgeSlats(
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
+  if (bridgeId && fit.scale >= 15) {
+    const center = projectPoint3D({ c: c + 0.5, r: r + 0.5, z: 0.02 }, fit);
+    drawMiniPairLabel(ctx, center, bridgeId, fit.scale, "#1E3A8A", "#FFFFFF");
+  }
   ctx.restore();
 }
 
@@ -343,19 +384,50 @@ function drawObstacleInlay(
   c: number,
   r: number
 ): void {
-  const pad = 0.21;
+  const pad = 0.18;
   const p00 = projectPoint3D({ c: c + pad, r: r + pad, z: 0.01 }, fit);
   const p10 = projectPoint3D({ c: c + 1 - pad, r: r + pad, z: 0.01 }, fit);
   const p11 = projectPoint3D({ c: c + 1 - pad, r: r + 1 - pad, z: 0.01 }, fit);
   const p01 = projectPoint3D({ c: c + pad, r: r + 1 - pad, z: 0.01 }, fit);
 
-  drawPolygon(
-    ctx,
-    [p00, p10, p11, p01],
-    "#B91C1C",
-    "#7F1D1D",
-    Math.max(1.1, fit.scale * 0.03)
-  );
+  const borderLw = Math.max(1.1, fit.scale * 0.03);
+  drawPolygon(ctx, [p00, p10, p11, p01], "#B91C1C", "#7F1D1D", 0);
+
+  // Colorblind-friendly subtle diagonal hazard stripes clipped inside the Red Obstacle inlay
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(p00.x, p00.y);
+  ctx.lineTo(p10.x, p10.y);
+  ctx.lineTo(p11.x, p11.y);
+  ctx.lineTo(p01.x, p01.y);
+  ctx.closePath();
+  ctx.clip();
+
+  ctx.strokeStyle = "rgba(254, 226, 226, 0.38)";
+  ctx.lineWidth = Math.max(1.4, fit.scale * 0.052);
+  ctx.lineCap = "butt";
+  for (const offset of [0.32, 0.62, 0.92, 1.22, 1.52]) {
+    const s = projectPoint3D({ c: c + offset, r: r + 0.05, z: 0.012 }, fit);
+    const e = projectPoint3D({ c: c + 0.05, r: r + offset, z: 0.012 }, fit);
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(p00.x, p00.y);
+  ctx.lineTo(p10.x, p10.y);
+  ctx.lineTo(p11.x, p11.y);
+  ctx.lineTo(p01.x, p01.y);
+  ctx.closePath();
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#7F1D1D";
+  ctx.lineWidth = borderLw;
+  ctx.stroke();
+  ctx.restore();
 }
 
 export function MoveTwoBloxorzCanvas({
@@ -372,10 +444,92 @@ export function MoveTwoBloxorzCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchGestureRef = useRef<{
+    x: number;
+    y: number;
+    lockedSwipe: boolean;
+  } | null>(null);
+  const interactiveRef = useRef(interactive);
+  const onSwipeDirectionRef = useRef(onSwipeDirection);
   const [boxSize, setBoxSize] = useState<{ width: number; height: number }>({
     width: 480,
     height: 390,
   });
+
+  useEffect(() => {
+    interactiveRef.current = interactive;
+    onSwipeDirectionRef.current = onSwipeDirection;
+  }, [interactive, onSwipeDirection]);
+
+  // Threshold-gated touch gesture listener: only prevents page scroll once finger movement
+  // exceeds a small swipe threshold on an active board so mobile users aren't scroll-trapped.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const SWIPE_LOCK_PX = 10;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (!interactiveRef.current || !onSwipeDirectionRef.current) {
+        touchGestureRef.current = null;
+        return;
+      }
+      const t = e.touches[0];
+      if (!t) return;
+      touchGestureRef.current = {
+        x: t.clientX,
+        y: t.clientY,
+        lockedSwipe: false,
+      };
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const start = touchGestureRef.current;
+      if (!start || !interactiveRef.current || !onSwipeDirectionRef.current) {
+        return;
+      }
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (!start.lockedSwipe && Math.hypot(dx, dy) >= SWIPE_LOCK_PX) {
+        start.lockedSwipe = true;
+      }
+      if (start.lockedSwipe && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      const start = touchGestureRef.current;
+      touchGestureRef.current = null;
+      if (!start || !interactiveRef.current || !onSwipeDirectionRef.current) {
+        return;
+      }
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      const dir = resolveTrimetricSwipeDirection(dx, dy);
+      if (dir) {
+        onSwipeDirectionRef.current(dir);
+      }
+    };
+
+    const onTouchCancel = () => {
+      touchGestureRef.current = null;
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchCancel, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
+    };
+  }, []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -515,7 +669,7 @@ export function MoveTwoBloxorzCanvas({
               right: "#60A5FA",
               stroke: "#171717",
             });
-            drawBridgeSlats(ctx, fit, c, r);
+            drawBridgeSlats(ctx, fit, c, r, bridgeId);
           } else {
             drawRetractedBridgeGhost(ctx, fit, c, r, bridgeId);
           }
@@ -549,7 +703,10 @@ export function MoveTwoBloxorzCanvas({
           drawStartInlay(ctx, fit, c, r);
         }
         if (switchKind) {
-          drawSwitchInlay(ctx, fit, c, r, switchKind);
+          const switchBridgeId =
+            stage.switches.find((sw) => sw.r === r && sw.c === c)?.bridgeId ??
+            null;
+          drawSwitchInlay(ctx, fit, c, r, switchKind, switchBridgeId);
         }
       } else {
         // 3D Hinged Cuboid Unit (Cube 0 or Cube 1)
@@ -573,14 +730,16 @@ export function MoveTwoBloxorzCanvas({
       ref={containerRef}
       data-testid={testId}
       className={cn(
-        "relative w-full aspect-[5/4] sm:aspect-[4/3] rounded-2xl border-2 border-black bg-[#FAF9F5] overflow-hidden select-none touch-none shadow-[0_4px_0_#171717]",
+        "relative w-full aspect-[5/4] sm:aspect-[4/3] rounded-2xl border-2 border-black bg-[#FAF9F5] overflow-hidden select-none touch-manipulation shadow-[0_4px_0_#171717]",
         className
       )}
       onPointerDown={(e) => {
+        if (e.pointerType === "touch") return;
         if (!interactive || !onSwipeDirection) return;
         pointerStartRef.current = { x: e.clientX, y: e.clientY };
       }}
       onPointerUp={(e) => {
+        if (e.pointerType === "touch") return;
         if (!interactive || !onSwipeDirection || !pointerStartRef.current) return;
         const dx = e.clientX - pointerStartRef.current.x;
         const dy = e.clientY - pointerStartRef.current.y;
@@ -600,7 +759,7 @@ export function MoveTwoBloxorzCanvas({
           aria-live="polite"
           data-testid="move-two-toast"
           className={cn(
-            "pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-20 max-w-[90%] truncate rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-opacity",
+            "pointer-events-none absolute top-2.5 left-1/2 -translate-x-1/2 z-20 max-w-[90%] truncate rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-opacity motion-reduce:transition-none",
             overlayToast.tone === "warn"
               ? "border-red-600 bg-red-50/95 text-red-950"
               : "border-blue-600 bg-blue-50/95 text-blue-950"

@@ -7,10 +7,8 @@ import {
   AlertCircle,
   BarChart3,
   Calendar,
-  Check,
   CheckCircle2,
   Clock,
-  Copy,
   HelpCircle,
   LifeBuoy,
   Lightbulb,
@@ -19,19 +17,16 @@ import {
   PlusCircle,
   RotateCcw,
   Settings,
-  Share2,
   Sparkles,
   Trophy,
 } from "lucide-react";
 import {
+  getConnect5PuzzleForDate,
   sanitizeConnect5Puzzle,
   type Connect5Puzzle,
 } from "@/data/puzzles/connect-5";
-import { getConnect5PuzzleForDate, getLocalDateKey } from "@/lib/daily-engine";
 import {
   buildCustomGameShareUrl,
-  copyResultsOnly,
-  nativeShareResultsOnly,
   type ShareResultsOptions,
 } from "@/lib/custom-game-share";
 import { fetchCustomPuzzle } from "@/lib/custom-puzzles";
@@ -41,6 +36,7 @@ import {
   getAdminConnect5Overrides,
   getConnect5Progress,
   isDateCompleted,
+  recordGameRevealed,
   recordGameWin,
   saveConnect5Progress,
 } from "@/lib/game-storage";
@@ -48,8 +44,21 @@ import {
   computePuzzleContentHash,
   validateConnect5Payload,
 } from "@/lib/seeded-random";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playRevealSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import { formatTimerSeconds, GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
+import { WinFlourish } from "@/components/games/win-flourish";
+import { ResultShareButtons } from "./result-share-buttons";
 import { ConnectFiveCreator } from "./connect-five-creator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +66,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -70,6 +80,19 @@ const KEYBOARD_ROWS = [
   ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
   ["ENTER", "Z", "X", "C", "V", "B", "N", "M", "BACKSPACE"],
 ];
+
+function isConnect5MarkedRevealed(dateKey: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.localStorage.getItem(
+        `solgames_v1_revealed_connect-5_${dateKey}`
+      ) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
 
 function createInitialGrid(puzzle: Connect5Puzzle): {
   grid: string[][];
@@ -130,6 +153,7 @@ interface InitialBoardState {
   elapsedSeconds: number;
   hintsUsed: number;
   status: "playing" | "won";
+  wasRevealed: boolean;
   activeRow: number;
   activeCol: number;
 }
@@ -172,6 +196,7 @@ function loadInitialBoardState(
       elapsedSeconds: 0,
       hintsUsed: 0,
       status: "playing",
+      wasRevealed: false,
       activeRow: firstOpen.row,
       activeCol: firstOpen.col,
     };
@@ -224,6 +249,8 @@ function loadInitialBoardState(
       elapsedSeconds: saved.elapsedSeconds || 0,
       hintsUsed: saved.hintsUsed || 0,
       status: saved.status,
+      wasRevealed:
+        Boolean(saved.wasRevealed) || isConnect5MarkedRevealed(activeDateKey),
       activeRow: firstOpen.row,
       activeCol: firstOpen.col,
     };
@@ -247,6 +274,7 @@ function loadInitialBoardState(
     elapsedSeconds: 0,
     hintsUsed: 0,
     status: "playing",
+    wasRevealed: isConnect5MarkedRevealed(activeDateKey),
     activeRow: firstOpen.row,
     activeCol: firstOpen.col,
   };
@@ -257,25 +285,7 @@ export function ConnectFiveGame() {
   const dateParam = searchParams.get("date");
   const modeParam = searchParams.get("mode");
   const customId = searchParams.get("b");
-  const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
-    getLocalDateKey()
-  );
-
-  // Automatically detect midnight rollover when playing Today's daily puzzle
-  useEffect(() => {
-    if (dateParam || customId || modeParam === "create") return;
-    const checkDate = () => {
-      const current = getLocalDateKey();
-      setLiveTodayKey((prev) => (prev !== current ? current : prev));
-    };
-    const interval = setInterval(checkDate, 30000);
-    window.addEventListener("focus", checkDate);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", checkDate);
-    };
-  }, [dateParam, customId, modeParam]);
-
+  const liveTodayKey = useLiveLocalDateKey();
   const activeDateKey = dateParam || liveTodayKey;
 
   if (modeParam === "create") {
@@ -437,22 +447,21 @@ function ConnectFiveBoard({
   const elapsedSecondsRef = useRef<number>(initial.elapsedSeconds);
   const [hintsUsed, setHintsUsed] = useState<number>(initial.hintsUsed);
   const [status, setStatus] = useState<"playing" | "won">(initial.status);
+  const [isRevealed, setIsRevealed] = useState<boolean>(initial.wasRevealed);
   const [isBufferingWin, setIsBufferingWin] = useState<boolean>(false);
   const isBufferingWinRef = useRef<boolean>(false);
   const [winModalOpen, setWinModalOpen] = useState<boolean>(
     initial.status === "won"
   );
   const [notQuiteBanner, setNotQuiteBanner] = useState<boolean>(false);
-  const [resultsCopied, setResultsCopied] = useState<boolean>(false);
   const [checkRevealOpen, setCheckRevealOpen] = useState<boolean>(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
   const [statsOpen, setStatsOpen] = useState<boolean>(false);
 
-  const isMountedRef = useRef<boolean>(true);
   const winTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notQuiteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
@@ -480,6 +489,7 @@ function ConnectFiveBoard({
             elapsedSeconds: elapsedSecondsRef.current,
             hintsUsed,
             status: "won",
+            wasRevealed: isRevealed,
             puzzleHash: remoteHash,
           });
           return;
@@ -498,15 +508,11 @@ function ConnectFiveBoard({
         setLocked(base.locked);
         setSlashed(base.slashed);
         setStatus("playing");
+        setIsRevealed(false);
         setElapsedSeconds(0);
         elapsedSecondsRef.current = 0;
         setHintsUsed(0);
         setWinModalOpen(false);
-        if (copyTimeoutRef.current) {
-          clearTimeout(copyTimeoutRef.current);
-          copyTimeoutRef.current = null;
-        }
-        setResultsCopied(false);
         setIsBufferingWin(false);
         isBufferingWinRef.current = false;
         setActiveRow(firstOpen.row);
@@ -522,11 +528,12 @@ function ConnectFiveBoard({
           elapsedSeconds: 0,
           hintsUsed: 0,
           status: "playing",
+          wasRevealed: false,
           puzzleHash: remoteHash,
         });
       }
     },
-    [activeDateKey, grid, hintsUsed, locked, puzzle, slashed, status]
+    [activeDateKey, grid, hintsUsed, isRevealed, locked, puzzle, slashed, status]
   );
 
   // Fetch remote Supabase daily_puzzles override if configured and listen to live updates
@@ -570,6 +577,7 @@ function ConnectFiveBoard({
   useEffect(() => {
     if (!splashDismissed || status !== "playing" || isBufferingWin) return;
     const interval = setInterval(() => {
+      if (isGameTimerExternallyPaused()) return;
       setElapsedSeconds((prev) => {
         const next = prev + 1;
         elapsedSecondsRef.current = next;
@@ -581,12 +589,9 @@ function ConnectFiveBoard({
 
   // Cleanup timeouts on unmount
   useEffect(() => {
-    isMountedRef.current = true;
     return () => {
-      isMountedRef.current = false;
       if (winTimeoutRef.current) clearTimeout(winTimeoutRef.current);
       if (notQuiteTimeoutRef.current) clearTimeout(notQuiteTimeoutRef.current);
-      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
     };
   }, []);
 
@@ -598,7 +603,8 @@ function ConnectFiveBoard({
       nextSlashed: boolean[][],
       nextStatus: "playing" | "won" = status,
       nextHints: number = hintsUsed,
-      nextElapsed: number = elapsedSecondsRef.current
+      nextElapsed: number = elapsedSecondsRef.current,
+      nextRevealed: boolean = isRevealed
     ) => {
       if (isCustom) return;
       saveConnect5Progress({
@@ -610,11 +616,12 @@ function ConnectFiveBoard({
         elapsedSeconds: nextElapsed,
         hintsUsed: nextHints,
         status: nextStatus,
+        wasRevealed: nextRevealed,
         completedAt: nextStatus === "won" ? new Date().toISOString() : undefined,
         puzzleHash: computePuzzleContentHash(puzzle),
       });
     },
-    [activeDateKey, puzzle, status, hintsUsed, isCustom]
+    [activeDateKey, puzzle, status, hintsUsed, isCustom, isRevealed]
   );
 
   // Trigger board validation when all boxes are filled (and no unaddressed slashes remain)
@@ -656,20 +663,25 @@ function ConnectFiveBoard({
       const currentElapsed = elapsedSecondsRef.current;
 
       if (allCorrect) {
+        const alreadyRevealed =
+          isRevealed || (!isCustom && isConnect5MarkedRevealed(activeDateKey));
         isBufferingWinRef.current = true;
         setIsBufferingWin(true);
         setNotQuiteBanner(false);
+        playWinChimeSfx();
         persistProgress(
           candidateGrid,
           candidateLocked,
           newSlashed,
           "won",
           hintsUsed,
-          currentElapsed
+          currentElapsed,
+          alreadyRevealed
         );
-        if (!isCustom) {
-          recordGameWin("connect-5", activeDateKey, currentElapsed);
-        }
+        recordGameWin("connect-5", activeDateKey, currentElapsed, {
+          isCustom,
+          isRevealed: alreadyRevealed,
+        });
 
         if (winTimeoutRef.current) clearTimeout(winTimeoutRef.current);
         winTimeoutRef.current = setTimeout(() => {
@@ -679,6 +691,7 @@ function ConnectFiveBoard({
           setWinModalOpen(true);
         }, 1000);
       } else {
+        playErrorSfx();
         setSlashed(newSlashed);
         setNotQuiteBanner(true);
         persistProgress(
@@ -702,7 +715,7 @@ function ConnectFiveBoard({
         }, 1500);
       }
     },
-    [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom]
+    [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom, isRevealed]
   );
 
   // Handle typing a letter A-Z
@@ -744,6 +757,8 @@ function ConnectFiveBoard({
         if (foundCol === -1) return;
         targetCol = foundCol;
       }
+
+      playTapSfx();
 
       const wasOverwriteOfNormalCell =
         grid[targetRow][targetCol] !== "" && !slashed[targetRow][targetCol];
@@ -834,6 +849,8 @@ function ConnectFiveBoard({
     if (status !== "playing" || isBufferingWin || isBufferingWinRef.current) {
       return;
     }
+
+    playTapSfx();
 
     const r = Math.max(1, Math.min(4, activeRow));
     const nextGrid = grid.map((row) => [...row]);
@@ -961,6 +978,8 @@ function ConnectFiveBoard({
         return;
       }
 
+      playTapSfx();
+
       if (key === "Enter" || key === "Tab") {
         const dir = shiftKey ? -1 : 1;
         const nextRow = ((activeRow - 1 + dir + 4) % 4) + 1;
@@ -1020,7 +1039,9 @@ function ConnectFiveBoard({
     if (!splashDismissed) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (document.querySelector('[role="dialog"]')) return;
+      if (document.querySelector('[role="dialog"]') || isGameTimerExternallyPaused()) {
+        return;
+      }
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -1090,6 +1111,8 @@ function ConnectFiveBoard({
 
     if (!target) return;
 
+    playRevealSfx();
+
     const nextGrid = grid.map((r) => [...r]);
     const nextLocked = locked.map((r) => [...r]);
     const nextSlashed = slashed.map((r) => [...r]);
@@ -1125,7 +1148,20 @@ function ConnectFiveBoard({
     evaluateBoardIfFull(nextGrid, nextLocked, nextSlashed);
   };
 
-  const handleResetPuzzle = () => {
+  const hasTypedUnlockedLetters = useMemo(() => {
+    for (let r = 1; r < 5; r++) {
+      for (let c = 0; c < (grid[r]?.length ?? 0); c++) {
+        if (!locked[r]?.[c] && grid[r]?.[c] !== "") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [grid, locked]);
+
+  const confirmResetPuzzle = useCallback(() => {
+    playTapSfx();
+    setResetConfirmOpen(false);
     if (winTimeoutRef.current) {
       clearTimeout(winTimeoutRef.current);
       winTimeoutRef.current = null;
@@ -1134,44 +1170,76 @@ function ConnectFiveBoard({
       clearTimeout(notQuiteTimeoutRef.current);
       notQuiteTimeoutRef.current = null;
     }
-    if (copyTimeoutRef.current) {
-      clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = null;
-    }
     isBufferingWinRef.current = false;
-    if (!isCustom) {
-      clearConnect5Progress(activeDateKey);
-    }
+
+    // Fair-play monotonic reset: on daily puzzles while playing, keep elapsed time & hints monotonic
+    // so resetting right before the last letter cannot spoof a 0:02 0-hint solve!
+    const keepMonotonic = status === "playing" && !isCustom;
+    const nextElapsed = keepMonotonic ? elapsedSecondsRef.current : 0;
+    const nextHints = keepMonotonic ? hintsUsed : 0;
+    const nextRevealed = !isCustom
+      ? isRevealed || isConnect5MarkedRevealed(activeDateKey)
+      : false;
+
     const base = createInitialGrid(puzzle);
     setGrid(base.grid);
     setLocked(base.locked);
     setSlashed(base.slashed);
-    setElapsedSeconds(0);
-    elapsedSecondsRef.current = 0;
-    setHintsUsed(0);
+    setElapsedSeconds(nextElapsed);
+    elapsedSecondsRef.current = nextElapsed;
+    setHintsUsed(nextHints);
+    setIsRevealed(nextRevealed);
     setStatus("playing");
     setIsBufferingWin(false);
     setWinModalOpen(false);
-    setResultsCopied(false);
     setNotQuiteBanner(false);
     const firstOpen = findFirstOpenCell(base.grid, base.locked, base.slashed, 1);
     setActiveRow(firstOpen.row);
     setActiveCol(firstOpen.col);
     setSpecificCellFocus(true);
+
+    if (!isCustom) {
+      if (keepMonotonic) {
+        saveConnect5Progress({
+          dateKey: activeDateKey,
+          puzzleId: puzzle.id,
+          grid: base.grid,
+          slashed: base.slashed,
+          revealedByHint: base.locked,
+          elapsedSeconds: nextElapsed,
+          hintsUsed: nextHints,
+          status: "playing",
+          wasRevealed: nextRevealed,
+          puzzleHash: computePuzzleContentHash(puzzle),
+        });
+      } else {
+        clearConnect5Progress(activeDateKey);
+      }
+    }
+  }, [status, isCustom, hintsUsed, isRevealed, activeDateKey, puzzle]);
+
+  const handleResetPuzzle = () => {
+    playTapSfx();
+    if (status === "playing" && hasTypedUnlockedLetters) {
+      setResetConfirmOpen(true);
+      return;
+    }
+    confirmResetPuzzle();
   };
 
-  const buildConnect5ShareOptions = (): ShareResultsOptions => {
-    const rowEmojis = puzzle.words.map((w) => "🟩".repeat(w.length));
+  const shareOptions = useMemo<ShareResultsOptions>(() => {
+    const rowEmojis = puzzle.words.map((w, idx) =>
+      (idx === 0 || !isRevealed ? "🟩" : "🟨").repeat(w.length)
+    );
     const header = isCustom
       ? `🔗 Connect 5 — "${puzzle.title}" (by ${puzzle.author})`
       : `🔗 Connect 5 #${puzzle.puzzleNumber} — "${puzzle.title}"`;
-    const text = [
-      header,
-      `⏱️ Time: ${formatTimerSeconds(elapsedSeconds)}${
-        hintsUsed > 0 ? ` (${hintsUsed} hint${hintsUsed > 1 ? "s" : ""})` : ""
-      }`,
-      ...rowEmojis,
-    ].join("\n");
+    const statusLine = isRevealed
+      ? `📖 Chain Revealed (${formatTimerSeconds(elapsedSeconds)})`
+      : `⏱️ Time: ${formatTimerSeconds(elapsedSeconds)}${
+          hintsUsed > 0 ? ` (${hintsUsed} hint${hintsUsed > 1 ? "s" : ""})` : ""
+        }`;
+    const text = [header, statusLine, ...rowEmojis].join("\n");
 
     const url =
       isCustom && customId
@@ -1185,27 +1253,7 @@ function ConnectFiveBoard({
       text,
       url,
     };
-  };
-
-  const handleNativeShareResults = async () => {
-    await nativeShareResultsOnly(buildConnect5ShareOptions());
-  };
-
-  const handleCopyResults = async () => {
-    const { copied } = await copyResultsOnly(buildConnect5ShareOptions());
-    if (copied && isMountedRef.current) {
-      setResultsCopied(true);
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = setTimeout(() => {
-        if (isMountedRef.current) {
-          setResultsCopied(false);
-        }
-        copyTimeoutRef.current = null;
-      }, 1500);
-    }
-  };
+  }, [puzzle, isRevealed, isCustom, elapsedSeconds, hintsUsed, customId]);
 
   const isPartiallyFilled = useMemo(() => {
     let filledRows = 0;
@@ -1268,12 +1316,14 @@ function ConnectFiveBoard({
       elapsedSecondsRef.current
     );
     if (!isCorrect) {
+      playErrorSfx();
       toast({
         title: "Letter is incorrect",
         description:
           "Marked with a red slash. Type a new letter to replace it.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Square is correct!",
         description: "Nice! Keep going.",
@@ -1326,11 +1376,13 @@ function ConnectFiveBoard({
         description: "Enter letters in this row to check them.",
       });
     } else if (errorsFound > 0) {
+      playErrorSfx();
       toast({
         title: `Word checked: ${errorsFound} error(s) found`,
         description: "Incorrect letters have been marked with a red slash.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Word checked: All entered letters correct!",
         description:
@@ -1398,11 +1450,13 @@ function ConnectFiveBoard({
     }
 
     if (errorsFound > 0) {
+      playErrorSfx();
       toast({
         title: `Puzzle checked: ${errorsFound} error(s) found`,
         description: "Incorrect letters marked with red slashes.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Puzzle checked: All entered letters correct!",
         description: "Every letter you've entered so far is correct.",
@@ -1419,7 +1473,8 @@ function ConnectFiveBoard({
     evaluateBoardIfFull,
   ]);
 
-  const handleRevealPuzzle = useCallback(() => {
+  const handleConfirmRevealPuzzle = useCallback(() => {
+    playRevealSfx();
     const nextGrid = puzzle.words.map((w) => w.split(""));
     const nextLocked = puzzle.words.map((w) =>
       Array.from({ length: w.length }, () => true)
@@ -1428,6 +1483,7 @@ function ConnectFiveBoard({
       Array.from({ length: w.length }, () => false)
     );
 
+    setIsRevealed(true);
     setGrid(nextGrid);
     setLocked(nextLocked);
     setSlashed(nextSlashed);
@@ -1441,14 +1497,16 @@ function ConnectFiveBoard({
       nextSlashed,
       "won",
       hintsUsed,
-      currentElapsed
+      currentElapsed,
+      true
     );
     if (!isCustom) {
-      recordGameWin("connect-5", activeDateKey, currentElapsed);
+      recordGameRevealed("connect-5", activeDateKey);
     }
   }, [puzzle.words, persistProgress, hintsUsed, activeDateKey, isCustom]);
 
   const handleClearPuzzle = useCallback(() => {
+    playTapSfx();
     const nextGrid = grid.map((r, rIdx) =>
       rIdx === 0
         ? [...r]
@@ -1499,9 +1557,12 @@ function ConnectFiveBoard({
           dateKey={activeDateKey}
           showCreate={true}
           isCompletedToday={
-            status === "won" || isDateCompleted("connect-5", activeDateKey)
+            (status === "won" && !isRevealed) ||
+            (!isCustom && isDateCompleted("connect-5", activeDateKey))
           }
-          hasSavedProgress={elapsedSeconds > 0 && status !== "won"}
+          hasSavedProgress={
+            (hasTypedUnlockedLetters || elapsedSeconds >= 5) && status !== "won"
+          }
           onPlay={() => setSplashDismissed(true)}
           onCreate={() => router.push("/games/connect-5?mode=create")}
         />
@@ -1539,7 +1600,10 @@ function ConnectFiveBoard({
 
           <button
             type="button"
-            onClick={() => setCheckRevealOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setCheckRevealOpen(true);
+            }}
             disabled={status !== "playing"}
             className={cn(
               "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40",
@@ -1567,7 +1631,10 @@ function ConnectFiveBoard({
 
           <button
             type="button"
-            onClick={() => setHelpOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setHelpOpen(true);
+            }}
             className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
             title="How to Play"
             aria-label="How to Play"
@@ -1577,7 +1644,10 @@ function ConnectFiveBoard({
 
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setSettingsOpen(true);
+            }}
             className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
             title="Settings & Tools"
             aria-label="Settings"
@@ -1587,6 +1657,8 @@ function ConnectFiveBoard({
         </div>
       }
     >
+      <WinFlourish active={status === "won" && !isRevealed} />
+
       <div className="mx-auto max-w-xl flex flex-col items-center space-y-4 sm:space-y-5">
         <div className="flex items-center justify-between w-full px-1 gap-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -1602,17 +1674,20 @@ function ConnectFiveBoard({
             {status === "won" && (
               <Button
                 size="xs"
-                onClick={() => setWinModalOpen(true)}
+                onClick={() => {
+                  playTapSfx();
+                  setWinModalOpen(true);
+                }}
                 className="bg-[#2ECC71] text-black hover:bg-[#27b863] font-bold border border-black"
               >
                 <Trophy className="h-3.5 w-3.5 mr-1" />
-                View Win Summary
+                {isRevealed ? "View Chain" : "View Win Summary"}
               </Button>
             )}
             <button
               type="button"
               onClick={handleResetPuzzle}
-              className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 hover:text-black"
+              className="inline-flex items-center gap-1 text-xs font-bold text-gray-500 hover:text-black cursor-pointer"
               title="Reset board"
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -1623,7 +1698,7 @@ function ConnectFiveBoard({
 
         <div
           className={cn(
-            "w-full rounded-2xl border-2 border-black bg-white p-2.5 min-[375px]:p-3.5 sm:p-6 shadow-sm space-y-2.5 sm:space-y-3 transition-all",
+            "w-full rounded-2xl border-2 border-black bg-white p-2 min-[375px]:p-3 sm:p-6 shadow-sm space-y-2 sm:space-y-3 transition-all overflow-hidden",
             isBufferingWin && "ring-4 ring-[#2ECC71] bg-emerald-50/40 scale-[1.01]"
           )}
         >
@@ -1631,18 +1706,23 @@ function ConnectFiveBoard({
             const isRow0 = rowIdx === 0;
             const isRowFocused =
               status === "playing" && !isRow0 && activeRow === rowIdx;
+            const len = word.length;
 
             return (
               <div
                 key={rowIdx}
                 onClick={() => {
                   if (!isRow0 && status === "playing") {
+                    playTapSfx();
                     setActiveRow(rowIdx);
                     setSpecificCellFocus(false);
                   }
                 }}
                 className={cn(
-                  "flex items-center gap-1.5 min-[375px]:gap-2.5 sm:gap-3 rounded-xl p-1.5 min-[375px]:p-2 sm:p-2.5 border-2 transition-all cursor-pointer",
+                  "flex items-center rounded-xl border-2 transition-all cursor-pointer min-w-0",
+                  len >= 9
+                    ? "gap-1 sm:gap-2.5 p-1 min-[375px]:p-1.5 sm:p-2.5"
+                    : "gap-1.5 min-[375px]:gap-2.5 sm:gap-3 p-1.5 min-[375px]:p-2 sm:p-2.5",
                   isRow0
                     ? "bg-emerald-50/80 border-emerald-500/60 cursor-default"
                     : isRowFocused
@@ -1655,12 +1735,16 @@ function ConnectFiveBoard({
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!isRow0 && status === "playing") {
+                      playTapSfx();
                       setActiveRow(rowIdx);
                       setSpecificCellFocus(false);
                     }
                   }}
                   className={cn(
-                    "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg font-headline font-black text-xs min-[375px]:text-sm flex items-center justify-center shrink-0 border-2 transition-colors",
+                    "rounded-lg font-headline font-black flex items-center justify-center shrink-0 border-2 transition-colors",
+                    len >= 10
+                      ? "h-6 w-6 sm:h-9 sm:w-9 text-[11px] sm:text-sm"
+                      : "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 text-xs min-[375px]:text-sm",
                     isRow0
                       ? "bg-[#2ECC71] text-black border-black"
                       : isRowFocused
@@ -1676,7 +1760,16 @@ function ConnectFiveBoard({
                   {rowIdx + 1}
                 </button>
 
-                <div className="flex items-center gap-1 min-[375px]:gap-1.5 sm:gap-2 flex-nowrap">
+                <div
+                  className={cn(
+                    "flex items-center flex-nowrap min-w-0",
+                    len >= 9
+                      ? "gap-0.5 sm:gap-1.5"
+                      : len === 8
+                      ? "gap-0.5 min-[375px]:gap-1 sm:gap-2"
+                      : "gap-1 min-[375px]:gap-1.5 sm:gap-2"
+                  )}
+                >
                   {word.split("").map((_, colIdx) => {
                     const char = grid[rowIdx]?.[colIdx] ?? "";
                     const isCellLocked = locked[rowIdx]?.[colIdx] ?? false;
@@ -1694,6 +1787,7 @@ function ConnectFiveBoard({
                         onClick={(e) => {
                           e.stopPropagation();
                           if (status !== "playing" || isRow0) return;
+                          playTapSfx();
                           setActiveRow(rowIdx);
                           if (!isCellLocked) {
                             setActiveCol(colIdx);
@@ -1712,14 +1806,22 @@ function ConnectFiveBoard({
                           }
                         }}
                         className={cn(
-                          "relative h-9 min-[375px]:h-10 sm:h-13 rounded-lg min-[375px]:rounded-xl border-2 font-headline font-black text-base min-[375px]:text-lg sm:text-2xl uppercase flex items-center justify-center transition-all select-none shrink-0",
-                          word.length >= 7
-                            ? "w-7 min-[375px]:w-8 sm:w-12"
-                            : "w-8 min-[375px]:w-9 sm:w-12",
+                          "relative border-2 font-headline font-black uppercase flex items-center justify-center transition-all select-none shrink-0",
+                          len >= 11
+                            ? "w-[22px] min-[375px]:w-6 h-8 sm:w-9 sm:h-11 rounded-md sm:rounded-xl text-xs sm:text-lg"
+                            : len === 10
+                            ? "w-6 min-[375px]:w-[26px] h-8 min-[375px]:h-9 sm:w-9 sm:h-11 rounded-md sm:rounded-xl text-xs min-[375px]:text-sm sm:text-lg"
+                            : len === 9
+                            ? "w-6 min-[375px]:w-7 h-8 min-[375px]:h-9 sm:w-10 sm:h-11 rounded-lg sm:rounded-xl text-sm min-[375px]:text-base sm:text-xl"
+                            : len >= 7
+                            ? "w-7 min-[375px]:w-8 sm:w-11 h-9 min-[375px]:h-10 sm:h-12 rounded-lg min-[375px]:rounded-xl text-base min-[375px]:text-lg sm:text-2xl"
+                            : "w-8 min-[375px]:w-9 sm:w-12 h-9 min-[375px]:h-10 sm:h-13 rounded-lg min-[375px]:rounded-xl text-base min-[375px]:text-lg sm:text-2xl",
                           isRow0
                             ? "bg-[#2ECC71] text-black border-black shadow-2xs cursor-default"
                             : status === "won" || isBufferingWin
-                            ? "bg-[#2ECC71] text-black border-black"
+                            ? isRevealed && !isRow0
+                              ? "bg-amber-200 text-black border-black"
+                              : "bg-[#2ECC71] text-black border-black"
                             : isCellLocked
                             ? "bg-amber-100/90 text-black border-black/80 cursor-default"
                             : isCellSlashed
@@ -1765,7 +1867,12 @@ function ConnectFiveBoard({
                   })}
                 </div>
 
-                <span className="ml-auto text-[11px] font-mono font-bold text-gray-400 hidden xs:inline">
+                <span
+                  className={cn(
+                    "ml-auto text-[11px] font-mono font-bold text-gray-400",
+                    len >= 8 ? "hidden sm:inline" : "hidden xs:inline"
+                  )}
+                >
                   {word.length}L
                 </span>
               </div>
@@ -1795,53 +1902,65 @@ function ConnectFiveBoard({
         )}
 
         {status === "won" ? (
-          <div className="w-full rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="space-y-0.5 min-w-0">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-[#2ECC71] shrink-0" />
-                <span className="font-headline font-black text-base sm:text-lg text-black">
-                  Solved in {formatTimerSeconds(elapsedSeconds)}!
-                </span>
+          <div className="w-full rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2
+                    className={cn(
+                      "h-5 w-5 shrink-0",
+                      isRevealed ? "text-amber-600" : "text-[#2ECC71]"
+                    )}
+                  />
+                  <span className="font-headline font-black text-base sm:text-lg text-black">
+                    {isRevealed
+                      ? "Chain Revealed"
+                      : `Solved in ${formatTimerSeconds(elapsedSeconds)}!`}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600">
+                  {isCustom
+                    ? `Connect 5 · “${puzzle.title}” by ${puzzle.author}`
+                    : `Connect 5 #${puzzle.puzzleNumber} · “${puzzle.title}”`}
+                  {isRevealed
+                    ? " · Unscored reveal"
+                    : hintsUsed > 0
+                    ? ` · ${hintsUsed} hint${hintsUsed > 1 ? "s" : ""} used`
+                    : " · No hints used"}
+                </p>
               </div>
-              <p className="text-xs text-gray-600">
-                Connect 5 #{puzzle.puzzleNumber} · &ldquo;{puzzle.title}&rdquo;
-                {hintsUsed > 0
-                  ? ` · ${hintsUsed} hint${hintsUsed > 1 ? "s" : ""} used`
-                  : " · No hints used"}
-              </p>
+              <ResultShareButtons
+                title={shareOptions.title}
+                text={shareOptions.text}
+                url={shareOptions.url}
+                className="shrink-0"
+              />
             </div>
-            <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
-              <Button
-                type="button"
-                onClick={handleNativeShareResults}
-                className="bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
+
+            <div className="pt-2 border-t border-black/10 flex flex-wrap items-center justify-between gap-2">
+              <Link
+                href="/games/connect-5?mode=create"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-black bg-white hover:bg-emerald-50 px-3.5 py-2 text-xs font-headline font-black text-black transition-colors"
               >
-                <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
-                <span>Share</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCopyResults}
-                className={cn(
-                  "border-2 border-black font-headline font-bold text-xs h-10 px-3.5 sm:px-4 transition-colors",
-                  resultsCopied
-                    ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
-                    : "bg-white text-black hover:bg-gray-100"
-                )}
-              >
-                {resultsCopied ? (
-                  <>
-                    <Check className="h-4 w-4 mr-1.5 shrink-0" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4 mr-1.5 shrink-0" />
-                    <span>Copy results</span>
-                  </>
-                )}
-              </Button>
+                <PlusCircle className="h-3.5 w-3.5 text-emerald-700" />
+                Create Your Own Connect 5
+              </Link>
+              {isCustom ? (
+                <Link
+                  href="/games/connect-5"
+                  className="text-xs font-bold underline text-neutral-700 hover:text-black"
+                >
+                  Play Today&apos;s Connect 5 &rarr;
+                </Link>
+              ) : (
+                <Link
+                  href="/games/connect-5/archive"
+                  className="inline-flex items-center gap-1 text-xs font-bold underline text-neutral-700 hover:text-black"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  Playable Archive
+                </Link>
+              )}
             </div>
           </div>
         ) : (
@@ -1884,25 +2003,48 @@ function ConnectFiveBoard({
       </div>
 
       <Dialog open={winModalOpen} onOpenChange={setWinModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent
+          data-game-dialog-open={winModalOpen ? "true" : undefined}
+          className="max-w-md"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-2xl">
-              <CheckCircle2 className="h-6 w-6 text-[#2ECC71]" />
-              You Win!
+              <CheckCircle2
+                className={cn(
+                  "h-6 w-6",
+                  isRevealed ? "text-amber-600" : "text-[#2ECC71]"
+                )}
+              />
+              {isRevealed ? "Chain Revealed" : "You Win!"}
             </DialogTitle>
             <DialogDescription>
-              You solved Connect 5 #{puzzle.puzzleNumber} (&ldquo;{puzzle.title}
-              &rdquo;) in{" "}
-              <strong className="text-black font-mono">
-                {formatTimerSeconds(elapsedSeconds)}
-              </strong>
-              !
+              {isRevealed ? (
+                <>
+                  Here is the full solution for{" "}
+                  {isCustom
+                    ? `“${puzzle.title}”`
+                    : `Connect 5 #${puzzle.puzzleNumber} (“${puzzle.title}”)`}
+                  . Revealed puzzles do not count toward daily win streaks or fastest solve records.
+                </>
+              ) : (
+                <>
+                  You solved{" "}
+                  {isCustom
+                    ? `“${puzzle.title}”`
+                    : `Connect 5 #${puzzle.puzzleNumber} (“${puzzle.title}”)`}{" "}
+                  in{" "}
+                  <strong className="text-black font-mono">
+                    {formatTimerSeconds(elapsedSeconds)}
+                  </strong>
+                  !
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2 my-2">
             <p className="text-xs font-bold uppercase text-gray-500">
-              Today&apos;s 5-Word Chain Connections
+              5-Word Chain Connections
             </p>
             {puzzle.connections.map((conn, idx) => (
               <div
@@ -1918,39 +2060,19 @@ function ConnectFiveBoard({
           </div>
 
           <div className="flex flex-col gap-2 pt-2">
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                onClick={handleNativeShareResults}
-                className="w-full bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black h-10 px-4"
-              >
-                <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
-                <span>Share</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCopyResults}
-                className={cn(
-                  "w-full border-2 border-black font-headline font-bold h-10 px-4 transition-colors",
-                  resultsCopied
-                    ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
-                    : "bg-white text-black hover:bg-gray-100"
-                )}
-              >
-                {resultsCopied ? (
-                  <>
-                    <Check className="h-4 w-4 mr-1.5 shrink-0" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-4 w-4 mr-1.5 shrink-0" />
-                    <span>Copy results</span>
-                  </>
-                )}
-              </Button>
-            </div>
+            <ResultShareButtons
+              title={shareOptions.title}
+              text={shareOptions.text}
+              url={shareOptions.url}
+            />
+            <Link
+              href="/games/connect-5?mode=create"
+              onClick={() => setWinModalOpen(false)}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border-2 border-black bg-emerald-50 hover:bg-emerald-100 text-black font-headline font-bold h-9 text-xs transition-colors"
+            >
+              <PlusCircle className="h-3.5 w-3.5 text-emerald-700" />
+              Create Your Own Connect 5
+            </Link>
             <Button
               type="button"
               variant="outline"
@@ -1963,9 +2085,48 @@ function ConnectFiveBoard({
         </DialogContent>
       </Dialog>
 
+      {/* Reset Confirmation Modal */}
+      <Dialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <DialogContent
+          data-game-dialog-open={resetConfirmOpen ? "true" : undefined}
+          className="max-w-sm rounded-2xl border-2 border-black"
+        >
+          <DialogHeader>
+            <DialogTitle className="font-headline font-black text-lg">
+              Clear typed words?
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm text-neutral-600">
+              This clears all letters you&apos;ve typed into rows 2–5 back to the starting hints.
+              {!isCustom &&
+                " Your elapsed timer and hint count keep running fairly."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex flex-row justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setResetConfirmOpen(false)}
+              className="border-2 border-black font-bold"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmResetPuzzle}
+              className="bg-red-600 hover:bg-red-700 text-white border-2 border-black font-bold"
+            >
+              Clear Board
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Settings Modal */}
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+        <DialogContent
+          data-game-dialog-open={settingsOpen ? "true" : undefined}
+          className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
               <Settings className="h-5 w-5 text-gray-700" />
@@ -2049,7 +2210,7 @@ function ConnectFiveBoard({
         onCheckSquare={handleCheckSquare}
         onCheckWord={handleCheckWord}
         onCheckPuzzle={handleCheckPuzzle}
-        onRevealPuzzle={handleRevealPuzzle}
+        onRevealPuzzle={handleConfirmRevealPuzzle}
         onClearPuzzle={handleClearPuzzle}
       />
     </GameShell>

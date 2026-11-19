@@ -466,7 +466,7 @@ const SYLLABLE_OVERRIDES: Readonly<Record<string, number>> = {
   windows: 2,
 };
 
-/** Approximate English syllable counter with an override table for irregular words. */
+/** Approximate English syllable counter unified with `17-syllables.ts` `countLineSyllables`. */
 export function countSyllables(text: string): number {
   const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
   let total = 0;
@@ -477,13 +477,14 @@ export function countSyllables(text: string): number {
       total += SYLLABLE_OVERRIDES[word]!;
       continue;
     }
-    let w = word;
-    if (w.length <= 3) {
+    if (word.length <= 3) {
       total += 1;
       continue;
     }
-    w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, "").replace(/^y/, "");
-    const groups = w.match(/[aeiouy]{1,2}/g);
+    const normalized = word
+      .replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, "")
+      .replace(/^y/, "");
+    const groups = normalized.match(/[aeiouy]{1,2}/g);
     total += Math.max(1, groups ? groups.length : 1);
   }
   return total;

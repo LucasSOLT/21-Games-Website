@@ -41,10 +41,16 @@ import {
   playMoveTwoSwitchSfx,
   playMoveTwoVictorySfx,
   setMoveTwoMuted,
+  subscribeGameSfxMute,
 } from "@/lib/move-two-audio";
+import { playTapSfx } from "@/lib/game-sfx";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
 import type { CuboidAnimationPose } from "@/lib/move-two-renderer-3d";
 import { MoveTwoBloxorzCanvas } from "@/components/games/move-two-canvas";
-import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
+import { getDailyPuzzleForGame } from "@/lib/daily-engine";
 import {
   fetchRemoteOverrideForGame,
   getAdminOverridesForGame,
@@ -59,6 +65,7 @@ import { computePuzzleContentHash } from "@/lib/seeded-random";
 import { GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { ResultShareButtons } from "@/components/games/result-share-buttons";
+import { WinFlourish } from "@/components/games/win-flourish";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -68,6 +75,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+
+const MAX_UNDO_HISTORY = 60;
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
 
 interface StageHistorySnapshot {
   block: MoveTwoBlockState;
@@ -89,6 +109,7 @@ interface MoveTwoSavedProgressV3 {
   puzzleHash: string;
   activeDifficulty: MoveTwoDifficulty;
   stages: Record<MoveTwoDifficulty, StageRuntimeState>;
+  historyByDiff?: Record<MoveTwoDifficulty, StageHistorySnapshot[]>;
 }
 
 function buildFreshStageStates(
@@ -114,6 +135,39 @@ function buildFreshStageStates(
       status: "playing",
     },
   };
+}
+
+function sanitizeHistoryByDiff(
+  raw: unknown
+): Record<MoveTwoDifficulty, StageHistorySnapshot[]> {
+  const empty: Record<MoveTwoDifficulty, StageHistorySnapshot[]> = {
+    easy: [],
+    medium: [],
+    hard: [],
+  };
+  if (!raw || typeof raw !== "object") return empty;
+  const r = raw as Record<string, unknown>;
+  for (const diff of MOVE_TWO_DIFFICULTIES) {
+    const arr = r[diff];
+    if (!Array.isArray(arr)) continue;
+    empty[diff] = arr
+      .filter((item): item is StageHistorySnapshot => {
+        if (!item || typeof item !== "object") return false;
+        const s = item as Record<string, unknown>;
+        const b = s.block as Record<string, unknown> | undefined;
+        return Boolean(
+          b &&
+            typeof b.r === "number" &&
+            typeof b.c === "number" &&
+            typeof b.bridgeMask === "number" &&
+            typeof b.posture === "string" &&
+            typeof s.moves === "number" &&
+            typeof s.falls === "number"
+        );
+      })
+      .slice(-MAX_UNDO_HISTORY);
+  }
+  return empty;
 }
 
 function isValidSavedProgressV3(
@@ -181,29 +235,28 @@ function recordMoveTwoCompletion(
 export function MoveTwoGame() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
-    getLocalDateKey()
+  const liveTodayKey = useLiveLocalDateKey();
+
+  const activeDateKey =
+    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : liveTodayKey;
+  return (
+    <MoveTwoBoard
+      key={activeDateKey}
+      activeDateKey={activeDateKey}
+      liveTodayKey={liveTodayKey}
+    />
   );
-
-  useEffect(() => {
-    if (dateParam) return;
-    const onCheck = () => {
-      const curr = getLocalDateKey();
-      setLiveTodayKey((prev) => (prev !== curr ? curr : prev));
-    };
-    const id = setInterval(onCheck, 30_000);
-    window.addEventListener("focus", onCheck);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("focus", onCheck);
-    };
-  }, [dateParam]);
-
-  const activeDateKey = dateParam || liveTodayKey;
-  return <MoveTwoBoard key={activeDateKey} activeDateKey={activeDateKey} />;
 }
 
-function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
+function MoveTwoBoard({
+  activeDateKey,
+  liveTodayKey,
+}: {
+  activeDateKey: string;
+  liveTodayKey: string;
+}) {
   const initialPuzzle = useMemo<MoveTwoPuzzle>(() => {
     const resolved = getDailyPuzzleForGame<MoveTwoPuzzle>(
       "move-2",
@@ -241,11 +294,8 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   >(() => initialSaved?.stages ?? buildFreshStageStates(initialPuzzle));
   const [historyByDiff, setHistoryByDiff] = useState<
     Record<MoveTwoDifficulty, StageHistorySnapshot[]>
-  >({
-    easy: [],
-    medium: [],
-    hard: [],
-  });
+  >(() => sanitizeHistoryByDiff(initialSaved?.historyByDiff));
+  const hasPersistedRef = useRef<boolean>(Boolean(initialSaved));
 
   const [feedback, setFeedback] = useState<{
     tone: "warn" | "info";
@@ -258,6 +308,12 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
         : false
   );
   const [muted, setMuted] = useState<boolean>(() => isMoveTwoMuted());
+
+  useEffect(() => {
+    return subscribeGameSfxMute((nextMuted) => {
+      setMuted(nextMuted);
+    });
+  }, []);
 
   useEffect(() => {
     if (!feedback) return;
@@ -319,12 +375,23 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     };
   }, [activeDateKey, puzzle, cancelActiveRaf]);
 
-  // Persist v3 progress to localStorage whenever state changes
+  // Persist v3 progress (including capped 60-step Undo history per difficulty) to localStorage
   useEffect(() => {
     const hasAnyActivity = MOVE_TWO_DIFFICULTIES.some(
-      (d) => stageStates[d].moves > 0 || stageStates[d].status === "won"
+      (d) =>
+        stageStates[d].moves > 0 ||
+        stageStates[d].status === "won" ||
+        stageStates[d].bestMoves !== undefined ||
+        historyByDiff[d].length > 0
     );
-    if (!hasAnyActivity) return;
+    if (!hasAnyActivity && !hasPersistedRef.current) return;
+    hasPersistedRef.current = true;
+
+    const cappedHistory: Record<MoveTwoDifficulty, StageHistorySnapshot[]> = {
+      easy: historyByDiff.easy.slice(-MAX_UNDO_HISTORY),
+      medium: historyByDiff.medium.slice(-MAX_UNDO_HISTORY),
+      hard: historyByDiff.hard.slice(-MAX_UNDO_HISTORY),
+    };
 
     const payload: MoveTwoSavedProgressV3 = {
       version: 3,
@@ -332,15 +399,28 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       puzzleHash,
       activeDifficulty,
       stages: stageStates,
+      historyByDiff: cappedHistory,
     };
     saveGameProgress("move-2", activeDateKey, payload);
-  }, [activeDateKey, puzzle.id, puzzleHash, activeDifficulty, stageStates]);
+  }, [
+    activeDateKey,
+    puzzle.id,
+    puzzleHash,
+    activeDifficulty,
+    stageStates,
+    historyByDiff,
+  ]);
 
   const currentStage = puzzle.stages[activeDifficulty];
   const currentState = stageStates[activeDifficulty];
 
   const runSpawnDropAnimation = useCallback(
     (spawnBlock: MoveTwoBlockState) => {
+      if (prefersReducedMotion()) {
+        animKindRef.current = "idle";
+        setAnimPose(null);
+        return;
+      }
       animKindRef.current = "spawning";
       const startTs = performance.now();
       const duration = 165;
@@ -383,12 +463,13 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       }
 
       const outcome = stepBloxorzBlock(stage, runtime.block, dir);
+      const reducedMotion = prefersReducedMotion();
 
-      // Push snapshot for Undo
+      // Push snapshot for Undo (capped at MAX_UNDO_HISTORY = 60 steps)
       setHistoryByDiff((prev) => ({
         ...prev,
         [diff]: [
-          ...prev[diff],
+          ...prev[diff].slice(-(MAX_UNDO_HISTORY - 1)),
           {
             block: runtime.block,
             moves: runtime.moves,
@@ -414,6 +495,18 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           });
         } else {
           setFeedback(null);
+        }
+
+        if (reducedMotion) {
+          setStageStates((prev) => ({
+            ...prev,
+            [diff]: {
+              ...prev[diff],
+              block: outcome.next,
+              moves: prev[diff].moves + 1,
+            },
+          }));
+          return;
         }
 
         animKindRef.current = "rolling";
@@ -467,6 +560,20 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               : "Fell off the edge! Resetting to Start.",
         });
 
+        if (reducedMotion) {
+          const resetBlock = getInitialBlockState(stage);
+          setStageStates((prev) => ({
+            ...prev,
+            [diff]: {
+              ...prev[diff],
+              block: resetBlock,
+              moves: prev[diff].moves + 1,
+              falls: prev[diff].falls + 1,
+            },
+          }));
+          return;
+        }
+
         animKindRef.current = "falling";
         queuedDirRef.current = null;
         const fromBlock = runtime.block;
@@ -509,6 +616,20 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           tone: "warn",
           message: "Hit an obstacle! Resetting to Start.",
         });
+
+        if (reducedMotion) {
+          const resetBlock = getInitialBlockState(stage);
+          setStageStates((prev) => ({
+            ...prev,
+            [diff]: {
+              ...prev[diff],
+              block: resetBlock,
+              moves: prev[diff].moves + 1,
+              falls: prev[diff].falls + 1,
+            },
+          }));
+          return;
+        }
 
         animKindRef.current = "falling";
         queuedDirRef.current = null;
@@ -559,11 +680,30 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       playMoveTwoHoleDropSfx();
       setFeedback(null);
 
+      const finalMoves = runtime.moves + 1;
+      const lockedMoves = runtime.bestMoves ?? finalMoves;
+      const stars = computeMoveTwoStars(lockedMoves, stage.par);
+
+      if (reducedMotion) {
+        playMoveTwoVictorySfx();
+        recordMoveTwoCompletion(activeDateKey, lockedMoves, stage.par, stars);
+        setStageStates((prev) => ({
+          ...prev,
+          [diff]: {
+            ...prev[diff],
+            block: outcome.next,
+            moves: prev[diff].bestMoves ?? finalMoves,
+            status: "won",
+            bestMoves: prev[diff].bestMoves ?? finalMoves,
+          },
+        }));
+        setVictoryModalOpen(true);
+        return;
+      }
+
       animKindRef.current = "winning";
       queuedDirRef.current = null;
       const fromBlock = runtime.block;
-      const finalMoves = runtime.moves + 1;
-      const stars = computeMoveTwoStars(finalMoves, stage.par);
       const startTs = performance.now();
       const duration = 460;
 
@@ -583,22 +723,17 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
           animKindRef.current = "idle";
           setAnimPose(null);
           playMoveTwoVictorySfx();
-          recordMoveTwoCompletion(activeDateKey, finalMoves, stage.par, stars);
-          setStageStates((prev) => {
-            const prevBest = prev[diff].bestMoves;
-            const nextBest =
-              prevBest === undefined ? finalMoves : Math.min(prevBest, finalMoves);
-            return {
-              ...prev,
-              [diff]: {
-                ...prev[diff],
-                block: outcome.next,
-                moves: finalMoves,
-                status: "won",
-                bestMoves: nextBest,
-              },
-            };
-          });
+          recordMoveTwoCompletion(activeDateKey, lockedMoves, stage.par, stars);
+          setStageStates((prev) => ({
+            ...prev,
+            [diff]: {
+              ...prev[diff],
+              block: outcome.next,
+              moves: prev[diff].bestMoves ?? finalMoves,
+              status: "won",
+              bestMoves: prev[diff].bestMoves ?? finalMoves,
+            },
+          }));
           setVictoryModalOpen(true);
         }
       };
@@ -612,12 +747,29 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     performMoveRef.current = performMove;
   }, [performMove]);
 
-  // Keyboard controls (Arrow keys + WASD)
+  // Keyboard controls (Arrow keys + WASD) — strictly guarded when any modal or text field is open/focused.
   useEffect(() => {
-    if (!splashDismissed || currentState.status === "won") return;
+    if (!splashDismissed || currentState.status === "won" || victoryModalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (
+        isGameTimerExternallyPaused() ||
+        document.querySelector(
+          '[data-game-dialog-open="true"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+        )
+      ) {
+        return;
+      }
 
       let dir: MoveTwoDirection | null = null;
       switch (e.key) {
@@ -649,10 +801,11 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [splashDismissed, currentState.status]);
+  }, [splashDismissed, currentState.status, victoryModalOpen]);
 
   const handleSelectDifficulty = (diff: MoveTwoDifficulty) => {
     if (diff === activeDifficulty) return;
+    playTapSfx();
     cancelActiveRaf();
     setFeedback(null);
     setActiveDifficulty(diff);
@@ -663,6 +816,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     if (currentState.status === "won") return;
     const stack = historyByDiff[activeDifficulty];
     if (stack.length === 0) return;
+    playTapSfx(0.9);
     cancelActiveRaf();
     const last = stack[stack.length - 1]!;
     setHistoryByDiff((prev) => ({
@@ -683,14 +837,15 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   };
 
   const handleResetStage = () => {
+    playTapSfx(0.85);
     cancelActiveRaf();
     setVictoryModalOpen(false);
     const resetBlock = getInitialBlockState(currentStage);
-    if (currentState.status !== "won") {
+    if (currentState.status !== "won" && currentState.moves > 0) {
       setHistoryByDiff((prev) => ({
         ...prev,
         [activeDifficulty]: [
-          ...prev[activeDifficulty],
+          ...prev[activeDifficulty].slice(-(MAX_UNDO_HISTORY - 1)),
           {
             block: currentState.block,
             moves: currentState.moves,
@@ -701,16 +856,23 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     } else {
       setHistoryByDiff((prev) => ({ ...prev, [activeDifficulty]: [] }));
     }
-    setStageStates((prev) => ({
-      ...prev,
-      [activeDifficulty]: {
-        ...prev[activeDifficulty],
-        block: resetBlock,
-        moves: prev[activeDifficulty].status === "won" ? 0 : prev[activeDifficulty].moves,
-        falls: prev[activeDifficulty].status === "won" ? 0 : prev[activeDifficulty].falls,
-        status: "playing",
-      },
-    }));
+    setStageStates((prev) => {
+      const prevStage = prev[activeDifficulty];
+      const lockedBest =
+        prevStage.bestMoves ??
+        (prevStage.status === "won" ? prevStage.moves : undefined);
+      return {
+        ...prev,
+        [activeDifficulty]: {
+          ...prevStage,
+          block: resetBlock,
+          moves: 0,
+          falls: 0,
+          status: "playing",
+          bestMoves: lockedBest,
+        },
+      };
+    });
     setFeedback(null);
     runSpawnDropAnimation(resetBlock);
   };
@@ -727,8 +889,13 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
   };
 
   const anyWonToday =
-    MOVE_TWO_DIFFICULTIES.some((d) => stageStates[d].status === "won") ||
-    isDateCompleted("move-2", activeDateKey);
+    MOVE_TWO_DIFFICULTIES.some(
+      (d) => stageStates[d].status === "won" || stageStates[d].bestMoves !== undefined
+    ) || isDateCompleted("move-2", activeDateKey);
+
+  const allThreeCleared = MOVE_TWO_DIFFICULTIES.every(
+    (d) => stageStates[d].status === "won" || stageStates[d].bestMoves !== undefined
+  );
 
   const hasSavedMoves = MOVE_TWO_DIFFICULTIES.some(
     (d) => stageStates[d].moves > 0
@@ -740,7 +907,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     for (const d of MOVE_TWO_DIFFICULTIES) {
       const st = stageStates[d];
       const movesUsed =
-        st.status === "won" ? st.moves : st.bestMoves;
+        st.bestMoves ?? (st.status === "won" ? st.moves : undefined);
       if (movesUsed !== undefined) {
         const par = puzzle.stages[d].par;
         map[d] = {
@@ -753,19 +920,28 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     return map;
   }, [stageStates, puzzle.stages]);
 
+  const isToday = activeDateKey === liveTodayKey;
+  const shareUrl = isToday
+    ? "https://21games.ai/games/move-2"
+    : `https://21games.ai/games/move-2?date=${activeDateKey}`;
+
   const shareText = useMemo(
     () =>
       buildMoveTwoShareText({
         puzzleNumber: puzzle.puzzleNumber,
         title: puzzle.title,
-        moves: currentState.moves,
+        moves: currentState.bestMoves ?? currentState.moves,
         par: currentStage.par,
-        stars: computeMoveTwoStars(currentState.moves, currentStage.par),
+        stars: computeMoveTwoStars(
+          currentState.bestMoves ?? currentState.moves,
+          currentStage.par
+        ),
         results: solvedResultsMap,
       }),
     [
       puzzle.puzzleNumber,
       puzzle.title,
+      currentState.bestMoves,
       currentState.moves,
       currentStage.par,
       solvedResultsMap,
@@ -863,8 +1039,9 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
     );
   }
 
+  const recordedStageMoves = currentState.bestMoves ?? currentState.moves;
   const currentStars = computeMoveTwoStars(
-    currentState.moves,
+    recordedStageMoves,
     currentStage.par
   );
   const postureLabel =
@@ -882,6 +1059,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
       dateKey={activeDateKey}
       author={puzzle.author}
     >
+      <WinFlourish active={allThreeCleared} />
       <div className="mx-auto max-w-xl w-full px-3 py-2.5 sm:py-4 space-y-2.5">
         {/* NYT Sudoku-Style Difficulty Switcher Tabs */}
         <div
@@ -904,7 +1082,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                 data-testid={`move-two-diff-${diff}`}
                 onClick={() => handleSelectDifficulty(diff)}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs sm:text-sm font-bold transition-all cursor-pointer",
+                  "flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs sm:text-sm font-bold transition-all motion-reduce:transition-none cursor-pointer",
                   active
                     ? "bg-black text-white shadow-sm"
                     : "bg-transparent text-neutral-700 hover:bg-neutral-100"
@@ -934,7 +1112,10 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
 
         {/* Fixed-Height Single-Row Status & Audio Strip (Zero Height Shift) */}
         <div className="flex h-11 flex-nowrap items-center justify-between gap-2 rounded-2xl border-2 border-black bg-white px-3 shadow-[0_2px_0_#171717] overflow-hidden">
-          <div className="flex items-center gap-1.5 sm:gap-2.5 text-[11px] min-[375px]:text-xs sm:text-sm whitespace-nowrap min-w-0">
+          <div
+            aria-live="polite"
+            className="flex items-center gap-1.5 sm:gap-2.5 text-[11px] min-[375px]:text-xs sm:text-sm whitespace-nowrap min-w-0"
+          >
             <span className="font-mono font-black text-black">
               Moves: {currentState.moves}
             </span>
@@ -1118,7 +1299,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               <DialogDescription className="text-sm font-semibold text-neutral-700 text-center">
                 Solved in{" "}
                 <span className="font-mono font-black text-black">
-                  {currentState.moves}
+                  {recordedStageMoves}
                 </span>{" "}
                 moves · Par{" "}
                 <span className="font-mono font-bold">{currentStage.par}</span>{" "}
@@ -1137,7 +1318,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
                     type="button"
                     onClick={() => handleSelectDifficulty(diff)}
                     className={cn(
-                      "rounded-xl border-2 p-2 text-center transition-all cursor-pointer",
+                      "rounded-xl border-2 p-2 text-center transition-all motion-reduce:transition-none cursor-pointer",
                       summary
                         ? "border-emerald-600 bg-emerald-50/80 text-emerald-950"
                         : "border-neutral-200 bg-neutral-50 text-neutral-600 hover:border-black"
@@ -1186,6 +1367,7 @@ function MoveTwoBoard({ activeDateKey }: { activeDateKey: string }) {
               <ResultShareButtons
                 title={`Move Two #${puzzle.puzzleNumber}`}
                 text={shareText}
+                url={shareUrl}
               />
             </div>
 

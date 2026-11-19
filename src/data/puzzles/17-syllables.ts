@@ -10,6 +10,13 @@ import {
   getLocalDateKey,
   getPuzzleNumberForDate,
 } from "@/lib/date-keys";
+import {
+  buildStructuredHaikuLines as buildStructuredHaikuLinesBase,
+  sanitize17SyllablesPuzzle,
+  sanitizeCustomWordChunks,
+  sliceHaikuIntoChunks,
+  sliceSingleWord,
+} from "@/lib/puzzle-sanitizers";
 
 export interface HaikuWord {
   text: string; // Uppercase word, e.g. "AUTUMN"
@@ -135,6 +142,12 @@ const KNOWN_SYLLABLES: Record<string, number> = {
   with: 1, without: 2, woods: 1, world: 1,
   // Y
   yield: 1,
+  // Shared irregular words from AI haiku helper & bank
+  ago: 2, mile: 1, miles: 1,
+  everything: 3, everyone: 3, create: 2, cicadas: 3, wherever: 3,
+  thousand: 2, poem: 2, hour: 1, idea: 3, real: 1, being: 2,
+  children: 2, family: 3, beautiful: 3, people: 2, little: 2,
+  single: 2, maple: 2, windows: 2,
 };
 
 /**
@@ -148,14 +161,16 @@ export function countWordSyllables(word: string): number {
   if (KNOWN_SYLLABLES[clean] !== undefined) {
     return KNOWN_SYLLABLES[clean];
   }
+  if (clean.length <= 3) {
+    return 1;
+  }
 
   // Heuristic counting for words not in the explicit lexicon
-  let count = 0;
   const normalized = clean
-    .replace(/(?:[^laeiouy]|ed|es|e)$/, "")
+    .replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, "")
     .replace(/^y/, "");
   const matched = normalized.match(/[aeiouy]{1,2}/g);
-  count = matched ? matched.length : 1;
+  const count = matched ? matched.length : 1;
   return Math.max(1, count);
 }
 
@@ -192,98 +207,10 @@ export function validateHaikuStructure(lines: [string, string, string]): {
 }
 
 // ============================================================================
-// Deterministic Single-Word Uppercase Chunk Slicer
+// Unified Single-Source-of-Truth Chunk Slicer (re-exported from puzzle-sanitizers)
 // ============================================================================
 
-/**
- * Slices a single word into 1 to 3 uppercase chunks.
- * Chunks NEVER cross word boundaries.
- */
-export function sliceSingleWord(word: string, shouldSplit: boolean): string[] {
-  const upper = word.toUpperCase().replace(/[^A-Z]/g, "");
-  if (!upper) return [];
-  if (!shouldSplit || upper.length <= 3) {
-    return [upper];
-  }
-  if (upper.length === 4) {
-    return [upper.slice(0, 2), upper.slice(2)];
-  }
-  if (upper.length === 5) {
-    if (upper.endsWith("ASS")) {
-      return [upper.slice(0, 3), upper.slice(3)];
-    }
-    return [upper.slice(0, 2), upper.slice(2)];
-  }
-  if (upper.length === 6) {
-    return [upper.slice(0, 3), upper.slice(3)];
-  }
-  if (upper.length === 7) {
-    return [upper.slice(0, 3), upper.slice(3)];
-  }
-  if (upper.length === 8) {
-    return [upper.slice(0, 4), upper.slice(4)];
-  }
-  // 9+ letters
-  return [upper.slice(0, 3), upper.slice(3, 6), upper.slice(6)];
-}
-
-/**
- * Slices a 3-line 5-7-5 haiku into 14–20 variable-length uppercase chunks.
- * Rules:
- * - Single-word chunks only (never cross word boundaries).
- * - Chunk lengths between 1 and 8 characters.
- * - Total chunk count strictly within [14, 20].
- * - Deterministic output.
- */
-export function sliceHaikuIntoChunks(
-  lines: [string, string, string],
-  targetChunkCount = 16
-): string[] {
-  const allWords: string[] = [];
-  for (const line of lines) {
-    const words = line
-      .toUpperCase()
-      .split(/\s+/)
-      .map((w) => w.replace(/[^A-Z]/g, ""))
-      .filter((w) => w.length > 0);
-    allWords.push(...words);
-  }
-
-  // Base: unsplit words
-  const currentChunks = allWords.map((w) => [w]);
-  let totalChunks = currentChunks.length;
-
-  // Find candidates to split (words with length >= 4)
-  // Sort candidate indices by word length descending so longest words split first
-  const candidateIndices = allWords
-    .map((w, idx) => ({ idx, len: w.length }))
-    .filter((item) => item.len >= 4)
-    .sort((a, b) => b.len - a.len);
-
-  // Split longest words until we reach targetChunkCount or run out of candidates
-  for (const { idx } of candidateIndices) {
-    if (totalChunks >= targetChunkCount) break;
-    const word = allWords[idx];
-    const sliced = sliceSingleWord(word, true);
-    if (sliced.length > 1) {
-      totalChunks += sliced.length - 1;
-      currentChunks[idx] = sliced;
-    }
-  }
-
-  // If still below minimum 14, split any remaining words of length 3 if needed
-  if (totalChunks < 14) {
-    for (let i = 0; i < allWords.length && totalChunks < 14; i++) {
-      if (currentChunks[i].length === 1 && allWords[i].length === 3) {
-        currentChunks[i] = [allWords[i].slice(0, 1), allWords[i].slice(1)];
-        totalChunks += 1;
-      }
-    }
-  }
-
-  const flattened = currentChunks.flat();
-  return flattened;
-}
+export { sliceSingleWord, sliceHaikuIntoChunks, sanitizeCustomWordChunks, sanitize17SyllablesPuzzle };
 
 /**
  * Slices a single uppercase word at sorted 1-based cut positions (`1 .. word.length - 1`).
@@ -305,64 +232,11 @@ export function sliceWordByCuts(word: string, cuts: readonly number[]): string[]
   return out;
 }
 
-/**
- * Builds structured line info with words and constituent chunks, honoring optional
- * editor-defined `customWordChunks` (`key = "${lineIdx}-${wordIdx}"`) when valid.
- */
 export function buildStructuredHaikuLines(
   lines: [string, string, string],
   customWordChunks?: Record<string, string[]>
 ): HaikuLineInfo[] {
-  const allWordsFlat = lines.flatMap((l) =>
-    l
-      .toUpperCase()
-      .split(/\s+/)
-      .map((w) => w.replace(/[^A-Z]/g, ""))
-      .filter(Boolean)
-  );
-
-  const candidateIndices = allWordsFlat
-    .map((w, idx) => ({ idx, len: w.length }))
-    .filter((item) => item.len >= 4)
-    .sort((a, b) => b.len - a.len);
-
-  let totalChunks = allWordsFlat.length;
-  const splitSet = new Set<number>();
-  for (const { idx } of candidateIndices) {
-    if (totalChunks >= 16) break;
-    splitSet.add(idx);
-    totalChunks += 1;
-  }
-
-  let wordPointer = 0;
-  return lines.map((line, lineIdx) => {
-    const rawWords = line
-      .toUpperCase()
-      .split(/\s+/)
-      .map((w) => w.replace(/[^A-Z]/g, ""))
-      .filter(Boolean);
-
-    const words: HaikuWord[] = rawWords.map((word, wordIdx) => {
-      const customKey = `${lineIdx}-${wordIdx}`;
-      const override = customWordChunks?.[customKey];
-      const overrideClean = override
-        ?.map((c) => c.toUpperCase().replace(/[^A-Z]/g, ""))
-        .filter(Boolean);
-      const shouldSplit = splitSet.has(wordPointer);
-      const chunks =
-        overrideClean && overrideClean.length > 0 && overrideClean.join("") === word
-          ? overrideClean
-          : sliceSingleWord(word, shouldSplit);
-      wordPointer++;
-      return { text: word, chunks };
-    });
-
-    return {
-      syllables: lineIdx === 1 ? 7 : 5,
-      text: line.toUpperCase().trim(),
-      words,
-    };
-  });
+  return buildStructuredHaikuLinesBase(lines, customWordChunks) as HaikuLineInfo[];
 }
 
 // ============================================================================
@@ -1195,65 +1069,6 @@ const HAIKU_AUTHORS: readonly string[] = [
 ];
 
 const SYNTHESIZED_17_CACHE = new Map<string, SeventeenSyllablesPuzzle>();
-
-/**
- * Self-heals any 17 Syllables puzzle payload whose `chunks` array is missing lines or
- * fails to match all letters in `lines` (e.g., partial manual override payloads), and
- * aligns `puzzleNumber` / `dateKey` when resolving a scheduled daily date.
- */
-export function sanitize17SyllablesPuzzle(
-  puzzle: SeventeenSyllablesPuzzle,
-  scheduledDateKey?: string
-): SeventeenSyllablesPuzzle {
-  if (!puzzle || !Array.isArray(puzzle.lines) || puzzle.lines.length !== 3) {
-    return puzzle;
-  }
-
-  const linesAlpha = puzzle.lines
-    .join("")
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "");
-  const rawChunks = Array.isArray(puzzle.chunks) ? puzzle.chunks : [];
-  const chunksAlpha = rawChunks
-    .map((c) => (typeof c === "string" ? c : ""))
-    .join("")
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "");
-
-  const needsChunkHeal = !linesAlpha || chunksAlpha !== linesAlpha;
-  const healedChunks = needsChunkHeal
-    ? puzzle.customWordChunks && Object.keys(puzzle.customWordChunks).length > 0
-      ? buildStructuredHaikuLines(puzzle.lines, puzzle.customWordChunks).flatMap(
-          (l) => l.words.flatMap((w) => w.chunks)
-        )
-      : sliceHaikuIntoChunks(puzzle.lines, 16)
-    : puzzle.chunks;
-
-  const effectiveDateKey =
-    scheduledDateKey && /^\d{4}-\d{2}-\d{2}$/.test(scheduledDateKey)
-      ? scheduledDateKey
-      : undefined;
-  const expectedPuzzleNum =
-    effectiveDateKey && puzzle.puzzleNumber !== 0
-      ? getPuzzleNumberForDate(effectiveDateKey)
-      : puzzle.puzzleNumber;
-  const nextDateKey = effectiveDateKey ?? puzzle.dateKey;
-
-  if (
-    !needsChunkHeal &&
-    expectedPuzzleNum === puzzle.puzzleNumber &&
-    nextDateKey === puzzle.dateKey
-  ) {
-    return puzzle;
-  }
-
-  return {
-    ...puzzle,
-    dateKey: nextDateKey,
-    puzzleNumber: expectedPuzzleNum,
-    chunks: healedChunks,
-  };
-}
 
 /**
  * Returns a deterministic, [5, 7, 5] validated, non-repeating 17 Syllables puzzle for any dateKey.

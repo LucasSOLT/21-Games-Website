@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Roboto_Slab } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider } from "@/components/account/auth-provider";
+import { CssIntegrityGuard } from "@/components/css-integrity-guard";
 import { assetPath } from "@/lib/asset-path";
 
 const inter = Inter({
@@ -17,51 +18,70 @@ const robotoSlab = Roboto_Slab({
   display: "swap",
 });
 
+const SITE_DESCRIPTION =
+  "Play 9 original daily word, logic, and spatial puzzles in the 21 → 1 countdown by SOL Theory — 21 Things, 17 Syllables, 9 Rhymes, Eightfold Echo, 6 Pics, Connect 5, Four Score, Move Two, and 1 Win.";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#FCFCFD",
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://21games.ai"),
   title: {
-    default: "21 Games (SOL GaMES) · Smart Games. Daily Rituals.",
+    default: "21 Games · Smart Games. Daily Rituals.",
     template: "%s · 21 Games",
   },
-  description:
-    "Daily gratitude, word-chain, and logic puzzle games by SOL Theory. Play Connect 5, 21 Things, 9 Rhymes, and daily brain puzzles.",
-  applicationName: "21 Games (SOL GaMES)",
+  description: SITE_DESCRIPTION,
+  applicationName: "21 Games",
+  manifest: assetPath("/manifest.webmanifest"),
+  appleWebApp: {
+    capable: true,
+    title: "21 Games",
+    statusBarStyle: "default",
+  },
   authors: [{ name: "SOL Theory", url: "https://www.soltheory.com" }],
   generator: "Next.js",
   keywords: [
-    "word games",
+    "21 Games",
     "daily puzzle",
-    "gratitude game",
-    "word chain",
-    "connect 5",
-    "21 things",
-    "9 rhymes",
-    "NYT games alternative",
+    "word games",
     "logic puzzles",
-    "brain games",
+    "21 Things",
+    "17 Syllables",
+    "9 Rhymes",
+    "Eightfold Echo",
+    "6 Pics",
+    "Connect 5",
+    "Four Score",
+    "Move Two",
+    "1 Win",
+    "SOL Theory",
   ],
   icons: {
     icon: [
       { url: assetPath("/favicon.svg"), type: "image/svg+xml" },
       { url: assetPath("/favicon.ico"), sizes: "any" },
+      { url: assetPath("/icon-192.png"), sizes: "192x192", type: "image/png" },
+      { url: assetPath("/icon-512.png"), sizes: "512x512", type: "image/png" },
     ],
     apple: [
       { url: assetPath("/apple-touch-icon.png"), sizes: "180x180", type: "image/png" },
     ],
-    shortcut: [assetPath("/favicon.svg")],
+    shortcut: [assetPath("/favicon.ico")],
   },
   openGraph: {
-    title: "21 Games (SOL GaMES) · Smart Games. Daily Rituals.",
-    description:
-      "Daily gratitude, word-chain, and logic puzzle games by SOL Theory. Play Connect 5, 21 Things, 9 Rhymes, and daily brain puzzles.",
+    title: "21 Games · Smart Games. Daily Rituals.",
+    description: SITE_DESCRIPTION,
     url: "https://21games.ai/",
-    siteName: "21 Games (SOL GaMES)",
+    siteName: "21 Games",
     images: [
       {
         url: "/og-image.png",
         width: 1200,
         height: 630,
-        alt: "21 Games (SOL GaMES) by SOL Theory",
+        alt: "21 Games · 9 Daily Puzzles (21 → 1) by SOL Theory",
       },
     ],
     locale: "en_US",
@@ -69,9 +89,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "21 Games (SOL GaMES) · Smart Games. Daily Rituals.",
-    description:
-      "Daily gratitude, word-chain, and logic puzzle games by SOL Theory. Play Connect 5, 21 Things, 9 Rhymes, and daily brain puzzles.",
+    title: "21 Games · Smart Games. Daily Rituals.",
+    description: SITE_DESCRIPTION,
     site: "@SOLTheory",
     creator: "@SOLTheory",
     images: ["/og-image.png"],
@@ -85,28 +104,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${robotoSlab.variable}`}>
-      <head>
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"
-        />
-        <meta name="theme-color" content="#000000" />
-        <link
-          rel="icon"
-          type="image/svg+xml"
-          href={assetPath("/favicon.svg")}
-        />
-        <link
-          rel="alternate icon"
-          type="image/x-icon"
-          href={assetPath("/favicon.ico")}
-        />
-        <link
-          rel="apple-touch-icon"
-          href={assetPath("/apple-touch-icon.png")}
-        />
-      </head>
       <body className="font-body antialiased">
+        <CssIntegrityGuard />
         <AuthProvider>
           <div>{children}</div>
           <Toaster />

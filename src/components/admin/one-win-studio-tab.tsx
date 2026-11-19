@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Lock, Play, RefreshCw, RotateCcw, Trash2, Trophy } from "lucide-react";
 import {
   ONE_WIN_DEFAULT_PROMPT,
@@ -28,6 +28,11 @@ interface OneWinStudioTabProps {
   targetDate: string;
   canEdit: boolean;
   editReason?: string;
+  syncVersion?: number;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
 }
 
@@ -52,12 +57,27 @@ export function OneWinStudioTab({
   targetDate,
   canEdit,
   editReason,
+  syncVersion = 0,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
 }: OneWinStudioTabProps) {
-  const initial = useMemo(() => loadPuzzleForDate(targetDate, true), [targetDate]);
+  const initial = useMemo(() => {
+    void syncVersion;
+    return loadPuzzleForDate(targetDate, true);
+  }, [targetDate, syncVersion]);
   const defaultPuzzle = useMemo(() => loadPuzzleForDate(targetDate, false), [targetDate]);
   const [prevDate, setPrevDate] = useState<string>(targetDate);
+  const [prevSyncVersion, setPrevSyncVersion] = useState<number>(syncVersion);
   const [title, setTitle] = useState<string>(initial.title);
+  const [author, setAuthor] = useState<string>(
+    initial.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    initial.editor || defaultEditor || "Daily Editorial"
+  );
   const [prompt, setPrompt] = useState<string>(initial.prompt);
   const [subtitle, setSubtitle] = useState<string>(initial.subtitle);
 
@@ -65,23 +85,32 @@ export function OneWinStudioTab({
   const [rawRows, setRawRows] = useState<AdminOneWinRow[]>([]);
   const [loadingLive, setLoadingLive] = useState<boolean>(false);
 
-  if (prevDate !== targetDate) {
+  if (prevDate !== targetDate || prevSyncVersion !== syncVersion) {
     setPrevDate(targetDate);
+    setPrevSyncVersion(syncVersion);
     setTitle(initial.title);
+    setAuthor(initial.author || defaultAuthor || "SOL Theory");
+    setEditorName(initial.editor || defaultEditor || "Daily Editorial");
     setPrompt(initial.prompt);
     setSubtitle(initial.subtitle);
   }
 
   const handleClearAll = () => {
     setTitle("");
+    setAuthor("");
+    setEditorName("");
     setPrompt("");
     setSubtitle("");
+    onDirty?.();
   };
 
   const handleRevertDefault = () => {
     setTitle(defaultPuzzle.title);
+    setAuthor(defaultPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(defaultPuzzle.editor || defaultEditor || "Daily Editorial");
     setPrompt(defaultPuzzle.prompt);
     setSubtitle(defaultPuzzle.subtitle);
+    onDirty?.();
   };
 
   const candidatePuzzle: OneWinPromptPuzzle = useMemo(
@@ -90,14 +119,34 @@ export function OneWinStudioTab({
       id: `1w-${targetDate}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: title.trim() || "Daily Gratitude Check-In",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
       prompt: prompt.trim() || ONE_WIN_DEFAULT_PROMPT,
       subtitle:
         subtitle.trim() ||
         "No win is too small — log yours blindly, then see where it ranks globally.",
       customDate: targetDate,
     }),
-    [initial, prompt, subtitle, targetDate, title]
+    [
+      author,
+      defaultAuthor,
+      defaultEditor,
+      editorName,
+      initial,
+      prompt,
+      subtitle,
+      targetDate,
+      title,
+    ]
   );
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(candidatePuzzle);
+  }, [candidatePuzzle]);
 
   const validation = useMemo(
     () => validateOneWinPuzzle(candidatePuzzle),
@@ -163,7 +212,7 @@ export function OneWinStudioTab({
       details: [
         `Title: ${candidatePuzzle.title}`,
         `Prompt: ${candidatePuzzle.prompt}`,
-        `Subtitle: ${candidatePuzzle.subtitle}`,
+        `Author: ${candidatePuzzle.author} · Editor: ${candidatePuzzle.editor}`,
       ],
       playImmediately,
     });
@@ -217,9 +266,48 @@ export function OneWinStudioTab({
             <Input
               disabled={!canEdit}
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                onDirty?.();
+              }}
               placeholder="Daily Gratitude Check-In"
+              className="text-base sm:text-sm"
             />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold uppercase text-gray-700 mb-1">
+                Author
+              </label>
+              <Input
+                disabled={!canEdit}
+                value={author}
+                onChange={(e) => {
+                  setAuthor(e.target.value);
+                  onDirty?.();
+                }}
+                placeholder={defaultAuthor}
+                className="text-base sm:text-sm"
+                data-testid="admin-1-win-author"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-gray-700 mb-1">
+                Editor
+              </label>
+              <Input
+                disabled={!canEdit}
+                value={editorName}
+                onChange={(e) => {
+                  setEditorName(e.target.value);
+                  onDirty?.();
+                }}
+                placeholder={defaultEditor}
+                className="text-base sm:text-sm"
+                data-testid="admin-1-win-editor"
+              />
+            </div>
           </div>
 
           <div>
@@ -230,8 +318,12 @@ export function OneWinStudioTab({
               disabled={!canEdit}
               rows={3}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                onDirty?.();
+              }}
               placeholder={ONE_WIN_DEFAULT_PROMPT}
+              className="text-base sm:text-sm"
             />
           </div>
 
@@ -242,8 +334,12 @@ export function OneWinStudioTab({
             <Input
               disabled={!canEdit}
               value={subtitle}
-              onChange={(e) => setSubtitle(e.target.value)}
+              onChange={(e) => {
+                setSubtitle(e.target.value);
+                onDirty?.();
+              }}
               placeholder="No win is too small — log yours blindly, then see where it ranks globally."
+              className="text-base sm:text-sm"
             />
           </div>
         </div>

@@ -48,7 +48,7 @@ interface NineRhymesEditorProps {
 }
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border-2 border-neutral-300 text-sm font-medium focus:border-black focus:outline-hidden bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border-2 border-neutral-300 text-base sm:text-sm font-medium focus:border-black focus:outline-hidden bg-white";
 
 /**
  * Shared 9 Rhymes authoring form (Creator Mode + /admin studio). Each of the 9 rows has:

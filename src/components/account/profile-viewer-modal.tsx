@@ -32,7 +32,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/components/account/auth-provider";
 import { UnifiedNineGameStats } from "@/components/account/unified-nine-game-stats";
-import { ALL_GAME_SLUGS, type AllGameSlug } from "@/lib/games-config";
+import { ALL_GAMES, ALL_GAME_SLUGS, type AllGameSlug } from "@/lib/games-config";
+import {
+  fetchCustomPuzzle,
+  getMyCreatedCustomPuzzles,
+  syncMyCustomPuzzlesFromCloud,
+  type CustomPuzzleSummary,
+} from "@/lib/custom-puzzles";
 import { getLocalDateKey } from "@/lib/date-keys";
 import {
   AVATAR_COLOR_OPTIONS,
@@ -54,8 +60,7 @@ import {
 import {
   getPastDateKeys,
   parseDateKeyToLocalNoon,
-} from "@/lib/daily-engine";
-import { shareCustomGame } from "@/lib/custom-game-share";
+} from "@/lib/date-keys";
 import type { TwentyOneThingsBoard } from "@/data/puzzles/21-things";
 import { assetPath } from "@/lib/asset-path";
 import { useToast } from "@/hooks/use-toast";
@@ -1172,26 +1177,46 @@ export function LoggedInProfileDashboard({
   const [createdBoards, setCreatedBoards] = useState<TwentyOneThingsBoard[]>(
     () => getUserCreated21Boards()
   );
+  const [createdCustomPuzzles, setCreatedCustomPuzzles] = useState<
+    CustomPuzzleSummary[]
+  >(() => getMyCreatedCustomPuzzles());
+  const [showAllPicks, setShowAllPicks] = useState<boolean>(false);
+  const [showAllCreated, setShowAllCreated] = useState<boolean>(false);
 
   useEffect(() => {
     let isMounted = true;
     const handleSync = () => {
       if (isMounted) {
         setCreatedBoards(getUserCreated21Boards());
+        setCreatedCustomPuzzles(getMyCreatedCustomPuzzles());
         setLocalStats(getAllLocalGameStats());
       }
     };
 
-    const localIds = new Set(getUserCreated21Boards().map((b) => b.id));
+    void syncMyCustomPuzzlesFromCloud(profile.id).then((syncedList) => {
+      if (isMounted) {
+        setCreatedCustomPuzzles(syncedList);
+      }
+    });
+
+    const localIds = new Set([
+      ...getUserCreated21Boards().map((b) => b.id),
+      ...getMyCreatedCustomPuzzles().map((p) => p.id),
+    ]);
     const missingRemoteIds = (profile.createdBoardIds || []).filter(
       (id) => id && !localIds.has(id)
     );
     if (missingRemoteIds.length > 0) {
       void Promise.all(
-        missingRemoteIds.map((id) => fetchUserCreated21BoardById(id))
+        missingRemoteIds.map((id) =>
+          /^(17s|9r|6p|c5)-/i.test(id)
+            ? fetchCustomPuzzle(id)
+            : fetchUserCreated21BoardById(id)
+        )
       ).then(() => {
         if (isMounted) {
           setCreatedBoards(getUserCreated21Boards());
+          setCreatedCustomPuzzles(getMyCreatedCustomPuzzles());
         }
       });
     }
@@ -1199,15 +1224,17 @@ export function LoggedInProfileDashboard({
     window.addEventListener("solgames:stats-updated", handleSync);
     window.addEventListener("solgames:profile-sync", handleSync);
     window.addEventListener("solgames:auth-changed", handleSync);
+    window.addEventListener("solgames:custom-puzzle-created", handleSync);
     window.addEventListener("storage", handleSync);
     return () => {
       isMounted = false;
       window.removeEventListener("solgames:stats-updated", handleSync);
       window.removeEventListener("solgames:profile-sync", handleSync);
       window.removeEventListener("solgames:auth-changed", handleSync);
+      window.removeEventListener("solgames:custom-puzzle-created", handleSync);
       window.removeEventListener("storage", handleSync);
     };
-  }, [profile.createdBoardIds]);
+  }, [profile.id, profile.createdBoardIds]);
 
   const mergedStats = useMemo(
     () => mergeAllGameStatsMaps(profile.allGameStats ?? null, localStats),
@@ -1231,9 +1258,48 @@ export function LoggedInProfileDashboard({
     return { totalPlayed, activeStreaks, bestStreak, completedToday };
   }, [mergedStats, todayKey]);
 
+  const unifiedCreatedItems = useMemo(() => {
+    const seen = new Set<string>();
+    const items: Array<{
+      id: string;
+      title: string;
+      subtitle: string;
+      shareUrl: string;
+      playHref: string;
+    }> = [];
+
+    for (const cp of createdCustomPuzzles) {
+      if (seen.has(cp.id)) continue;
+      seen.add(cp.id);
+      const gameName =
+        ALL_GAMES.find((g) => g.slug === cp.gameSlug)?.name ?? cp.gameSlug;
+      items.push({
+        id: cp.id,
+        title: cp.title,
+        subtitle: `${gameName} · By ${cp.creatorName}`,
+        shareUrl: cp.shareUrl,
+        playHref: `/games/${cp.gameSlug}?b=${encodeURIComponent(cp.id)}`,
+      });
+    }
+
+    for (const b of createdBoards) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      items.push({
+        id: b.id,
+        title: b.title,
+        subtitle: `21 Things · By ${b.creatorName}`,
+        shareUrl: `https://21games.ai${buildBoardPlayHref(b)}`,
+        playHref: buildBoardPlayHref(b),
+      });
+    }
+
+    return items;
+  }, [createdBoards, createdCustomPuzzles]);
+
   const totalCreatedCount = Math.max(
     profile.boardsCreatedCount,
-    createdBoards.length
+    unifiedCreatedItems.length
   );
 
   const handleOpenEditTab = () => {
@@ -1302,37 +1368,12 @@ export function LoggedInProfileDashboard({
     }
   };
 
-  const handleCopyBoardLink = async (board: TwentyOneThingsBoard) => {
-    const shareUrl = buildBoardShareUrl(board);
-    const creatorHandle =
-      profile.handle ||
-      board.creatorHandle ||
-      (board.creatorName
-        ? `@${board.creatorName.toLowerCase().replace(/[^a-z0-9_]/g, "")}`
-        : undefined);
-
-    await shareCustomGame({
-      title: board.title,
-      creatorHandle,
-      creatorName: board.creatorName || profile.displayName,
-      shareUrl,
-      gameName: "21 Things",
-      toastTitle: "Share Link & Blurb Copied!",
-      toastDescription: `Copied attributed share blurb for "${board.title}" to clipboard.`,
-    });
-
-    setCopiedBoardId(board.id);
-    setTimeout(() => {
-      setCopiedBoardId((prev) => (prev === board.id ? null : prev));
-    }, 1500);
-  };
-
   const handleSignOutClick = async () => {
     await signOut();
     toast({
       title: "Signed Out",
       description:
-        "You have signed out. Your on-device stats remain safely stored.",
+        "You have signed out cleanly. Sign back in anytime to restore your cloud stats.",
     });
   };
 
@@ -1531,7 +1572,10 @@ export function LoggedInProfileDashboard({
               </div>
             ) : (
               <div className="space-y-1.5 overflow-hidden">
-                {profile.recentPicks.slice(0, 2).map((pick, idx) => (
+                {(showAllPicks
+                  ? profile.recentPicks
+                  : profile.recentPicks.slice(0, 2)
+                ).map((pick, idx) => (
                   <div
                     key={`${pick.boardId}-${pick.pick1Item}-${idx}`}
                     className="rounded-xl border-2 border-black/15 bg-[#f7eef5]/60 p-2.5 flex items-center justify-between gap-2 overflow-hidden"
@@ -1560,15 +1604,26 @@ export function LoggedInProfileDashboard({
                     </Link>
                   </div>
                 ))}
+                {profile.recentPicks.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPicks((v) => !v)}
+                    className="w-full pt-0.5 text-center text-[11px] font-black text-[#9D50BB] hover:underline cursor-pointer"
+                  >
+                    {showAllPicks
+                      ? "Show less"
+                      : `Show all ${profile.recentPicks.length} #1 picks →`}
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* My Created 21 Things Boards (up to 2) */}
+          {/* My Created Custom Puzzles & Boards across all 5 Creator Mode games */}
           <div className="space-y-1.5 pt-2 border-t border-black/10 overflow-hidden">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[11px] font-black uppercase tracking-wider text-gray-700">
-                My Created 21 Things Boards ({createdBoards.length})
+                My Created Puzzles &amp; Boards ({unifiedCreatedItems.length})
               </span>
               <Link
                 href="/games/21-things?mode=create"
@@ -1576,45 +1631,56 @@ export function LoggedInProfileDashboard({
                 className="inline-flex items-center gap-1 text-[11px] font-black text-[#9D50BB] hover:underline"
               >
                 <Plus className="h-3 w-3" />
-                + Create Board
+                + Create
               </Link>
             </div>
 
-            {createdBoards.length === 0 ? (
+            {unifiedCreatedItems.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-2.5 text-xs text-gray-600 flex items-center justify-between gap-2">
                 <span className="truncate">
-                  Voice-brainstorm or type your own 21 Things board to share with friends.
+                  Create custom puzzles in 21 Things, 17 Syllables, 9 Rhymes, 6 Pics, or Connect 5 to share with friends.
                 </span>
                 <Link
                   href="/games/21-things?mode=create"
                   onClick={onNavigateAway}
                   className="shrink-0 font-black text-black underline"
                 >
-                  + Create Board
+                  + Create →
                 </Link>
               </div>
             ) : (
               <div className="space-y-1.5 overflow-hidden">
-                {createdBoards.slice(0, 2).map((createdBoard) => {
-                  const isCopied = copiedBoardId === createdBoard.id;
+                {(showAllCreated
+                  ? unifiedCreatedItems
+                  : unifiedCreatedItems.slice(0, 2)
+                ).map((item) => {
+                  const isCopied = copiedBoardId === item.id;
                   return (
                     <div
-                      key={createdBoard.id}
+                      key={item.id}
                       className="rounded-xl border-2 border-black/15 bg-gray-50 p-2.5 flex items-center justify-between gap-2 overflow-hidden"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="font-headline text-xs sm:text-sm font-black text-black truncate">
-                          {createdBoard.title}
+                          {item.title}
                         </div>
                         <div className="text-[11px] text-gray-500 truncate">
-                          By {createdBoard.creatorName} · 21 Tiles
+                          {item.subtitle}
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
-                          onClick={() => handleCopyBoardLink(createdBoard)}
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(item.shareUrl);
+                              setCopiedBoardId(item.id);
+                              window.setTimeout(() => setCopiedBoardId(null), 1500);
+                            } catch {
+                              // Ignore clipboard errors
+                            }
+                          }}
                           className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-white px-2 py-1 text-[11px] font-black text-black hover:bg-gray-100 transition-colors cursor-pointer"
                         >
                           {isCopied ? (
@@ -1631,7 +1697,7 @@ export function LoggedInProfileDashboard({
                         </button>
 
                         <Link
-                          href={buildBoardPlayHref(createdBoard)}
+                          href={item.playHref}
                           onClick={onNavigateAway}
                           className="inline-flex items-center gap-1 rounded-lg border-2 border-black bg-[#F9D423] px-2.5 py-1 text-[11px] font-black text-black hover:bg-[#f0c808] transition-colors"
                         >
@@ -1641,6 +1707,17 @@ export function LoggedInProfileDashboard({
                     </div>
                   );
                 })}
+                {unifiedCreatedItems.length > 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllCreated((v) => !v)}
+                    className="w-full pt-0.5 text-center text-[11px] font-black text-[#9D50BB] hover:underline cursor-pointer"
+                  >
+                    {showAllCreated
+                      ? "Show less"
+                      : `Show all ${unifiedCreatedItems.length} created puzzles →`}
+                  </button>
+                )}
               </div>
             )}
           </div>

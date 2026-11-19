@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   SIX_PICS_COUNT,
   SIX_PICS_PUZZLES,
@@ -29,6 +30,10 @@ interface SixPicsStudioTabProps {
   editReason?: string;
   aiConfig?: AIHelperConfig;
   syncVersion?: number;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
 }
 
@@ -38,28 +43,48 @@ export function SixPicsStudioTab({
   editReason,
   aiConfig,
   syncVersion = 0,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
 }: SixPicsStudioTabProps) {
-  const initial = useMemo<SixPicsEditorState>(() => {
+  const resolvedInitial = useMemo<SixPicsPuzzle | null>(() => {
     void syncVersion;
-    const resolved = getDailyPuzzleForGame<SixPicsPuzzle>(
-      "6-pics",
-      targetDate,
-      getAdminOverridesForGame("6-pics")
+    return (
+      getDailyPuzzleForGame<SixPicsPuzzle>(
+        "6-pics",
+        targetDate,
+        getAdminOverridesForGame("6-pics")
+      )?.puzzle ?? null
     );
-    return resolved
-      ? puzzleToSixPicsEditorState(resolved.puzzle)
-      : emptySixPicsEditorState();
   }, [targetDate, syncVersion]);
 
-  const defaultState = useMemo<SixPicsEditorState>(() => {
-    const resolved = getDailyPuzzleForGame<SixPicsPuzzle>("6-pics", targetDate, {});
-    return resolved
-      ? puzzleToSixPicsEditorState(resolved.puzzle)
-      : initial;
-  }, [targetDate, initial]);
+  const initial = useMemo<SixPicsEditorState>(
+    () =>
+      resolvedInitial
+        ? puzzleToSixPicsEditorState(resolvedInitial)
+        : emptySixPicsEditorState(),
+    [resolvedInitial]
+  );
+
+  const resolvedDefault = useMemo<SixPicsPuzzle | null>(
+    () => getDailyPuzzleForGame<SixPicsPuzzle>("6-pics", targetDate, {})?.puzzle ?? null,
+    [targetDate]
+  );
+
+  const defaultState = useMemo<SixPicsEditorState>(
+    () => (resolvedDefault ? puzzleToSixPicsEditorState(resolvedDefault) : initial),
+    [resolvedDefault, initial]
+  );
 
   const [editor, setEditor] = useState<SixPicsEditorState>(initial);
+  const [author, setAuthor] = useState<string>(
+    resolvedInitial?.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    resolvedInitial?.editor || defaultEditor || "Daily Editorial"
+  );
   const [rerollCount, setRerollCount] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -68,8 +93,67 @@ export function SixPicsStudioTab({
   if (prevInitial !== initial) {
     setPrevInitial(initial);
     setEditor(initial);
+    setAuthor(resolvedInitial?.author || defaultAuthor || "SOL Theory");
+    setEditorName(resolvedInitial?.editor || defaultEditor || "Daily Editorial");
     setErrors([]);
   }
+
+  const liveDraft = useMemo<SixPicsPuzzle>(() => {
+    const cleanAuthor = author.trim() || defaultAuthor || "SOL Theory";
+    const cleanEditor = editorName.trim() || defaultEditor || "Daily Editorial";
+    const built = draftToSixPicsPuzzle({
+      id: `6p-admin-${targetDate}`,
+      title: editor.title,
+      themeAnswer: editor.themeAnswer,
+      aliasesCsv: editor.aliasesCsv,
+      rows: editor.rows,
+      creatorName: cleanAuthor,
+    });
+    if (built.puzzle) {
+      return {
+        ...built.puzzle,
+        puzzleNumber: getPuzzleNumberForDate(targetDate),
+        author: cleanAuthor,
+        editor: cleanEditor,
+        customDate: targetDate,
+      };
+    }
+    return {
+      id: `6p-admin-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: editor.title.trim() || "6 Pics Draft",
+      themeAnswer: editor.themeAnswer.trim() || "Untitled Theme",
+      acceptedAliases: editor.aliasesCsv
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      author: cleanAuthor,
+      editor: cleanEditor,
+      images: Array.from({ length: 6 }, (_, i) => {
+        const row = editor.rows[i];
+        return {
+          scene: row?.scene ?? "sun",
+          caption: row?.caption?.trim() || `Picture ${i + 1}`,
+          aliases: (row?.aliasesCsv ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          hint: row?.hint?.trim() || undefined,
+          imageUrl: row?.imageUrl?.trim() || undefined,
+          initialPiece: row?.initialPiece,
+        };
+      }),
+      customDate: targetDate,
+    };
+  }, [author, defaultAuthor, defaultEditor, editor, editorName, targetDate]);
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(liveDraft);
+  }, [liveDraft]);
 
   const handleReroll = () => {
     const next = rerollCount + 1;
@@ -78,6 +162,7 @@ export function SixPicsStudioTab({
       SIX_PICS_PUZZLES[(next * 11 + targetDate.length) % SIX_PICS_PUZZLES.length]!;
     setEditor(puzzleToSixPicsEditorState(pick));
     setErrors([]);
+    onDirty?.();
   };
 
   const handleClearAll = () => {
@@ -96,29 +181,38 @@ export function SixPicsStudioTab({
         initialPiece: undefined,
       })),
     });
+    setAuthor("");
+    setEditorName("");
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRevertDefault = () => {
     setEditor(defaultState);
+    setAuthor(resolvedDefault?.author || defaultAuthor || "SOL Theory");
+    setEditorName(resolvedDefault?.editor || defaultEditor || "Daily Editorial");
     setErrors([]);
+    onDirty?.();
   };
 
   const buildPuzzle = (): SixPicsPuzzle | null => {
+    const cleanAuthor = author.trim() || defaultAuthor || "SOL Theory";
+    const cleanEditor = editorName.trim() || defaultEditor || "Daily Editorial";
     const { puzzle, errors: e } = draftToSixPicsPuzzle({
       id: `6p-admin-${targetDate}`,
       title: editor.title,
       themeAnswer: editor.themeAnswer,
       aliasesCsv: editor.aliasesCsv,
       rows: editor.rows,
-      creatorName: "SOL Theory",
+      creatorName: cleanAuthor,
     });
     setErrors(e);
     if (!puzzle) return null;
     return {
       ...puzzle,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
-      editor: "Daily Editorial",
+      author: cleanAuthor,
+      editor: cleanEditor,
       customDate: targetDate,
     };
   };
@@ -140,7 +234,7 @@ export function SixPicsStudioTab({
       details: [
         `Visible overarching theme: ${puzzle.themeAnswer}`,
         `${SIX_PICS_COUNT} jigsaw-covered pictures (36 pts max)`,
-        `Supports uploaded device photos, optional hints & accepted synonyms`,
+        `Author: ${puzzle.author} · Editor: ${puzzle.editor}`,
       ],
       playImmediately,
     });
@@ -202,8 +296,50 @@ export function SixPicsStudioTab({
         </p>
       )}
 
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+            Author
+          </label>
+          <Input
+            disabled={!canEdit}
+            value={author}
+            onChange={(e) => {
+              setAuthor(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultAuthor}
+            className="text-base sm:text-sm"
+            data-testid="admin-6-pics-author"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+            Editor
+          </label>
+          <Input
+            disabled={!canEdit}
+            value={editorName}
+            onChange={(e) => {
+              setEditorName(e.target.value);
+              onDirty?.();
+            }}
+            placeholder={defaultEditor}
+            className="text-base sm:text-sm"
+            data-testid="admin-6-pics-editor"
+          />
+        </div>
+      </div>
+
       <fieldset disabled={!canEdit} className="contents">
-        <SixPicsEditor value={editor} onChange={setEditor} aiConfig={aiConfig} />
+        <SixPicsEditor
+          value={editor}
+          onChange={(next) => {
+            setEditor(next);
+            onDirty?.();
+          }}
+          aiConfig={aiConfig}
+        />
       </fieldset>
 
       {errors.length > 0 && (

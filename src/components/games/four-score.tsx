@@ -30,7 +30,18 @@ import {
   type FourScoreOperator,
   type FourScorePuzzle,
 } from "@/data/puzzles/four-score";
-import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
+import { getDailyPuzzleForGame } from "@/lib/daily-engine";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playRevealSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import {
   getAdminOverridesForGame,
   getGameProgress,
@@ -43,6 +54,7 @@ import { GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { Button } from "@/components/ui/button";
 import { ResultShareButtons } from "./result-share-buttons";
+import { WinFlourish } from "./win-flourish";
 import { cn } from "@/lib/utils";
 
 const subscribeNoop = () => () => {};
@@ -112,7 +124,7 @@ export function FourScoreGame() {
 function FourScoreDaily() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const todayKey = useLiveLocalDateKey();
   const dateKey =
     isValidDateKey(dateParam) && dateParam <= todayKey ? dateParam : todayKey;
   const [syncVersion, setSyncVersion] = useState(0);
@@ -152,6 +164,7 @@ interface FourScoreBoardProps {
 }
 
 function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
+  const liveTodayKey = useLiveLocalDateKey();
   const saved = useMemo<SavedFourScoreProgress | null>(() => {
     const s = getGameProgress<SavedFourScoreProgress>(
       "four-score",
@@ -184,12 +197,15 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
 
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const digitBufferRef = useRef<string>("");
+  const digitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordedRef = useRef(false);
 
   const current = history[history.length - 1]!;
   const unusedOpsCount = current.ops.filter((o) => !o.used).length;
   const fullBoardUsed = current.tiles.length === 1 && unusedOpsCount === 0;
   const won = fullBoardUsed && current.tiles[0]!.value === FOUR_SCORE_TARGET;
+  const solved = won;
   const missedFinal = fullBoardUsed && current.tiles[0]!.value !== FOUR_SCORE_TARGET;
   const hasSavedProgress = history.length > 1;
 
@@ -213,6 +229,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     () => () => {
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+      if (digitTimerRef.current) clearTimeout(digitTimerRef.current);
     },
     []
   );
@@ -228,7 +245,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     });
   }, [dateKey, puzzle.id, puzzleHash, history, undoCount, extraHintNumbers]);
 
-  // Record win once on reaching 80 with full board used.
+  // Record win once on reaching 80 with full board used (never double-counted in Practice mode).
   useEffect(() => {
     if (!won || recordedRef.current) return;
     recordedRef.current = true;
@@ -238,6 +255,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
   }, [won, dateKey]);
 
   const triggerIllegal = useCallback((msg: string) => {
+    playErrorSfx();
     setErrorMsg(msg);
     setShaking(true);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
@@ -260,6 +278,15 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       const nextOps = current.ops.map((o) =>
         o.id === opBadge.id ? { ...o, used: true } : o
       );
+      const isFinalStep = nextTiles.length === 1 && nextOps.every((o) => o.used);
+      if (isFinalStep && nextTiles[0]!.value === FOUR_SCORE_TARGET) {
+        playSnapSfx(history.length);
+        playWinChimeSfx();
+      } else if (isFinalStep) {
+        playErrorSfx();
+      } else {
+        playSnapSfx(history.length);
+      }
       setHistory([
         ...history,
         {
@@ -290,6 +317,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
 
       // Clicking the already-selected first tile deselects it.
       if (selectedTileId === tile.id) {
+        playTapSfx(0.9);
         setSelectedTileId(null);
         setSelectedOpId(null);
         return;
@@ -299,6 +327,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       if (selectedTileId && armedOp && !isUnaryOperator(armedOp.op)) {
         const firstTile = current.tiles.find((t) => t.id === selectedTileId);
         if (!firstTile) {
+          playTapSfx();
           setSelectedTileId(tile.id);
           setSelectedOpId(null);
           return;
@@ -334,6 +363,15 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
         const nextOps = current.ops.map((o) =>
           o.id === armedOp.id ? { ...o, used: true } : o
         );
+        const isFinalStep = nextTiles.length === 1 && nextOps.every((o) => o.used);
+        if (isFinalStep && nextTiles[0]!.value === FOUR_SCORE_TARGET) {
+          playSnapSfx(history.length);
+          playWinChimeSfx();
+        } else if (isFinalStep) {
+          playErrorSfx();
+        } else {
+          playSnapSfx(history.length);
+        }
         setHistory([
           ...history,
           {
@@ -349,6 +387,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       }
 
       // Otherwise select/switch the active first tile.
+      playTapSfx();
       setSelectedTileId(tile.id);
     },
     [
@@ -367,6 +406,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
     (badge: BoardOpBadge) => {
       if (won || badge.used) return;
       if (selectedOpId === badge.id) {
+        playTapSfx(0.9);
         setSelectedOpId(null);
         return;
       }
@@ -378,6 +418,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
           return;
         }
       }
+      playTapSfx(1.08);
       setSelectedOpId(badge.id);
     },
     [won, selectedOpId, selectedTileId, current.tiles, applyUnaryStep]
@@ -385,6 +426,7 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
 
   const handleUndo = useCallback(() => {
     if (history.length <= 1 || won) return;
+    playTapSfx(0.9);
     setHistory((h) => h.slice(0, -1));
     setUndoCount((c) => c + 1);
     setSelectedTileId(null);
@@ -394,12 +436,171 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
 
   const handleReset = useCallback(() => {
     if (history.length <= 1 || won) return;
+    playTapSfx(0.85);
     setHistory([initialSnapshot(puzzle)]);
     setUndoCount((c) => c + 1);
     setSelectedTileId(null);
     setSelectedOpId(null);
     setErrorMsg(null);
   }, [history.length, won, puzzle]);
+
+  const handlePracticeReset = useCallback(() => {
+    playTapSfx();
+    recordedRef.current = true;
+    setHistory([initialSnapshot(puzzle)]);
+    setSelectedTileId(null);
+    setSelectedOpId(null);
+    setErrorMsg(null);
+  }, [puzzle]);
+
+  // Desktop keyboard shortcuts when playing (and no modal/input is focused):
+  // digits 0–9, +, -, * (x), /, ^, s (square root √ / square), Backspace/u (Undo), Escape (Clear/Reset).
+  useEffect(() => {
+    if (!splashDismissed || won) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isGameTimerExternallyPaused()) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = e.key;
+
+      if (key === "Backspace" || key === "u" || key === "U") {
+        if (history.length > 1) {
+          e.preventDefault();
+          handleUndo();
+        }
+        return;
+      }
+
+      if (key === "Escape") {
+        if (history.length > 1) {
+          e.preventDefault();
+          handleReset();
+        } else if (selectedTileId !== null || selectedOpId !== null) {
+          e.preventDefault();
+          playTapSfx(0.9);
+          setSelectedTileId(null);
+          setSelectedOpId(null);
+        }
+        return;
+      }
+
+      const unusedOps = current.ops.filter((o) => !o.used);
+      let matchedOp: BoardOpBadge | undefined;
+      if (key === "+") {
+        matchedOp = unusedOps.find((o) => o.op === "+");
+      } else if (key === "-") {
+        matchedOp = unusedOps.find(
+          (o) => o.op === "−" || (o.op as string) === "-"
+        );
+      } else if (key === "*" || key === "x" || key === "X") {
+        matchedOp = unusedOps.find(
+          (o) => o.op === "×" || (o.op as string) === "*"
+        );
+      } else if (key === "/") {
+        matchedOp = unusedOps.find(
+          (o) => o.op === "÷" || (o.op as string) === "/"
+        );
+      } else if (key === "^") {
+        matchedOp =
+          unusedOps.find((o) => o.op === "xʸ") ??
+          unusedOps.find((o) => o.op === "x²");
+      } else if (key === "s" || key === "S") {
+        matchedOp =
+          unusedOps.find((o) => String(o.op).includes("√")) ??
+          unusedOps.find((o) => isUnaryOperator(o.op));
+      }
+
+      if (matchedOp) {
+        e.preventDefault();
+        digitBufferRef.current = "";
+        handleOpClick(matchedOp);
+        return;
+      }
+
+      if (/^[0-9]$/.test(key)) {
+        e.preventDefault();
+        const armedBinary =
+          selectedOpId !== null &&
+          Boolean(
+            current.ops.find(
+              (o) => o.id === selectedOpId && !o.used && !isUnaryOperator(o.op)
+            )
+          );
+        const pool =
+          armedBinary && selectedTileId
+            ? current.tiles.filter((t) => t.id !== selectedTileId)
+            : current.tiles;
+
+        const nextBuf = !armedBinary ? `${digitBufferRef.current}${key}` : key;
+        digitBufferRef.current = nextBuf;
+        if (digitTimerRef.current) clearTimeout(digitTimerRef.current);
+        digitTimerRef.current = setTimeout(() => {
+          digitBufferRef.current = "";
+        }, 550);
+
+        let candidate: BoardTile | undefined;
+        if (nextBuf.length > 1) {
+          candidate = pool.find((t) => String(t.value) === nextBuf);
+        }
+        if (!candidate) {
+          const exactMatches = pool.filter((t) => String(t.value) === key);
+          if (exactMatches.length > 0) {
+            const curIdx = exactMatches.findIndex((t) => t.id === selectedTileId);
+            candidate =
+              !armedBinary && curIdx >= 0
+                ? exactMatches[(curIdx + 1) % exactMatches.length]
+                : exactMatches[0];
+          } else {
+            const prefixMatches = pool.filter((t) =>
+              String(t.value).startsWith(key)
+            );
+            if (prefixMatches.length > 0) {
+              const curIdx = prefixMatches.findIndex(
+                (t) => t.id === selectedTileId
+              );
+              candidate =
+                !armedBinary && curIdx >= 0
+                  ? prefixMatches[(curIdx + 1) % prefixMatches.length]
+                  : prefixMatches[0];
+            }
+          }
+        }
+
+        if (candidate) {
+          if (armedBinary) {
+            digitBufferRef.current = "";
+          }
+          handleTileClick(candidate);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    splashDismissed,
+    won,
+    history.length,
+    selectedTileId,
+    selectedOpId,
+    current.ops,
+    current.tiles,
+    handleUndo,
+    handleReset,
+    handleOpClick,
+    handleTileClick,
+  ]);
 
   const liveEquationText = useMemo(() => {
     if (won) {
@@ -464,22 +665,37 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       }),
     [puzzle.puzzleNumber, puzzle.digits.length, puzzle.operators.length, undoCount]
   );
+  const shareUrl =
+    dateKey !== liveTodayKey
+      ? `https://21games.ai/games/four-score?date=${dateKey}`
+      : "https://21games.ai/games/four-score";
 
   if (!splashDismissed) {
     return (
-      <GameSplashScreen
+      <GameShell
         gameSlug="four-score"
         gameTitle="Four Score"
-        tagline="Use every number tile and operator badge once to reach the exact score of 80."
-        theme={puzzle.title}
-        author={puzzle.author}
         puzzleNumber={puzzle.puzzleNumber}
         dateKey={dateKey}
-        showCreate={false}
-        isCompletedToday={isDateCompleted("four-score", dateKey) || won}
-        hasSavedProgress={hasSavedProgress && !won}
-        onPlay={() => setSplashDismissed(true)}
-      />
+        author={puzzle.author}
+      >
+        <GameSplashScreen
+          gameSlug="four-score"
+          gameTitle="Four Score"
+          tagline="Use every number tile and operator badge once to reach the exact score of 80."
+          theme={puzzle.title}
+          author={puzzle.author}
+          puzzleNumber={puzzle.puzzleNumber}
+          dateKey={dateKey}
+          showCreate={false}
+          isCompletedToday={isDateCompleted("four-score", dateKey) || won}
+          hasSavedProgress={hasSavedProgress && !won}
+          onPlay={() => {
+            playTapSfx();
+            setSplashDismissed(true);
+          }}
+        />
+      </GameShell>
     );
   }
 
@@ -491,12 +707,13 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
       dateKey={dateKey}
       author={puzzle.author}
     >
+      <WinFlourish active={solved} />
       <div className="max-w-lg mx-auto px-3 sm:px-4 py-2 space-y-4">
         {/* Top-Left Formula Guide + Target 80 + Live Equation Builder Banner */}
         <div
           className={cn(
             "rounded-2xl border-2 border-black bg-white p-3.5 sm:p-4 space-y-2.5 shadow-[4px_4px_0px_#000]",
-            shaking && "animate-bounce border-red-600"
+            shaking && "animate-bounce motion-reduce:animate-none border-red-600"
           )}
           data-testid="four-score-banner"
         >
@@ -510,12 +727,15 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
                 {canRevealMoreHints && (
                   <button
                     type="button"
-                    onClick={() => setExtraHintNumbers((n) => n + 1)}
-                    className="inline-flex items-center gap-1 rounded-full border border-black bg-[#F9D423] hover:bg-[#F9D423]/80 px-2 py-0.5 text-[10px] font-black text-black shadow-[1px_1px_0px_#000]"
+                    onClick={() => {
+                      playRevealSfx();
+                      setExtraHintNumbers((n) => n + 1);
+                    }}
+                    className="inline-flex min-h-[36px] items-center gap-1 rounded-full border border-black bg-[#F9D423] hover:bg-[#F9D423]/80 px-3 py-1 text-xs font-black text-black shadow-[1px_1px_0px_#000] cursor-pointer"
                     data-testid="four-score-reveal-hint"
                     title="Reveal one more number in the formula guide"
                   >
-                    <Lightbulb className="h-2.5 w-2.5" />
+                    <Lightbulb className="h-3.5 w-3.5" />
                     +1 #
                   </button>
                 )}
@@ -600,10 +820,11 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
                   key={tile.id}
                   type="button"
                   disabled={won}
+                  aria-pressed={isSelected}
                   onClick={() => handleTileClick(tile)}
                   data-testid={`four-score-tile-${tile.id}`}
                   className={cn(
-                    "min-h-20 rounded-2xl border-2 border-black px-3 py-2.5 flex flex-col items-center justify-center transition-all select-none",
+                    "min-h-20 rounded-2xl border-2 border-black px-3 py-2.5 flex flex-col items-center justify-center transition-all motion-reduce:transition-none select-none cursor-pointer disabled:cursor-default",
                     isSelected
                       ? "bg-[#F9D423] -translate-y-0.5 shadow-[4px_4px_0px_#000]"
                       : won
@@ -641,10 +862,11 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
                   key={badge.id}
                   type="button"
                   disabled={badge.used || won}
+                  aria-pressed={isSelected}
                   onClick={() => handleOpClick(badge)}
                   data-testid={`four-score-op-${badge.id}`}
                   className={cn(
-                    "h-12 min-w-14 px-3.5 rounded-full border-2 font-headline font-black text-lg transition-all select-none",
+                    "h-12 min-w-14 px-3.5 rounded-full border-2 font-headline font-black text-lg transition-all motion-reduce:transition-none select-none cursor-pointer",
                     badge.used
                       ? "bg-neutral-200 border-neutral-300 text-neutral-400 line-through cursor-not-allowed"
                       : isSelected
@@ -725,8 +947,19 @@ function FourScoreBoard({ puzzle, puzzleHash, dateKey }: FourScoreBoardProps) {
             <ResultShareButtons
               title={`Four Score #${puzzle.puzzleNumber}`}
               text={shareText}
-              url="https://21games.ai/games/four-score"
+              url={shareUrl}
             />
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handlePracticeReset}
+              className="w-full border-2 border-black font-bold"
+              data-testid="four-score-practice-reset"
+            >
+              <RotateCcw className="h-4 w-4 mr-1.5" />
+              Play Again (Practice)
+            </Button>
 
             <div className="flex justify-center pt-1">
               <Link

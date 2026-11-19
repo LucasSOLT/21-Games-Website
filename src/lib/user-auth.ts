@@ -1,10 +1,8 @@
-import {
-  TWENTY_ONE_THINGS_BOARDS,
-  type TwentyOneJourney,
-} from "@/data/puzzles/21-things";
-import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/daily-engine";
+import type { TwentyOneJourney } from "@/data/puzzles/21-things";
+import { daysBetweenDateKeys, getLocalDateKey } from "@/lib/date-keys";
 import { ALL_GAME_SLUGS } from "@/lib/games-config";
 import {
+  clearAllLocalUserGameData,
   DEFAULT_STATS,
   getAdmin21ThingsOverrides,
   getAllLocalGameStats,
@@ -20,6 +18,10 @@ import {
   type AllGameStatsMap,
   type GameStats,
 } from "@/lib/game-storage";
+import {
+  getMyCreatedCustomPuzzles,
+  syncMyCustomPuzzlesFromCloud,
+} from "@/lib/custom-puzzles";
 import { assetPath } from "@/lib/asset-path";
 import {
   clearAuthStorage,
@@ -288,11 +290,30 @@ export function isGameMaster(profile: UserProfile | null): boolean {
 }
 
 export function isAdmin(profile: UserProfile | null): boolean {
-  return isGameMaster(profile);
+  if (!profile || profile.isBanned) return false;
+  if (isGameMaster(profile)) return true;
+  if (!profile.email || typeof profile.email !== "string") return false;
+  const email = normalizeEmail(profile.email);
+  if (!email || profile.role !== "admin") return false;
+
+  if (typeof window !== "undefined") {
+    if (profile.authMode !== "supabase") return false;
+    if (!activeVerifiedJwtEmail || activeVerifiedJwtEmail !== email) {
+      return false;
+    }
+    if (
+      !lastVerifiedSessionProfile ||
+      normalizeEmail(lastVerifiedSessionProfile.email) !== email ||
+      lastVerifiedSessionProfile.role !== "admin"
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function canAccessPuzzleStudio(profile: UserProfile | null): boolean {
-  return isGameMaster(profile);
+  return isGameMaster(profile) || isAdmin(profile);
 }
 
 export interface DateEditPermission {
@@ -445,11 +466,11 @@ function resolveBoardMetadata(boardId: string): {
     }
   }
 
-  const dailyMatch = TWENTY_ONE_THINGS_BOARDS.find((b) => b.id === boardId);
-  if (dailyMatch) {
+  const dateMatch = boardId.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
     return {
-      boardTitle: dailyMatch.title,
-      dateKey: dailyMatch.customDate ?? getLocalDateKey(),
+      boardTitle: `21 Things (${dateMatch[1]})`,
+      dateKey: dateMatch[1]!,
     };
   }
 
@@ -457,6 +478,69 @@ function resolveBoardMetadata(boardId: string): {
     boardTitle: "21 Things Board",
     dateKey: getLocalDateKey(),
   };
+}
+
+interface CloudOneWinHistoryItem {
+  dateKey: string;
+  displayText: string;
+  normalizedKey: string;
+  rank: number;
+  sharedCount: number;
+  submittedAt: string;
+}
+
+const ONE_WIN_LOCAL_HISTORY_KEY = "solgames_v1_1w_history";
+
+function readLocalOneWinHistoryRaw(): CloudOneWinHistoryItem[] {
+  const storage = getSafeLocalStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(ONE_WIN_LOCAL_HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (x): x is CloudOneWinHistoryItem =>
+        Boolean(
+          x &&
+            typeof x.dateKey === "string" &&
+            typeof x.displayText === "string" &&
+            typeof x.normalizedKey === "string"
+        )
+    );
+  } catch {
+    return [];
+  }
+}
+
+function mergeRemoteOneWinHistoryIntoLocal(rawRemote: unknown): void {
+  if (!Array.isArray(rawRemote) || rawRemote.length === 0) return;
+  const storage = getSafeLocalStorage();
+  if (!storage) return;
+  try {
+    const byDate = new Map<string, CloudOneWinHistoryItem>();
+    for (const item of rawRemote) {
+      if (
+        item &&
+        typeof item === "object" &&
+        typeof (item as CloudOneWinHistoryItem).dateKey === "string" &&
+        typeof (item as CloudOneWinHistoryItem).displayText === "string" &&
+        typeof (item as CloudOneWinHistoryItem).normalizedKey === "string"
+      ) {
+        const entry = item as CloudOneWinHistoryItem;
+        byDate.set(entry.dateKey, entry);
+      }
+    }
+    for (const localItem of readLocalOneWinHistoryRaw()) {
+      byDate.set(localItem.dateKey, localItem);
+    }
+    const merged = Array.from(byDate.values())
+      .sort((a, b) => b.dateKey.localeCompare(a.dateKey))
+      .slice(0, 180);
+    storage.setItem(ONE_WIN_LOCAL_HISTORY_KEY, JSON.stringify(merged));
+  } catch {
+    // Ignore storage errors
+  }
 }
 
 function journeyToResonancePick(
@@ -865,6 +949,14 @@ async function fetchSupabaseUserProfileRow(
 
   if (!data) return null;
 
+  const rawAllGameStats =
+    data.all_game_stats && typeof data.all_game_stats === "object"
+      ? (data.all_game_stats as Record<string, unknown>)
+      : null;
+  if (rawAllGameStats && "_oneWinHistory" in rawAllGameStats) {
+    mergeRemoteOneWinHistoryIntoLocal(rawAllGameStats._oneWinHistory);
+  }
+
   return {
     id: String(data.id || userId),
     email: normalizeEmail(String(data.email || email)),
@@ -915,6 +1007,12 @@ async function upsertSupabaseUserProfileRow(
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
+  const oneWinHistory = readLocalOneWinHistoryRaw().slice(0, 120);
+  const allGameStatsPayload =
+    oneWinHistory.length > 0
+      ? { ...profile.allGameStats, _oneWinHistory: oneWinHistory }
+      : profile.allGameStats;
+
   // Only user-editable columns are ever sent. role / is_banned / banned_* / email / id
   // are protected server-side (column grants + trigger) and managed exclusively by the
   // signup trigger and the Game Master RPCs.
@@ -924,7 +1022,7 @@ async function upsertSupabaseUserProfileRow(
     avatar_color: profile.avatarColor,
     connect5_stats: profile.connect5Stats,
     twenty_one_stats: profile.twentyOneStats,
-    all_game_stats: profile.allGameStats,
+    all_game_stats: allGameStatsPayload,
     recent_picks: profile.recentPicks,
     created_board_ids: profile.createdBoardIds,
     updated_at: profile.lastSyncedAt,
@@ -1260,7 +1358,7 @@ export function ensureProfileSyncListenerRegistered(): void {
   if (isContinuousSyncRegistered) return;
   isContinuousSyncRegistered = true;
 
-  registerProfileSyncCallback(async () => {
+  const triggerActiveSync = async () => {
     if (isSyncInProgress) {
       pendingResyncAfterCurrent = true;
       return;
@@ -1275,60 +1373,124 @@ export function ensureProfileSyncListenerRegistered(): void {
       return;
     }
     await syncProfileAndMergeGuestStats(active);
-  });
+  };
+
+  registerProfileSyncCallback(triggerActiveSync);
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("solgames:custom-puzzle-created", () => {
+      void triggerActiveSync();
+    });
+  }
+}
+
+export interface SyncProfileOptions {
+  skipRemoteFetchBeforeMerge?: boolean;
+  skipWriteIfUnchanged?: boolean;
+  remoteBaseline?: Partial<UserProfile> | null;
 }
 
 /**
- * Merges local guest GameStats ("connect-5" & "21-things"), created 21 Things boards,
- * and local player journeys into `baseProfile`, writes the merged GameStats back to
- * localStorage via `setGameStats()`, saves the updated UserProfile to localStorage
- * and Supabase `public.user_profiles`, and registers continuous sync with `game-storage.ts`.
+ * Merges local guest GameStats (all 9 games), all 5 Creator Mode custom puzzles & 21 Things boards,
+ * 1 Win personal history, and local player journeys into `baseProfile`, writes merged GameStats back
+ * to localStorage, and persists safely to Supabase without overwriting newer wins from another device.
  */
 export async function syncProfileAndMergeGuestStats(
-  baseProfile: UserProfile
+  baseProfile: UserProfile,
+  options?: SyncProfileOptions
 ): Promise<UserProfile> {
   ensureProfileSyncListenerRegistered();
   isSyncInProgress = true;
 
   let syncedProfile: UserProfile;
   try {
-    const normalizedBase = normalizeUserProfile(baseProfile);
+    let workingBase = normalizeUserProfile(baseProfile);
+
+    // Fetch latest remote row before merging on incremental updates so Tab A never overwrites Tab B
+    if (
+      !options?.skipRemoteFetchBeforeMerge &&
+      isSupabaseConfigured &&
+      activeVerifiedJwtEmail &&
+      normalizeEmail(workingBase.email) === activeVerifiedJwtEmail
+    ) {
+      try {
+        const latestRemote = await fetchSupabaseUserProfileRow(
+          workingBase.id,
+          workingBase.email
+        );
+        if (latestRemote && !latestRemote.isBanned) {
+          workingBase = normalizeUserProfile({
+            ...workingBase,
+            connect5Stats: mergeTwoGameStats(
+              workingBase.connect5Stats,
+              latestRemote.connect5Stats ?? DEFAULT_STATS
+            ),
+            twentyOneStats: mergeTwoGameStats(
+              workingBase.twentyOneStats,
+              latestRemote.twentyOneStats ?? DEFAULT_STATS
+            ),
+            allGameStats: mergeAllGameStatsMaps(
+              workingBase.allGameStats,
+              latestRemote.allGameStats
+            ),
+            createdBoardIds: Array.from(
+              new Set([
+                ...workingBase.createdBoardIds,
+                ...(latestRemote.createdBoardIds ?? []),
+              ])
+            ),
+            recentPicks: mergeRecentPicks(
+              [
+                ...(latestRemote.recentPicks ?? []),
+                ...workingBase.recentPicks,
+              ],
+              []
+            ),
+          });
+        }
+      } catch {
+        // Offline or transient error: proceed with local merge
+      }
+    }
 
     const localAll = getAllLocalGameStats();
-    const mergedAll = mergeAllGameStatsMaps(normalizedBase.allGameStats, localAll);
+    const mergedAll = mergeAllGameStatsMaps(workingBase.allGameStats, localAll);
     mergedAll["connect-5"] = mergeTwoGameStats(
       mergedAll["connect-5"],
-      mergeTwoGameStats(normalizedBase.connect5Stats, getGameStats("connect-5"))
+      mergeTwoGameStats(workingBase.connect5Stats, getGameStats("connect-5"))
     );
     mergedAll["21-things"] = mergeTwoGameStats(
       mergedAll["21-things"],
-      mergeTwoGameStats(normalizedBase.twentyOneStats, getGameStats("21-things"))
+      mergeTwoGameStats(workingBase.twentyOneStats, getGameStats("21-things"))
     );
 
     const mergedC5 = mergedAll["connect-5"];
     const merged21 = mergedAll["21-things"];
 
-    // Write merged stats back to localStorage for all 9 games so GameShell & game boards reflect merged streaks
     for (const slug of ALL_GAME_SLUGS) {
-      setGameStats(slug, mergedAll[slug]);
+      const existingRaw = getGameStats(slug);
+      if (JSON.stringify(existingRaw) !== JSON.stringify(mergedAll[slug])) {
+        setGameStats(slug, mergedAll[slug]);
+      }
     }
 
-    // Merge user-created 21 Things board IDs
+    // Merge user-created IDs across ALL 5 Creator Mode games (21 Things + 17s / 9r / 6p / c5)
     const localCreatedBoards = getUserCreated21Boards();
+    const localCustomPuzzles = getMyCreatedCustomPuzzles();
     const mergedCreatedBoardIds = Array.from(
       new Set([
         ...localCreatedBoards.map((b) => b.id),
-        ...normalizedBase.createdBoardIds,
+        ...localCustomPuzzles.map((p) => p.id),
+        ...workingBase.createdBoardIds,
       ])
     ).filter(Boolean);
 
-    // Merge recent #1 resonance picks from local journeys
     const localJourneys = getAllLocalPlayerJourneys();
-    const priorPicks = normalizedBase.recentPicks;
+    const priorPicks = workingBase.recentPicks;
     const mergedRecentPicks = mergeRecentPicks(priorPicks, localJourneys);
 
     syncedProfile = {
-      ...normalizedBase,
+      ...workingBase,
       connect5Stats: mergedC5,
       twentyOneStats: merged21,
       allGameStats: mergedAll,
@@ -1339,7 +1501,25 @@ export async function syncProfileAndMergeGuestStats(
     };
 
     saveActiveUserProfile(syncedProfile);
-    await upsertSupabaseUserProfileRow(syncedProfile);
+
+    const baseline = options?.remoteBaseline;
+    const isUnchangedFromBaseline =
+      options?.skipWriteIfUnchanged === true &&
+      baseline !== null &&
+      baseline !== undefined &&
+      baseline.displayName === syncedProfile.displayName &&
+      baseline.handle === syncedProfile.handle &&
+      baseline.avatarColor === syncedProfile.avatarColor &&
+      JSON.stringify(baseline.allGameStats) ===
+        JSON.stringify(syncedProfile.allGameStats) &&
+      JSON.stringify(baseline.createdBoardIds ?? []) ===
+        JSON.stringify(syncedProfile.createdBoardIds) &&
+      JSON.stringify(baseline.recentPicks ?? []) ===
+        JSON.stringify(syncedProfile.recentPicks);
+
+    if (!isUnchangedFromBaseline) {
+      await upsertSupabaseUserProfileRow(syncedProfile);
+    }
   } finally {
     isSyncInProgress = false;
   }
@@ -1397,8 +1577,6 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
     activeVerifiedJwtEmail = email;
     activeVerifiedJwtToken = session.access_token;
 
-    // Throws on a lookup error => handled by the catch below, which FAILS CLOSED
-    // (no verified profile) instead of treating the account as "not banned".
     const remoteRow = await fetchSupabaseUserProfileRow(sessionUser.id, email);
 
     if (remoteRow?.isBanned) {
@@ -1412,6 +1590,9 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
       purgeActiveUserStorageSilently();
       return null;
     }
+
+    // Hydrate user's custom puzzles across all 5 Creator Mode games in background
+    void syncMyCustomPuzzlesFromCloud(sessionUser.id);
 
     const meta = sessionUser.user_metadata ?? {};
     const localActive = getActiveUserProfile();
@@ -1462,7 +1643,11 @@ export async function restoreUserSession(): Promise<UserProfile | null> {
       authMode: "supabase",
     });
 
-    const synced = await syncProfileAndMergeGuestStats(baseProfile);
+    const synced = await syncProfileAndMergeGuestStats(baseProfile, {
+      skipRemoteFetchBeforeMerge: true,
+      skipWriteIfUnchanged: remoteRow !== null,
+      remoteBaseline: remoteRow,
+    });
     markServerVerified(synced);
     saveActiveUserProfile(synced);
     return synced;
@@ -2023,6 +2208,7 @@ export async function signOutUser(): Promise<void> {
   clearServerVerifiedState();
   purgeSupabaseAuthTokenStorage();
   saveActiveUserProfile(null);
+  clearAllLocalUserGameData();
 }
 
 export async function updateUserProfile(
@@ -2113,7 +2299,8 @@ export async function updateUserProfile(
 }
 
 export function subscribeToAuthChanges(
-  listener: (profile: UserProfile | null) => void
+  listener: (profile: UserProfile | null) => void,
+  options?: { onPasswordRecovery?: () => void }
 ): () => void {
   ensureProfileSyncListenerRegistered();
 
@@ -2137,9 +2324,10 @@ export function subscribeToAuthChanges(
       return;
     }
 
-    // While a sign-in / restore / profile sync is running, its owner emits the final
-    // event once the verified profile is ready; do not start a competing verification.
-    if (isSyncInProgress) return;
+    if (isSyncInProgress) {
+      pendingResyncAfterCurrent = true;
+      return;
+    }
 
     try {
       const { data, error } = await supabase.auth.getSession();
@@ -2156,10 +2344,6 @@ export function subscribeToAuthChanges(
       const sessionEmail =
         sessionUser?.email ? normalizeEmail(sessionUser.email) : null;
 
-      // Fast path ONLY when this exact user + token was verified server-side
-      // (auth.getUser + profile/ban lookup) within the last VERIFICATION_TTL_MS.
-      // Anything else (first load, other tab, swapped token, missing sessionUser.email,
-      // stale cache) goes through restoreUserSession() -> getUser() verification.
       const cached = lastVerifiedSessionProfile;
       const cachedIsFresh =
         sessionEmail !== null &&
@@ -2228,6 +2412,10 @@ export function subscribeToAuthChanges(
     const supabase = getSupabaseClient();
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "PASSWORD_RECOVERY") {
+          options?.onPasswordRecovery?.();
+          return;
+        }
         if (event === "SIGNED_OUT") {
           clearServerVerifiedState();
           purgeSupabaseAuthTokenStorage();
@@ -2238,6 +2426,10 @@ export function subscribeToAuthChanges(
           event === "TOKEN_REFRESHED" ||
           event === "USER_UPDATED"
         ) {
+          if (isSyncInProgress) {
+            pendingResyncAfterCurrent = true;
+            return;
+          }
           void restoreUserSession().then((profile) => {
             listener(profile);
           });

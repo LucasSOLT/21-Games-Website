@@ -11,18 +11,25 @@ import React, {
 } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowUp, Calendar, Delete, Link2, Share2, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUp,
+  Calendar,
+  CornerDownLeft,
+  Delete,
+  PlusCircle,
+  Sparkles,
+} from "lucide-react";
 import {
   NINE_RHYMES_CLUE_COUNT,
   validateNineRhymesPuzzle,
   type NineRhymesPuzzle,
 } from "@/data/puzzles/9-rhymes";
-import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
+import { getDailyPuzzleForGame } from "@/lib/daily-engine";
 import {
   buildCustomGameShareUrl,
-  copyToClipboard,
   formatCustomGameBlurb,
-  nativeShareResultsOnly,
+  generateCustomGameId,
   isValidCustomGameId,
 } from "@/lib/custom-game-share";
 import { fetchCustomPuzzle, saveCustomPuzzle } from "@/lib/custom-puzzles";
@@ -47,11 +54,22 @@ import {
   totalScore,
   type RoundResult,
 } from "@/lib/nine-rhymes-engine";
-import { generateCustomGameId } from "@/lib/custom-game-share";
 import { computePuzzleContentHash } from "@/lib/seeded-random";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playRevealSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import { GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { GameLogo } from "@/components/game-logo";
+import { WinFlourish } from "@/components/games/win-flourish";
 import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -126,7 +144,7 @@ function NineRhymesRouter() {
 /* ------------------------------------------------------------------------ */
 
 function NineRhymesDaily({ dateParam }: { dateParam: string | null }) {
-  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const todayKey = useLiveLocalDateKey();
   const dateKey =
     isValidDateKey(dateParam) && dateParam <= todayKey ? dateParam : todayKey;
   const [syncVersion, setSyncVersion] = useState(0);
@@ -155,6 +173,7 @@ function NineRhymesDaily({ dateParam }: { dateParam: string | null }) {
       puzzle={puzzle}
       puzzleHash={hash}
       dateKey={dateKey}
+      todayKey={todayKey}
       isCustom={false}
     />
   );
@@ -165,6 +184,7 @@ function NineRhymesDaily({ dateParam }: { dateParam: string | null }) {
 /* ------------------------------------------------------------------------ */
 
 function NineRhymesCustomLoader({ customId }: { customId: string }) {
+  const todayKey = useLiveLocalDateKey();
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "missing" }
@@ -186,7 +206,12 @@ function NineRhymesCustomLoader({ customId }: { customId: string }) {
       }
       setState({
         status: "ready",
-        puzzle: { ...record.payload, id: record.id, puzzleNumber: 0, author: record.creatorName || record.payload.author },
+        puzzle: {
+          ...record.payload,
+          id: record.id,
+          puzzleNumber: 0,
+          author: record.creatorName || record.payload.author,
+        },
         handle: record.creatorHandle,
       });
     })();
@@ -204,18 +229,32 @@ function NineRhymesCustomLoader({ customId }: { customId: string }) {
   }
   if (state.status === "missing") {
     return (
-      <GameShell gameSlug="9-rhymes" gameTitle="9 Rhymes" puzzleNumber={0} dateKey={getLocalDateKey()} author="Friend">
+      <GameShell
+        gameSlug="9-rhymes"
+        gameTitle="9 Rhymes"
+        puzzleNumber={0}
+        dateKey={todayKey}
+        author="Friend"
+      >
         <div className="max-w-md mx-auto text-center space-y-4 py-16">
           <h2 className="font-headline font-black text-2xl">Puzzle not found</h2>
           <p className="text-sm text-neutral-600">
             This friend link may be mistyped or was removed. You can still play today&apos;s 9 Rhymes.
           </p>
-          <Link
-            href="/games/9-rhymes"
-            className="inline-flex items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-bold text-white border-2 border-black"
-          >
-            Play today&apos;s 9 Rhymes
-          </Link>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+            <Link
+              href="/games/9-rhymes"
+              className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-2.5 text-sm font-bold text-white border-2 border-black"
+            >
+              Play today&apos;s 9 Rhymes
+            </Link>
+            <Link
+              href="/games/9-rhymes?mode=create"
+              className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-black border-2 border-black"
+            >
+              Create Your Own
+            </Link>
+          </div>
         </div>
       </GameShell>
     );
@@ -225,7 +264,8 @@ function NineRhymesCustomLoader({ customId }: { customId: string }) {
       key={state.puzzle.id}
       puzzle={state.puzzle}
       puzzleHash={computePuzzleContentHash(state.puzzle)}
-      dateKey={getLocalDateKey()}
+      dateKey={todayKey}
+      todayKey={todayKey}
       isCustom
       creatorHandle={state.handle}
       customId={customId}
@@ -241,6 +281,7 @@ interface NineRhymesBoardProps {
   puzzle: NineRhymesPuzzle;
   puzzleHash: string;
   dateKey: string;
+  todayKey: string;
   isCustom: boolean;
   creatorHandle?: string;
   customId?: string;
@@ -250,6 +291,7 @@ function NineRhymesBoard({
   puzzle,
   puzzleHash,
   dateKey,
+  todayKey,
   isCustom,
   creatorHandle,
   customId,
@@ -282,9 +324,14 @@ function NineRhymesBoard({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const recordedRef = useRef(false);
+  const winChimedRef = useRef(Boolean(saved && saved.results.length >= NINE_RHYMES_CLUE_COUNT));
 
   const complete = results.length >= NINE_RHYMES_CLUE_COUNT;
   const roundIndex = Math.min(results.length, NINE_RHYMES_CLUE_COUNT - 1);
+  const currentClue = !complete ? puzzle.clues[roundIndex] : undefined;
+  const expectedLength = currentClue
+    ? currentClue.answer.replace(/[^a-z]/gi, "").length
+    : 0;
   const score = totalScore(results);
   const busy = typing;
   const inputLocked = busy || complete || !splashDismissed;
@@ -302,9 +349,12 @@ function NineRhymesBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splashDismissed]);
 
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    []
+  );
 
   // Persist progress (daily + archive only).
   useEffect(() => {
@@ -325,6 +375,16 @@ function NineRhymesBoard({
       recordScoredCompletion("9-rhymes", dateKey, score, NINE_RHYMES_CLUE_COUNT);
     }
   }, [complete, isCustom, dateKey, score]);
+
+  const showResultCard = complete && !typing && shown >= transcript.length;
+  const gameStatus = showResultCard ? "completed" : "playing";
+
+  useEffect(() => {
+    if (showResultCard && !winChimedRef.current) {
+      winChimedRef.current = true;
+      playWinChimeSfx();
+    }
+  }, [showResultCard]);
 
   // Smooth auto-scroll to the newest bubble / typing dots.
   useEffect(() => {
@@ -359,6 +419,11 @@ function NineRhymesBoard({
     if (!guess) return;
     const clue = puzzle.clues[roundIndex]!;
     const correct = matchesAnswer(guess, clue);
+    if (correct) {
+      playSnapSfx();
+    } else {
+      playErrorSfx();
+    }
     const result: RoundResult = {
       guess,
       outcome: correct ? "correct" : "wrong",
@@ -372,12 +437,14 @@ function NineRhymesBoard({
   const confirmHint = () => {
     setConfirm(null);
     if (inputLocked || currentHinted) return;
+    playRevealSfx();
     advance(results, true);
   };
 
   const confirmReveal = () => {
     setConfirm(null);
     if (inputLocked) return;
+    playRevealSfx();
     setInput("");
     advance(
       [...results, { guess: "", outcome: "revealed", hinted: currentHinted, points: 0 }],
@@ -388,12 +455,14 @@ function NineRhymesBoard({
   const pressLetter = useCallback(
     (letter: string) => {
       if (inputLocked) return;
+      playTapSfx();
       setInput((v) => (v.length < MAX_INPUT_LENGTH ? v + letter.toLowerCase() : v));
     },
     [inputLocked]
   );
   const pressBackspace = useCallback(() => {
     if (inputLocked) return;
+    playTapSfx();
     setInput((v) => v.slice(0, -1));
   }, [inputLocked]);
 
@@ -401,7 +470,15 @@ function NineRhymesBoard({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (confirm || helpOpen || statsOpen) return;
+      if (
+        confirm ||
+        helpOpen ||
+        statsOpen ||
+        document.querySelector('[role="dialog"]') ||
+        isGameTimerExternallyPaused()
+      ) {
+        return;
+      }
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
         if (!(target as HTMLInputElement).readOnly) return;
@@ -421,16 +498,34 @@ function NineRhymesBoard({
   }, [confirm, helpOpen, statsOpen, submitGuess, pressBackspace, pressLetter]);
 
   const handleReplay = () => {
-    clearGameProgress("9-rhymes", dateKey);
-    window.location.reload();
+    playTapSfx();
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!isCustom) {
+      clearGameProgress("9-rhymes", dateKey);
+    }
+    winChimedRef.current = false;
+    setResults([]);
+    setCurrentHinted(false);
+    setInput("");
+    setConfirm(null);
+    setShown(1);
+    setTyping(true);
+    timerRef.current = setTimeout(() => {
+      setShown(buildTranscript(puzzle, { results: [], currentHinted: false }).length);
+      setTyping(false);
+    }, TYPING_DELAY_MS);
   };
 
-  const showResultCard = complete && !typing && shown >= transcript.length;
-  const shareUrl = isCustom && customId
-    ? buildCustomGameShareUrl("9-rhymes", customId)
-    : typeof window !== "undefined"
-    ? `${window.location.origin}${window.location.pathname}`.replace(/\/$/, "")
-    : "https://21games.ai/games/9-rhymes";
+  const baseDailyUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}${window.location.pathname}`.replace(/\/$/, "")
+      : "https://21games.ai/games/9-rhymes";
+  const shareUrl =
+    isCustom && customId
+      ? buildCustomGameShareUrl("9-rhymes", customId)
+      : !isCustom && dateKey !== todayKey
+      ? `${baseDailyUrl}?date=${encodeURIComponent(dateKey)}`
+      : baseDailyUrl;
   const shareText = buildShareText({
     puzzleNumber: puzzle.puzzleNumber,
     results,
@@ -459,7 +554,7 @@ function NineRhymesBoard({
           dateKey={dateKey}
           showCreate
           isCompletedToday={!isCustom && isDateCompleted("9-rhymes", dateKey)}
-          hasSavedProgress={results.length > 0 || currentHinted}
+          hasSavedProgress={(results.length > 0 || currentHinted) && !complete}
           onPlay={() => setSplashDismissed(true)}
           onCreate={() => router.push("/games/9-rhymes?mode=create")}
         />
@@ -478,8 +573,10 @@ function NineRhymesBoard({
       statsOpen={statsOpen}
       onStatsOpenChange={setStatsOpen}
     >
+      <WinFlourish active={gameStatus === "completed"} />
+
       <div
-        className="mx-auto w-full max-w-md h-[calc(100dvh-4.5rem)] max-h-[760px] min-h-[360px] sm:h-[calc(100dvh-8.5rem)] sm:min-h-[500px] flex flex-col rounded-2xl border-2 border-black bg-white overflow-hidden shadow-[0_4px_0_#111111]"
+        className="mx-auto w-full max-w-md h-[calc(100dvh-4.5rem)] max-h-[calc(100dvh-5.75rem-env(safe-area-inset-bottom,0px))] sm:max-h-[760px] min-h-[340px] sm:h-[calc(100dvh-8.5rem)] sm:min-h-[500px] flex flex-col rounded-2xl border-2 border-black bg-white overflow-hidden shadow-[0_4px_0_#111111]"
         data-testid="nine-rhymes-chat"
       >
         {/* Contact header */}
@@ -496,7 +593,11 @@ function NineRhymesBoard({
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-2.5 sm:py-3 space-y-2 bg-white" aria-live="polite">
+        <div
+          ref={scrollRef}
+          className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-2.5 sm:py-3 space-y-2 bg-white"
+          aria-live="polite"
+        >
           {visible.map((m) => (
             <div key={m.id} className={cn("flex", m.role === "me" ? "justify-end" : "justify-start")}>
               <div
@@ -542,18 +643,31 @@ function NineRhymesBoard({
                 text={shareText}
                 url={shareUrl}
               />
+              {!isCustom && (
+                <Link
+                  href="/games/9-rhymes?mode=create"
+                  className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border-2 border-black bg-white hover:bg-neutral-50 px-3.5 py-2 text-xs font-headline font-black text-black transition-colors"
+                >
+                  <PlusCircle className="h-3.5 w-3.5 text-[#007AFF]" />
+                  Create Your Own 9 Rhymes
+                </Link>
+              )}
               <div className="flex flex-wrap justify-center gap-3 text-xs font-bold">
                 {isCustom ? (
                   <>
-                    <Link className="underline" href="/games/9-rhymes">Play today&apos;s 9 Rhymes</Link>
-                    <Link className="underline" href="/games/9-rhymes?mode=create">Create your own</Link>
+                    <Link className="underline" href="/games/9-rhymes">
+                      Play today&apos;s 9 Rhymes
+                    </Link>
+                    <Link className="underline" href="/games/9-rhymes?mode=create">
+                      Create your own
+                    </Link>
                   </>
                 ) : (
                   <>
                     <Link className="underline inline-flex items-center gap-1" href="/games/9-rhymes/archive">
                       <Calendar className="h-3.5 w-3.5" /> Archive
                     </Link>
-                    <button type="button" className="underline" onClick={handleReplay}>
+                    <button type="button" className="underline cursor-pointer" onClick={handleReplay}>
                       Replay this puzzle
                     </button>
                   </>
@@ -570,8 +684,11 @@ function NineRhymesBoard({
               <button
                 type="button"
                 disabled={inputLocked}
-                onClick={() => setConfirm("hint")}
-                className="shrink-0 rounded-full border-2 border-[#007AFF] text-[#007AFF] px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40"
+                onClick={() => {
+                  playTapSfx();
+                  setConfirm("hint");
+                }}
+                className="shrink-0 rounded-full border-2 border-[#007AFF] text-[#007AFF] px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40 cursor-pointer"
                 data-testid="nine-hint-pill"
               >
                 {HINT_COST_LABEL}
@@ -580,8 +697,11 @@ function NineRhymesBoard({
             <button
               type="button"
               disabled={inputLocked}
-              onClick={() => setConfirm("reveal")}
-              className="shrink-0 rounded-full border-2 border-neutral-400 text-neutral-700 px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40"
+              onClick={() => {
+                playTapSfx();
+                setConfirm("reveal");
+              }}
+              className="shrink-0 rounded-full border-2 border-neutral-400 text-neutral-700 px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs font-bold disabled:opacity-40 cursor-pointer"
               data-testid="nine-reveal-pill"
             >
               {REVEAL_LABEL}
@@ -591,18 +711,37 @@ function NineRhymesBoard({
 
         {/* iMessage input bar (readOnly: no OS keyboard; min-w-0 + size={1} + shrink-0 guarantees Send arrow is always visible in portrait view) */}
         {!complete && (
-          <div className="shrink-0 flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-white border-t border-black/10">
+          <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-white border-t border-black/10">
             <input
               readOnly
               size={1}
               inputMode="none"
               aria-label="Your guess"
               value={input.toUpperCase()}
-              placeholder="Text Message"
-              className="min-w-0 w-0 flex-1 rounded-full border-2 border-neutral-300 px-3.5 py-1.5 sm:py-2 text-sm sm:text-[15px] font-semibold tracking-wider bg-white placeholder:tracking-normal placeholder:font-normal focus:outline-hidden"
+              placeholder={
+                expectedLength > 0
+                  ? `Type ${expectedLength}-letter rhyme`
+                  : "Text Message"
+              }
+              className="min-w-0 w-0 flex-1 rounded-full border-2 border-neutral-300 px-3.5 py-1.5 sm:py-2 text-base sm:text-[15px] font-semibold tracking-wider bg-white placeholder:tracking-normal placeholder:font-normal placeholder:text-sm focus:outline-hidden"
               data-testid="nine-input"
               onFocus={(e) => e.currentTarget.blur()}
             />
+            {expectedLength > 0 && (input.length > 0 || currentHinted) && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full border px-2 py-0.5 font-mono text-[11px] font-black tabular-nums",
+                  input.length === expectedLength
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                    : input.length > expectedLength
+                    ? "border-amber-500 bg-amber-50 text-amber-800"
+                    : "border-neutral-300 bg-neutral-100 text-neutral-600"
+                )}
+                aria-label={`${input.length} of ${expectedLength} letters`}
+              >
+                {input.length} / {expectedLength}
+              </span>
+            )}
             <button
               type="button"
               onClick={submitGuess}
@@ -618,17 +757,32 @@ function NineRhymesBoard({
 
         {/* Custom QWERTY keyboard */}
         {!complete && (
-          <div className="shrink-0 bg-[#D1D3D9] px-1 pt-1 sm:pt-1.5 pb-1.5 sm:pb-2 space-y-1 sm:space-y-1.5 select-none" data-testid="nine-keyboard">
+          <div
+            className="shrink-0 bg-[#D1D3D9] px-1 pt-1 sm:pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom,0px))] sm:pb-2 space-y-1 sm:space-y-1.5 select-none"
+            data-testid="nine-keyboard"
+          >
             {KEYBOARD_ROWS.map((row, ri) => (
               <div key={ri} className="flex justify-center gap-1">
-                {ri === 2 && <span className="w-3 min-[380px]:w-5 shrink-0" />}
+                {ri === 2 && (
+                  <button
+                    type="button"
+                    onClick={submitGuess}
+                    disabled={inputLocked || input.trim().length === 0}
+                    aria-label="Enter guess"
+                    data-testid="nine-enter-key"
+                    className="min-h-[40px] h-10 px-1.5 min-[380px]:px-2.5 shrink-0 rounded-md bg-[#007AFF] text-[10px] min-[380px]:text-xs font-black text-white flex items-center justify-center gap-0.5 shadow-[0_1px_0_#0051a8] active:bg-[#0066d6] disabled:bg-[#AEB3BE] disabled:text-neutral-600 disabled:shadow-[0_1px_0_#8b8d92] cursor-pointer"
+                  >
+                    <CornerDownLeft className="h-3.5 w-3.5 shrink-0" />
+                    <span className="hidden min-[360px]:inline">GO</span>
+                  </button>
+                )}
                 {row.map((k) => (
                   <button
                     key={k}
                     type="button"
                     onClick={() => pressLetter(k)}
                     disabled={inputLocked}
-                    className="h-9 sm:h-10 flex-1 min-w-0 max-w-[34px] rounded-md bg-white text-xs min-[380px]:text-sm font-bold text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-200 disabled:opacity-60"
+                    className="min-h-[40px] h-10 flex-1 min-w-0 max-w-[34px] rounded-md bg-white text-xs min-[380px]:text-sm font-bold text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-200 disabled:opacity-60 cursor-pointer"
                   >
                     {k}
                   </button>
@@ -639,7 +793,7 @@ function NineRhymesBoard({
                     onClick={pressBackspace}
                     disabled={inputLocked}
                     aria-label="Backspace"
-                    className="h-9 sm:h-10 w-10 min-[380px]:w-12 shrink-0 rounded-md bg-[#AEB3BE] flex items-center justify-center text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-400"
+                    className="min-h-[40px] h-10 w-10 min-[380px]:w-12 shrink-0 rounded-md bg-[#AEB3BE] flex items-center justify-center text-black shadow-[0_1px_0_#8b8d92] active:bg-neutral-400 cursor-pointer"
                   >
                     <Delete className="h-4 w-4 min-[380px]:h-5 min-[380px]:w-5" />
                   </button>
@@ -652,7 +806,10 @@ function NineRhymesBoard({
 
       {/* Hint confirmation */}
       <Dialog open={confirm === "hint"} onOpenChange={(o) => !o && setConfirm(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          data-game-dialog-open={confirm === "hint" ? "true" : undefined}
+          className="max-w-sm"
+        >
           <DialogHeader>
             <DialogTitle>Need a hint?</DialogTitle>
             <DialogDescription>
@@ -663,7 +820,11 @@ function NineRhymesBoard({
             <Button variant="outline" onClick={() => setConfirm(null)} className="border-2 border-black font-bold">
               Cancel
             </Button>
-            <Button onClick={confirmHint} className="font-bold bg-[#007AFF] hover:bg-[#0066d6] text-white" data-testid="nine-hint-confirm">
+            <Button
+              onClick={confirmHint}
+              className="font-bold bg-[#007AFF] hover:bg-[#0066d6] text-white"
+              data-testid="nine-hint-confirm"
+            >
               Use hint
             </Button>
           </div>
@@ -672,7 +833,10 @@ function NineRhymesBoard({
 
       {/* Reveal confirmation */}
       <Dialog open={confirm === "reveal"} onOpenChange={(o) => !o && setConfirm(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          data-game-dialog-open={confirm === "reveal" ? "true" : undefined}
+          className="max-w-sm"
+        >
           <DialogHeader>
             <DialogTitle>Reveal this word?</DialogTitle>
             <DialogDescription>
@@ -698,33 +862,49 @@ function NineRhymesBoard({
 /* ------------------------------------------------------------------------ */
 
 function NineRhymesCreator() {
+  const todayKey = useLiveLocalDateKey();
   const { profile, isAuthenticated, openAccountModal } = useAuth();
   const [editor, setEditor] = useState<NineRhymesEditorState>(emptyNineRhymesEditorState);
   const [errors, setErrors] = useState<string[]>([]);
   const [publishing, setPublishing] = useState(false);
-  const [created, setCreated] = useState<{ url: string; blurbWithUrl: string; blurbText: string; title: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [created, setCreated] = useState<{
+    url: string;
+    blurbWithUrl: string;
+    blurbText: string;
+    title: string;
+  } | null>(null);
 
   const shell = {
     gameSlug: "9-rhymes" as const,
     gameTitle: "9 Rhymes",
     puzzleNumber: 0,
-    dateKey: getLocalDateKey(),
+    dateKey: todayKey,
     author: profile?.displayName ?? "You",
   };
 
   if (!isAuthenticated || !profile) {
     return (
       <GameShell {...shell} subtitle="Create & Share">
-        <div className="max-w-md mx-auto text-center space-y-4 py-16">
-          <Sparkles className="h-8 w-8 mx-auto text-[#9D50BB]" />
-          <h2 className="font-headline font-black text-2xl">Sign in to create</h2>
-          <p className="text-sm text-neutral-600">
-            Creating a custom 9 Rhymes puzzle requires an account so friends can see who made it.
-          </p>
-          <Button onClick={() => openAccountModal("signin")} className="font-bold border-2 border-black">
-            Sign in
-          </Button>
+        <div className="max-w-md mx-auto space-y-4 py-12">
+          <div>
+            <Link
+              href="/games/9-rhymes"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-600 hover:text-black"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to Game
+            </Link>
+          </div>
+          <div className="text-center space-y-4 py-6">
+            <Sparkles className="h-8 w-8 mx-auto text-[#9D50BB]" />
+            <h2 className="font-headline font-black text-2xl">Sign in to create</h2>
+            <p className="text-sm text-neutral-600">
+              Creating a custom 9 Rhymes puzzle requires an account so friends can see who made it.
+            </p>
+            <Button onClick={() => openAccountModal("signin")} className="font-bold border-2 border-black">
+              Sign in
+            </Button>
+          </div>
         </div>
       </GameShell>
     );
@@ -733,14 +913,20 @@ function NineRhymesCreator() {
   if (profile.isBanned) {
     return (
       <GameShell {...shell} subtitle="Create & Share">
-        <p className="text-center py-16 text-sm font-semibold">
-          Your account has been suspended from publishing custom puzzles.
-        </p>
+        <div className="max-w-md mx-auto space-y-4 py-12 text-center">
+          <p className="text-sm font-semibold">
+            Your account has been suspended from publishing custom puzzles.
+          </p>
+          <Link href="/games/9-rhymes" className="text-xs font-bold underline">
+            &larr; Back to Game
+          </Link>
+        </div>
       </GameShell>
     );
   }
 
   const publish = async () => {
+    playTapSfx();
     setErrors([]);
     setPublishing(true);
     try {
@@ -753,6 +939,7 @@ function NineRhymesCreator() {
         creatorName: profile.displayName,
       });
       if (!puzzle) {
+        playErrorSfx();
         setErrors(draftErrors);
         return;
       }
@@ -766,9 +953,11 @@ function NineRhymesCreator() {
         payload: puzzle as unknown as Record<string, unknown>,
       });
       if (!saved.ok) {
+        playErrorSfx();
         setErrors([saved.error]);
         return;
       }
+      playWinChimeSfx();
       const blurb = formatCustomGameBlurb({
         title: puzzle.title,
         creatorHandle: profile.handle,
@@ -790,6 +979,16 @@ function NineRhymesCreator() {
   return (
     <GameShell {...shell} subtitle="Create & Share">
       <div className="max-w-2xl mx-auto space-y-4 py-2" data-testid="nine-creator">
+        <div className="flex items-center justify-between gap-2">
+          <Link
+            href="/games/9-rhymes"
+            className="inline-flex items-center gap-1.5 rounded-lg border-2 border-black/15 hover:border-black bg-white px-3 py-1.5 text-xs font-bold text-black transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to Game
+          </Link>
+        </div>
+
         <div>
           <h2 className="font-headline font-black text-2xl">Create your own 9 Rhymes</h2>
           <p className="text-sm text-neutral-600">
@@ -801,38 +1000,29 @@ function NineRhymesCreator() {
           <div className="rounded-2xl border-2 border-black bg-[#fffbe6] p-4 space-y-3" data-testid="nine-created">
             <p className="font-headline font-black text-lg">Your puzzle is ready! 🎉</p>
             <p className="text-sm break-all font-mono">{created.url}</p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                className="flex-1 bg-black text-white border-2 border-black font-bold"
-                onClick={() =>
-                  void nativeShareResultsOnly({
-                    title: `${created.title} — 9 Rhymes`,
-                    text: created.blurbText,
-                    url: created.url,
-                  })
-                }
+            <ResultShareButtons
+              title={`${created.title} — 9 Rhymes`}
+              text={created.blurbText}
+              url={created.url}
+            />
+            <div className="flex flex-wrap items-center gap-4 pt-1">
+              <Link
+                className="text-xs font-bold underline"
+                href={`/games/9-rhymes?b=${created.url.split("?b=")[1]}`}
               >
-                <Share2 className="h-4 w-4 mr-1.5" /> Share
-              </Button>
-              <Button
+                Play it yourself →
+              </Link>
+              <button
                 type="button"
-                variant="outline"
-                className="flex-1 border-2 border-black font-bold"
-                onClick={async () => {
-                  const ok = await copyToClipboard(created.blurbWithUrl);
-                  if (ok) {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  }
+                onClick={() => {
+                  setCreated(null);
+                  setEditor(emptyNineRhymesEditorState());
                 }}
+                className="text-xs font-bold underline text-neutral-600 hover:text-black cursor-pointer"
               >
-                <Link2 className="h-4 w-4 mr-1.5" /> {copied ? "Copied!" : "Copy link"}
-              </Button>
+                Create another
+              </button>
             </div>
-            <Link className="text-xs font-bold underline" href={`/games/9-rhymes?b=${created.url.split("?b=")[1]}`}>
-              Play it yourself →
-            </Link>
           </div>
         ) : (
           <>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Eraser, RotateCcw, Shuffle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,10 @@ export interface MoveTwoStudioTabProps {
   syncVersion?: number;
   initialPuzzle?: MoveTwoPuzzle;
   hasCustomOverride?: boolean;
+  defaultAuthor?: string;
+  defaultEditor?: string;
+  onDraftChange?: (draft: unknown) => void;
+  onDirty?: () => void;
   onPublish: (req: GenericPublishRequest) => void;
   onClearOverride?: () => void;
 }
@@ -272,6 +276,10 @@ export function MoveTwoStudioTab({
   editReason,
   syncVersion = 0,
   initialPuzzle: propInitialPuzzle,
+  defaultAuthor = "SOL Theory",
+  defaultEditor = "Daily Editorial",
+  onDraftChange,
+  onDirty,
   onPublish,
   onClearOverride,
 }: MoveTwoStudioTabProps) {
@@ -295,6 +303,12 @@ export function MoveTwoStudioTab({
 
   const [draft, setDraft] = useState<MoveTwoPuzzle>(resolvedInitialPuzzle);
   const [title, setTitle] = useState<string>(resolvedInitialPuzzle.title);
+  const [author, setAuthor] = useState<string>(
+    resolvedInitialPuzzle.author || defaultAuthor || "SOL Theory"
+  );
+  const [editorName, setEditorName] = useState<string>(
+    resolvedInitialPuzzle.editor || defaultEditor || "Daily Editorial"
+  );
   const [activeDiff, setActiveDiff] = useState<MoveTwoDifficulty>("medium");
   const [paintTool, setPaintTool] = useState<StudioPaintTool>("fragile");
   const [rerollCount, setRerollCount] = useState(0);
@@ -306,12 +320,38 @@ export function MoveTwoStudioTab({
     setPrevKey(currentKey);
     setDraft(resolvedInitialPuzzle);
     setTitle(resolvedInitialPuzzle.title);
+    setAuthor(resolvedInitialPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(
+      resolvedInitialPuzzle.editor || defaultEditor || "Daily Editorial"
+    );
     setErrors([]);
   }
 
   const liveSolve = useMemo(() => solveMoveTwo(draft), [draft]);
   const activeStage = draft.stages[activeDiff];
   const activeStageSolve = liveSolve.stages[activeDiff];
+
+  const liveDraft = useMemo<MoveTwoPuzzle>(
+    () => ({
+      ...draft,
+      version: 3,
+      id: `m2-admin-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: title.trim() || draft.title || "Terracotta Span",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
+      customDate: targetDate,
+    }),
+    [author, defaultAuthor, defaultEditor, draft, editorName, targetDate, title]
+  );
+
+  const onDraftChangeRef = useRef(onDraftChange);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  });
+  useEffect(() => {
+    onDraftChangeRef.current?.(liveDraft);
+  }, [liveDraft]);
 
   const updateStage = (
     diff: MoveTwoDifficulty,
@@ -330,6 +370,7 @@ export function MoveTwoStudioTab({
       };
     });
     setErrors([]);
+    onDirty?.();
   };
 
   const handleCellClick = (r: number, c: number) => {
@@ -485,6 +526,7 @@ export function MoveTwoStudioTab({
     setDraft(generated);
     setTitle(generated.title);
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRerollActiveStage = () => {
@@ -501,13 +543,21 @@ export function MoveTwoStudioTab({
     const blank = buildCleanBlankMoveTwoPuzzle(targetDate);
     setDraft(blank);
     setTitle("");
+    setAuthor("");
+    setEditorName("");
     setErrors([]);
+    onDirty?.();
   };
 
   const handleRevertToDefault = () => {
     setDraft(defaultBankPuzzle);
     setTitle(defaultBankPuzzle.title);
+    setAuthor(defaultBankPuzzle.author || defaultAuthor || "SOL Theory");
+    setEditorName(
+      defaultBankPuzzle.editor || defaultEditor || "Daily Editorial"
+    );
     setErrors([]);
+    onDirty?.();
     onClearOverride?.();
   };
 
@@ -536,6 +586,8 @@ export function MoveTwoStudioTab({
       id: `m2-admin-${targetDate}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: title.trim() || draft.title || "Terracotta Span",
+      author: author.trim() || defaultAuthor || "SOL Theory",
+      editor: editorName.trim() || defaultEditor || "Daily Editorial",
       stages: syncedStages,
       par: syncedStages.medium.par,
       customDate: targetDate,
@@ -563,6 +615,7 @@ export function MoveTwoStudioTab({
         `Easy (6×6): BFS Par ${syncedStages.easy.par} moves`,
         `Medium (8×8): BFS Par ${syncedStages.medium.par} moves`,
         `Hard (10×10): BFS Par ${syncedStages.hard.par} moves`,
+        `Author: ${candidate.author} · Editor: ${candidate.editor}`,
       ],
       playImmediately,
     });
@@ -639,19 +692,55 @@ export function MoveTwoStudioTab({
         </p>
       )}
 
-      {/* Title Input + Difficulty Tabs */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="w-full sm:max-w-xs">
+      {/* Title + Attribution Inputs */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
           <label className="block text-xs font-bold mb-1">Puzzle Title</label>
           <Input
             value={title}
             disabled={!canEdit}
             placeholder="e.g. Terracotta Span"
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              onDirty?.();
+            }}
             maxLength={50}
+            className="text-base sm:text-sm"
             data-testid="admin-move-two-title-input"
           />
         </div>
+        <div>
+          <label className="block text-xs font-bold mb-1">Author</label>
+          <Input
+            value={author}
+            disabled={!canEdit}
+            placeholder={defaultAuthor}
+            onChange={(e) => {
+              setAuthor(e.target.value);
+              onDirty?.();
+            }}
+            className="text-base sm:text-sm"
+            data-testid="admin-move-two-author"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold mb-1">Editor</label>
+          <Input
+            value={editorName}
+            disabled={!canEdit}
+            placeholder={defaultEditor}
+            onChange={(e) => {
+              setEditorName(e.target.value);
+              onDirty?.();
+            }}
+            className="text-base sm:text-sm"
+            data-testid="admin-move-two-editor"
+          />
+        </div>
+      </div>
+
+      {/* Difficulty Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
 
         <div className="flex flex-wrap items-center gap-1.5">
           {MOVE_TWO_DIFFICULTIES.map((diff) => {

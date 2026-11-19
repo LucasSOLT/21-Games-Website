@@ -1,16 +1,22 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Check, Copy, Share2 } from "lucide-react";
 import {
   copyResultsOnly,
   nativeShareResultsOnly,
   type ShareResultsOptions,
 } from "@/lib/custom-game-share";
+import { playTapSfx } from "@/lib/game-sfx";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const COPIED_FEEDBACK_MS = 1500;
+
+const subscribeNoop = () => () => {};
+const getCanNativeShareSnapshot = () =>
+  typeof navigator !== "undefined" && typeof navigator.share === "function";
+const getServerNativeShareSnapshot = () => true;
 
 interface ResultShareButtonsProps {
   /** Share-sheet title. */
@@ -26,7 +32,7 @@ interface ResultShareButtonsProps {
 
 /**
  * Universal completion-screen action row used by every game:
- *   - **Share**        → `nativeShareResultsOnly` (navigator.share, NEVER clipboard)
+ *   - **Share**        → `nativeShareResultsOnly` (navigator.share, NEVER clipboard; shown only when supported)
  *   - **Copy results** → `copyResultsOnly`        (clipboard only, NEVER navigator.share),
  *                        "Copied!" checkmark for 1500ms.
  */
@@ -38,6 +44,11 @@ export function ResultShareButtons({
   stacked = false,
 }: ResultShareButtonsProps) {
   const [copied, setCopied] = useState(false);
+  const canNativeShare = useSyncExternalStore(
+    subscribeNoop,
+    getCanNativeShareSnapshot,
+    getServerNativeShareSnapshot
+  );
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
@@ -52,11 +63,13 @@ export function ResultShareButtons({
   const options: ShareResultsOptions = { title, text, url };
 
   const handleShare = useCallback(async () => {
+    playTapSfx();
     await nativeShareResultsOnly(options);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, text, url]);
 
   const handleCopy = useCallback(async () => {
+    playTapSfx();
     const { copied: ok } = await copyResultsOnly(options);
     if (ok && mountedRef.current) {
       setCopied(true);
@@ -71,15 +84,17 @@ export function ResultShareButtons({
 
   return (
     <div className={cn("flex gap-2", stacked ? "flex-col" : "flex-row", className)}>
-      <Button
-        type="button"
-        onClick={handleShare}
-        data-testid="share-button"
-        className="flex-1 bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
-      >
-        <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
-        <span>Share</span>
-      </Button>
+      {canNativeShare && (
+        <Button
+          type="button"
+          onClick={handleShare}
+          data-testid="share-button"
+          className="flex-1 bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
+        >
+          <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
+          <span>Share</span>
+        </Button>
+      )}
       <Button
         type="button"
         variant="outline"

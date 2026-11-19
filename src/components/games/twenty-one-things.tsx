@@ -35,11 +35,6 @@ import {
 } from "@/lib/voice-note-audio";
 import { VoiceNotePlayer } from "./voice-note-player";
 import {
-  decodeShareable21Board,
-  get21ThingsBoardForDate,
-  getLocalDateKey,
-} from "@/lib/daily-engine";
-import {
   buildBoardShareUrl,
   copyResultsOnly,
   formatCustomGameBlurb,
@@ -49,7 +44,9 @@ import {
   type ShareResultsOptions,
 } from "@/lib/custom-game-share";
 import {
+  decodeShareable21Board,
   enforceTileConstraints,
+  get21ThingsBoardForDate,
   parseTranscriptTo21Items,
   type TwentyOneJourney,
   type TwentyOneThingsBoard,
@@ -73,6 +70,15 @@ import {
 import { computePuzzleContentHash } from "@/lib/seeded-random";
 import { GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
+import { WinFlourish } from "@/components/games/win-flourish";
+import { ResultShareButtons } from "./result-share-buttons";
+import { useLiveLocalDateKey } from "@/hooks/use-live-date-key";
+import {
+  playRevealSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import { useAuth } from "@/components/account/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -214,24 +220,7 @@ export function TwentyOneThingsGame() {
     searchParams.has("boardId") ||
     searchParams.has("board");
 
-  const [liveTodayKey, setLiveTodayKey] = useState<string>(() =>
-    getLocalDateKey()
-  );
-
-  useEffect(() => {
-    if (dateParam || hasCustomParam) return;
-    const checkDate = () => {
-      const current = getLocalDateKey();
-      setLiveTodayKey((prev) => (prev !== current ? current : prev));
-    };
-    const interval = setInterval(checkDate, 30000);
-    window.addEventListener("focus", checkDate);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", checkDate);
-    };
-  }, [dateParam, hasCustomParam]);
-
+  const liveTodayKey = useLiveLocalDateKey();
   const activeDateKey = dateParam || liveTodayKey;
   const instanceKey = `${activeDateKey}::${boardTokenParam ?? ""}::${boardIdParam ?? ""}::${hasCustomParam ? "custom" : "daily"}::${modeParam ?? ""}`;
 
@@ -376,13 +365,11 @@ function TwentyOneThingsBoardView({
   const [rawTranscript, setRawTranscript] = useState("");
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [creatorItems, setCreatorItems] = useState<string[]>(() =>
-    initialCustomBoard ? initialCustomBoard.items.slice(0, 21) : []
+    Array(21).fill("")
   );
   const [autoShortenedCount, setAutoShortenedCount] = useState(0);
   const [shareUrl, setShareUrl] = useState<string>("");
-  const [journeyResultsCopied, setJourneyResultsCopied] = useState(false);
   const [creatorLinkCopied, setCreatorLinkCopied] = useState(false);
-  const journeyCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creatorCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
@@ -394,10 +381,6 @@ function TwentyOneThingsBoardView({
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
-      }
-      if (journeyCopyTimerRef.current) {
-        clearTimeout(journeyCopyTimerRef.current);
-        journeyCopyTimerRef.current = null;
       }
       if (creatorCopyTimerRef.current) {
         clearTimeout(creatorCopyTimerRef.current);
@@ -431,7 +414,6 @@ function TwentyOneThingsBoardView({
     (remoteBoard: TwentyOneThingsBoard) => {
       if (!board) {
         setBoard(remoteBoard);
-        setCreatorItems(remoteBoard.items.slice(0, 21));
         return;
       }
       const remoteHash = computePuzzleContentHash(remoteBoard);
@@ -445,12 +427,6 @@ function TwentyOneThingsBoardView({
         clear21ThingsProgress(remoteBoard.id);
 
         setBoard(remoteBoard);
-        setCreatorItems(remoteBoard.items.slice(0, 21));
-        if (journeyCopyTimerRef.current) {
-          clearTimeout(journeyCopyTimerRef.current);
-          journeyCopyTimerRef.current = null;
-        }
-        setJourneyResultsCopied(false);
         setPhase("pick6");
         setPick6([]);
         setPick3([]);
@@ -483,7 +459,6 @@ function TwentyOneThingsBoardView({
           if (!active) return;
           if (remoteBoard) {
             setBoard(remoteBoard);
-            setCreatorItems(remoteBoard.items.slice(0, 21));
             // Initialize game state specifically for this custom board
             const saved = sanitizeSaved21Progress(
               get21ThingsProgress(remoteBoard.id),
@@ -599,6 +574,7 @@ function TwentyOneThingsBoardView({
   const handleTileTap = (index: number) => {
     if (phase === "pick6") {
       if (pick6.includes(index)) {
+        playTapSfx();
         const next6 = pick6.filter((i) => i !== index);
         setPick6(next6);
         persistState("pick6", next6, [], null);
@@ -607,11 +583,16 @@ function TwentyOneThingsBoardView({
           toast({
             title: "6 Favorites Selected",
             description:
-              "Tap a highlighted yellow tile to deselect it, or continue to Phase 2 (Pick 3).",
+              "Tap a highlighted green tile to deselect it, or continue to Phase 2 (Pick 3).",
           });
           return;
         }
         const next6 = [...pick6, index];
+        if (next6.length === 6) {
+          playSnapSfx(2);
+        } else {
+          playTapSfx();
+        }
         setPick6(next6);
         persistState("pick6", next6, [], null);
       }
@@ -621,6 +602,7 @@ function TwentyOneThingsBoardView({
     if (phase === "pick3") {
       if (!pick6.includes(index)) return;
       if (pick3.includes(index)) {
+        playTapSfx();
         const next3 = pick3.filter((i) => i !== index);
         setPick3(next3);
         persistState("pick3", pick6, next3, null);
@@ -634,6 +616,11 @@ function TwentyOneThingsBoardView({
           return;
         }
         const next3 = [...pick3, index];
+        if (next3.length === 3) {
+          playSnapSfx(4);
+        } else {
+          playTapSfx();
+        }
         setPick3(next3);
         persistState("pick3", pick6, next3, null);
       }
@@ -643,6 +630,11 @@ function TwentyOneThingsBoardView({
     if (phase === "pick1") {
       if (!pick3.includes(index)) return;
       const next1 = pick1 === index ? null : index;
+      if (next1 !== null) {
+        playSnapSfx(6);
+      } else {
+        playTapSfx();
+      }
       setPick1(next1);
       persistState("pick1", pick6, pick3, next1);
     }
@@ -650,18 +642,21 @@ function TwentyOneThingsBoardView({
 
   const advanceToPick3 = () => {
     if (pick6.length !== 6) return;
+    playRevealSfx();
     setPhase("pick3");
     persistState("pick3", pick6, pick3, null);
   };
 
   const advanceToPick1 = () => {
     if (pick3.length !== 3) return;
+    playRevealSfx();
     setPhase("pick1");
     persistState("pick1", pick6, pick3, null);
   };
 
   const advanceToReflect = () => {
     if (pick1 === null) return;
+    playRevealSfx();
     const effectiveName = playerName || profile?.displayName || "";
     if (!playerName && effectiveName) {
       setPlayerName(effectiveName);
@@ -671,6 +666,7 @@ function TwentyOneThingsBoardView({
   };
 
   const handleBackStep = () => {
+    playTapSfx();
     if (phase === "pick3") {
       setPhase("pick6");
       setPick3([]);
@@ -686,6 +682,7 @@ function TwentyOneThingsBoardView({
   };
 
   const handleResetFunnel = (targetBoardId = board?.id ?? "") => {
+    playTapSfx();
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -710,11 +707,6 @@ function TwentyOneThingsBoardView({
     if (targetBoardId) {
       clear21ThingsProgress(targetBoardId);
     }
-    if (journeyCopyTimerRef.current) {
-      clearTimeout(journeyCopyTimerRef.current);
-      journeyCopyTimerRef.current = null;
-    }
-    setJourneyResultsCopied(false);
     setPhase("pick6");
     setPick6([]);
     setPick3([]);
@@ -881,6 +873,10 @@ function TwentyOneThingsBoardView({
 
   const handleSubmitReflection = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isRecordingAudio) {
+      stopAudioRecording();
+      return;
+    }
     if (pick1 === null || !board) return;
 
     const finalName =
@@ -891,7 +887,12 @@ function TwentyOneThingsBoardView({
 
     const isCustom = Boolean(
       hasCustomParam ||
-      (board.id && (board.id.startsWith("21t-") || board.id.startsWith("custom-") || board.puzzleNumber === 0))
+        boardIdParam ||
+        boardTokenParam ||
+        (board.id &&
+          (board.id.startsWith("21t-") ||
+            board.id.startsWith("custom-") ||
+            board.puzzleNumber === 0))
     );
     const mode: ModerationMode = isCustom ? "private" : "public";
     const surface = isCustom ? "private_custom" : "public";
@@ -928,6 +929,7 @@ function TwentyOneThingsBoardView({
 
     setJourneys((prev) => [created, ...prev]);
     setPhase("complete");
+    playWinChimeSfx();
     persistState(
       "complete",
       pick6,
@@ -937,7 +939,7 @@ function TwentyOneThingsBoardView({
       finalNote,
       voiceNoteDataUrl
     );
-    recordGameWin("21-things", activeDateKey, 0);
+    recordGameWin("21-things", activeDateKey, 0, { isCustom });
 
     toast({
       title: "Sent to Creator Feed!",
@@ -950,9 +952,9 @@ function TwentyOneThingsBoardView({
     const text = [
       `✨ 21 Things (${board.title} by ${board.creatorName})`,
       `21 → 6 → 3 → 1 Funnel:`,
-      `🟨 Top 6: ${pick6.map((i) => board.items[i]).join(" · ")}`,
-      `🟧 Top 3: ${pick3.map((i) => board.items[i]).join(" · ")}`,
-      `👑 My #1: "${board.items[pick1]}"`,
+      `🟩 Top 6: ${pick6.map((i) => board.items[i]).join(" · ")}`,
+      `🟪 Top 3: ${pick3.map((i) => board.items[i]).join(" · ")}`,
+      `🟨 My #1: "${board.items[pick1]}"`,
       reflectionNote ? `💬 "${reflectionNote}"` : "",
     ]
       .filter(Boolean)
@@ -971,30 +973,6 @@ function TwentyOneThingsBoardView({
       text,
       url,
     };
-  };
-
-  const handleNativeShareJourney = async () => {
-    const options = buildJourneyShareOptions();
-    if (!options) return;
-    await nativeShareResultsOnly(options);
-  };
-
-  const handleCopyJourneyResults = async () => {
-    const options = buildJourneyShareOptions();
-    if (!options) return;
-    const { copied } = await copyResultsOnly(options);
-    if (copied && isMountedRef.current) {
-      setJourneyResultsCopied(true);
-      if (journeyCopyTimerRef.current) {
-        clearTimeout(journeyCopyTimerRef.current);
-      }
-      journeyCopyTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current) {
-          setJourneyResultsCopied(false);
-        }
-        journeyCopyTimerRef.current = null;
-      }, 1500);
-    }
   };
 
   const toggleVoiceBrainstorm = () => {
@@ -1039,13 +1017,11 @@ function TwentyOneThingsBoardView({
           ).trim();
           const parsed = parseTranscriptTo21Items(updated);
           if (parsed.items.length > 0) {
-            setCreatorItems((curr) => {
-              const merged = [...curr];
-              parsed.items.forEach((item, idx) => {
-                if (idx < 21) merged[idx] = item;
-              });
-              return merged;
-            });
+            setCreatorItems(
+              Array.from({ length: 21 }, (_, idx) =>
+                idx < parsed.items.length ? parsed.items[idx]! : ""
+              )
+            );
             setAutoShortenedCount(parsed.autoShortenedCount);
           }
           return updated;
@@ -1073,10 +1049,9 @@ function TwentyOneThingsBoardView({
     const { items, autoShortenedCount: shortened } =
       parseTranscriptTo21Items(sourceText);
 
-    const nextItems = [...creatorItems];
-    items.forEach((item, idx) => {
-      if (idx < 21) nextItems[idx] = item;
-    });
+    const nextItems = Array.from({ length: 21 }, (_, idx) =>
+      idx < items.length ? items[idx]! : ""
+    );
     setCreatorItems(nextItems);
     setAutoShortenedCount(shortened);
 
@@ -1529,6 +1504,7 @@ function TwentyOneThingsBoardView({
                   value={creatorName}
                   onChange={(e) => setCreatorName(e.target.value)}
                   placeholder="e.g. Alex Morgan"
+                  className="text-base sm:text-sm"
                 />
               </div>
               <div>
@@ -1539,6 +1515,7 @@ function TwentyOneThingsBoardView({
                   value={creatorTitle}
                   onChange={(e) => setCreatorTitle(e.target.value)}
                   placeholder="e.g. 21 Things Bringing Me Joy"
+                  className="text-base sm:text-sm"
                 />
               </div>
             </div>
@@ -1561,7 +1538,7 @@ function TwentyOneThingsBoardView({
                 value={rawTranscript}
                 onChange={(e) => setRawTranscript(e.target.value)}
                 placeholder="Speak or type freely: dogs with two different colored eyes, vintage VW Beetles, morning coffee smell, rain on a tin roof..."
-                className="min-h-[84px]"
+                className="min-h-[84px] text-base sm:text-sm"
               />
             </div>
 
@@ -1612,7 +1589,7 @@ function TwentyOneThingsBoardView({
                           handleCreatorTileEdit(idx, e.target.value)
                         }
                         onBlur={() => handleCreatorTileBlur(idx)}
-                        className="w-full bg-white rounded-md border border-black/15 px-2 py-1 text-xs font-bold text-black focus:outline-none focus:border-black"
+                        className="w-full bg-white rounded-md border border-black/15 px-2 py-1 text-base sm:text-xs font-bold text-black focus:outline-none focus:border-black"
                         maxLength={50}
                       />
                       {overLimit && suggestion && (
@@ -1653,6 +1630,7 @@ function TwentyOneThingsBoardView({
         )
       ) : (
         <div className="space-y-2 sm:space-y-4">
+          <WinFlourish active={phase === "complete"} />
           <div className="rounded-2xl border-2 border-black bg-white p-2.5 sm:p-4 shadow-2xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -1679,11 +1657,11 @@ function TwentyOneThingsBoardView({
                   className={cn(
                     "px-1.5 xs:px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] xs:text-[10.5px] sm:text-xs font-black border whitespace-nowrap",
                     phase === "pick6"
-                      ? "bg-[#F9D423] text-black border-black"
+                      ? "bg-[#2ECC71] text-black border-black"
                       : "bg-gray-100 text-gray-600 border-gray-300"
                   )}
                 >
-                  1. Pick 6 ({pick6.length}/6)
+                  🟩 1. Keep 6 ({pick6.length}/6)
                 </span>
                 <span className="text-gray-400 font-bold text-[10px] sm:text-xs">
                   →
@@ -1692,11 +1670,11 @@ function TwentyOneThingsBoardView({
                   className={cn(
                     "px-1.5 xs:px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] xs:text-[10.5px] sm:text-xs font-black border whitespace-nowrap",
                     phase === "pick3"
-                      ? "bg-[#F9D423] text-black border-black"
+                      ? "bg-[#9D50BB] text-white border-black"
                       : "bg-gray-100 text-gray-600 border-gray-300"
                   )}
                 >
-                  2. Pick 3 ({pick3.length}/3)
+                  🟪 2. Keep 3 ({pick3.length}/3)
                 </span>
                 <span className="text-gray-400 font-bold text-[10px] sm:text-xs">
                   →
@@ -1707,11 +1685,11 @@ function TwentyOneThingsBoardView({
                     phase === "pick1" ||
                       phase === "reflect" ||
                       phase === "complete"
-                      ? "bg-[#2ECC71] text-black border-black"
+                      ? "bg-[#F9D423] text-black border-black"
                       : "bg-gray-100 text-gray-600 border-gray-300"
                   )}
                 >
-                  3. Pick #1 {pick1 !== null ? "✓" : ""}
+                  🟨 3. Pick #1 {pick1 !== null ? "✓" : ""}
                 </span>
               </div>
             </div>
@@ -1806,7 +1784,7 @@ function TwentyOneThingsBoardView({
               <div className="min-w-0 flex-1 sm:flex-initial text-[11px] leading-snug sm:text-sm font-medium">
                 {phase === "pick6" && (
                   <>
-                    <strong className="text-[#F9D423]">
+                    <strong className="text-[#2ECC71]">
                       Phase 1 (21 → 6):
                     </strong>{" "}
                     Tap your <strong>6 favorite items</strong> on the grid below
@@ -1815,7 +1793,7 @@ function TwentyOneThingsBoardView({
                 )}
                 {phase === "pick3" && (
                   <>
-                    <strong className="text-[#F9D423]">
+                    <strong className="text-[#d89cf2]">
                       Phase 2 (6 → 3):
                     </strong>{" "}
                     From your 6 highlighted favorites, narrow down to your{" "}
@@ -1824,7 +1802,7 @@ function TwentyOneThingsBoardView({
                 )}
                 {phase === "pick1" && (
                   <>
-                    <strong className="text-[#2ECC71]">
+                    <strong className="text-[#F9D423]">
                       Phase 3 (3 → 1):
                     </strong>{" "}
                     From your final 3, tap the{" "}
@@ -1833,7 +1811,7 @@ function TwentyOneThingsBoardView({
                 )}
                 {phase === "reflect" && pick1 !== null && (
                   <>
-                    <strong className="text-[#2ECC71]">
+                    <strong className="text-[#F9D423]">
                       #1 Locked In: &ldquo;{board.items[pick1]}&rdquo;
                     </strong>{" "}
                     — Share a quick reflection note or voice clip below!
@@ -1841,7 +1819,7 @@ function TwentyOneThingsBoardView({
                 )}
                 {phase === "complete" && pick1 !== null && (
                   <>
-                    <strong className="text-[#2ECC71]">
+                    <strong className="text-[#F9D423]">
                       Funnel Complete! Your #1: &ldquo;{board.items[pick1]}
                       &rdquo;
                     </strong>{" "}
@@ -1877,7 +1855,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick3}
-                    className="hidden sm:inline-flex bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
+                    className="hidden sm:inline-flex bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
                   >
                     Continue to Top 3 →
                   </Button>
@@ -1887,7 +1865,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick1}
-                    className="hidden sm:inline-flex bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
+                    className="hidden sm:inline-flex bg-[#9D50BB] text-white hover:bg-[#883ea5] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white animate-bounce"
                   >
                     Continue to #1 Pick →
                   </Button>
@@ -1897,7 +1875,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToReflect}
-                    className="hidden sm:inline-flex bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white"
+                    className="hidden sm:inline-flex bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs sm:text-sm px-4 border-2 border-white"
                   >
                     Lock In #1 &amp; Reflect →
                   </Button>
@@ -1941,8 +1919,8 @@ function TwentyOneThingsBoardView({
               if (phase === "pick6") {
                 if (in6) {
                   tileClasses =
-                    "bg-[#F9D423] text-black border-black ring-2 ring-black shadow-sm scale-[1.01]";
-                  badgeLabel = "TOP 6";
+                    "bg-[#2ECC71] text-black border-black ring-2 ring-black shadow-sm scale-[1.01]";
+                  badgeLabel = "🟩 TOP 6";
                 }
               } else if (phase === "pick3") {
                 if (!in6) {
@@ -1951,41 +1929,41 @@ function TwentyOneThingsBoardView({
                     "bg-gray-100 text-gray-400 border-gray-200 opacity-35 scale-[0.98] cursor-default";
                 } else if (in3) {
                   tileClasses =
-                    "bg-[#F9D423] text-black border-black ring-2 ring-black shadow-md scale-[1.02]";
-                  badgeLabel = "TOP 3";
+                    "bg-[#9D50BB] text-white border-black ring-2 ring-black shadow-md scale-[1.02]";
+                  badgeLabel = "🟪 TOP 3";
                 } else {
                   tileClasses =
-                    "bg-[#fff6bf] hover:bg-[#F9D423]/70 text-black border-black/70";
+                    "bg-[#d8f8e5] hover:bg-[#b8f2d0] text-black border-black/70";
                   badgeLabel = "IN 6";
                 }
               } else if (phase === "pick1") {
                 if (!in3) {
                   isDimmed = true;
                   tileClasses = in6
-                    ? "bg-amber-50/50 text-gray-400 border-gray-200 opacity-45 scale-[0.98] cursor-default"
+                    ? "bg-emerald-50/50 text-gray-400 border-gray-200 opacity-45 scale-[0.98] cursor-default"
                     : "bg-gray-100 text-gray-400 border-gray-200 opacity-25 scale-[0.97] cursor-default";
                 } else if (isWinner) {
                   tileClasses =
-                    "bg-[#2ECC71] text-black border-black ring-3 ring-black shadow-lg scale-[1.03]";
-                  badgeLabel = "#1 PICK";
+                    "bg-[#F9D423] text-black border-black ring-3 ring-black shadow-lg scale-[1.03]";
+                  badgeLabel = "🟨 #1 PICK";
                 } else {
                   tileClasses =
-                    "bg-[#F9D423] hover:bg-[#ffe03b] text-black border-black shadow-xs";
-                  badgeLabel = "FINAL 3";
+                    "bg-[#ebd4f4] hover:bg-[#dfc0ec] text-black border-black shadow-xs";
+                  badgeLabel = "🟪 TOP 3";
                 }
               } else {
                 if (isWinner) {
                   tileClasses =
-                    "bg-[#2ECC71] text-black border-black ring-3 ring-black shadow-md";
+                    "bg-[#F9D423] text-black border-black ring-3 ring-black shadow-md";
                   badgeLabel = "👑 #1";
                 } else if (in3) {
                   tileClasses =
-                    "bg-[#F9D423] text-black border-black opacity-85";
-                  badgeLabel = "TOP 3";
+                    "bg-[#9D50BB] text-white border-black opacity-90";
+                  badgeLabel = "🟪 TOP 3";
                 } else if (in6) {
                   tileClasses =
-                    "bg-[#fff3b0] text-gray-800 border-black/50 opacity-70";
-                  badgeLabel = "TOP 6";
+                    "bg-[#c8f5da] text-gray-800 border-black/50 opacity-80";
+                  badgeLabel = "🟩 TOP 6";
                 } else {
                   isDimmed = true;
                   tileClasses =
@@ -2026,11 +2004,11 @@ function TwentyOneThingsBoardView({
             <div className="sm:hidden sticky bottom-2 z-20 rounded-xl border-2 border-black bg-gray-950/95 backdrop-blur-xs text-white px-3 py-2 shadow-lg flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold text-[#F9D423] truncate">
-                  {phase === "pick6" && "6/6 Favorites Selected!"}
-                  {phase === "pick3" && "Top 3 Selected!"}
+                  {phase === "pick6" && "🟩 6/6 Favorites Selected!"}
+                  {phase === "pick3" && "🟪 Top 3 Selected!"}
                   {phase === "pick1" &&
                     pick1 !== null &&
-                    `#1: "${board.items[pick1]}"`}
+                    `🟨 #1: "${board.items[pick1]}"`}
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -2048,7 +2026,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick3}
-                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs h-8 px-3 border border-white"
+                    className="bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs h-8 px-3 border border-white"
                   >
                     Continue to Top 3 →
                   </Button>
@@ -2057,7 +2035,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToPick1}
-                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs h-8 px-3 border border-white"
+                    className="bg-[#9D50BB] text-white hover:bg-[#883ea5] font-headline font-black text-xs h-8 px-3 border border-white"
                   >
                     Continue to #1 Pick →
                   </Button>
@@ -2066,7 +2044,7 @@ function TwentyOneThingsBoardView({
                   <Button
                     size="sm"
                     onClick={advanceToReflect}
-                    className="bg-[#2ECC71] text-black hover:bg-[#27b863] font-headline font-black text-xs h-8 px-3 border border-white"
+                    className="bg-[#F9D423] text-black hover:bg-[#e6c21c] font-headline font-black text-xs h-8 px-3 border border-white"
                   >
                     Lock In #1 &amp; Reflect →
                   </Button>
@@ -2082,7 +2060,7 @@ function TwentyOneThingsBoardView({
             >
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
-                  <Badge variant="green" className="mb-1">
+                  <Badge variant="yellow" className="mb-1">
                     Phase 4 · The Payoff
                   </Badge>
                   <h3 className="font-headline font-black text-lg sm:text-xl">
@@ -2105,6 +2083,7 @@ function TwentyOneThingsBoardView({
                     value={playerName}
                     onChange={(e) => setPlayerName(e.target.value)}
                     placeholder="e.g. Alex"
+                    className="text-base sm:text-sm"
                   />
                 </div>
                 <div>
@@ -2152,74 +2131,55 @@ function TwentyOneThingsBoardView({
                   value={reflectionNote}
                   onChange={(e) => setReflectionNote(e.target.value)}
                   placeholder={`Tell the creator why "${board.items[pick1]}" stood out above the other 20...`}
-                  className="min-h-[80px]"
+                  className="min-h-[80px] text-base sm:text-sm"
                 />
               </div>
 
               <div className="flex items-center justify-end gap-2">
                 <Button
                   type="submit"
-                  className="bg-black text-white hover:bg-gray-800 font-headline font-black px-6 h-11"
+                  disabled={isRecordingAudio}
+                  className="bg-black text-white hover:bg-gray-800 font-headline font-black px-6 h-11 disabled:opacity-50"
                 >
                   <Check className="h-4 w-4 mr-1.5" />
-                  Submit My 6 → 3 → 1 Journey
+                  {isRecordingAudio
+                    ? "Stop Recording to Submit"
+                    : "Submit My 6 → 3 → 1 Journey"}
                 </Button>
               </div>
             </form>
           )}
 
           {phase === "complete" && pick1 !== null && (
-            <div className="rounded-2xl border-2 border-black bg-[#f4fbf7] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="rounded-2xl border-2 border-black bg-[#FFFDF2] p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="space-y-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <Crown className="h-5 w-5 text-[#2ECC71] shrink-0" />
+                  <Crown className="h-5 w-5 text-[#d4a900] shrink-0" />
                   <span className="font-headline font-black text-base sm:text-lg">
                     Your #1 Resonance: &ldquo;{board.items[pick1]}&rdquo;
                   </span>
                 </div>
-                <p className="text-xs text-gray-600">
-                  <strong>Top 3:</strong>{" "}
+                <p className="text-xs text-gray-700">
+                  <strong>🟪 Top 3:</strong>{" "}
                   {pick3.map((i) => board.items[i]).join(" · ")}
                 </p>
-                <p className="text-xs text-gray-500">
-                  <strong>Top 6:</strong>{" "}
+                <p className="text-xs text-gray-600">
+                  <strong>🟩 Top 6:</strong>{" "}
                   {pick6.map((i) => board.items[i]).join(" · ")}
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 w-full lg:w-auto">
-                <div className="grid grid-cols-2 sm:flex items-center gap-2">
-                  <Button
-                    type="button"
-                    onClick={handleNativeShareJourney}
-                    className="bg-black text-white hover:bg-gray-800 border-2 border-black font-headline font-black text-xs h-10 px-3.5 sm:px-4"
-                  >
-                    <Share2 className="h-4 w-4 mr-1.5 shrink-0" />
-                    <span>Share</span>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCopyJourneyResults}
-                    className={cn(
-                      "border-2 border-black font-headline font-bold text-xs h-10 px-3.5 sm:px-4 transition-colors",
-                      journeyResultsCopied
-                        ? "bg-[#2ECC71] text-black hover:bg-[#27b863]"
-                        : "bg-white text-black hover:bg-gray-100"
-                    )}
-                  >
-                    {journeyResultsCopied ? (
-                      <>
-                        <Check className="h-4 w-4 mr-1.5 shrink-0" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="h-4 w-4 mr-1.5 shrink-0" />
-                        <span>Copy results</span>
-                      </>
-                    )}
-                  </Button>
-                </div>
+                {(() => {
+                  const shareOpts = buildJourneyShareOptions();
+                  return shareOpts ? (
+                    <ResultShareButtons
+                      title={shareOpts.title}
+                      text={shareOpts.text}
+                      url={shareOpts.url}
+                      className="flex-1"
+                    />
+                  ) : null;
+                })()}
                 <Button
                   type="button"
                   variant="outline"
@@ -2295,7 +2255,7 @@ function TwentyOneThingsBoardView({
                           · {j.createdAt}
                         </span>
                       </div>
-                      <Badge variant="green" className="text-xs">
+                      <Badge variant="yellow" className="text-xs">
                         👑 #1: {j.pick1}
                       </Badge>
                     </div>
@@ -2313,12 +2273,12 @@ function TwentyOneThingsBoardView({
                     <div className="pt-1 flex flex-col gap-1 text-[11px] text-gray-600">
                       <div>
                         <span className="font-bold text-black">
-                          Top 3 Finalists:
+                          🟪 Top 3 Finalists:
                         </span>{" "}
                         {j.pick3.map((it, i) => (
                           <span
                             key={i}
-                            className="inline-block rounded bg-[#F9D423]/60 px-1.5 py-0.5 mr-1 mb-1 font-semibold text-black"
+                            className="inline-block rounded bg-[#9D50BB]/20 border border-[#9D50BB]/35 px-1.5 py-0.5 mr-1 mb-1 font-semibold text-black"
                           >
                             {it}
                           </span>
@@ -2326,7 +2286,7 @@ function TwentyOneThingsBoardView({
                       </div>
                       <div>
                         <span className="font-bold text-gray-700">
-                          Initial Top 6:
+                          🟩 Initial Top 6:
                         </span>{" "}
                         {j.pick6.join(" · ")}
                       </div>

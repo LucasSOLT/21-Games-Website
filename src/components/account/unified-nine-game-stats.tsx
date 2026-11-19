@@ -107,6 +107,7 @@ export function UnifiedNineGameStats({
   const [oneWinHistory, setOneWinHistory] = useState<OneWinHistoryItem[]>(() =>
     getOneWinPersonalHistory()
   );
+  const [showAllOneWin, setShowAllOneWin] = useState<boolean>(false);
   const [internalSelectedGameId, setInternalSelectedGameId] =
     useState<AllGameSlug>(selectedGameId ?? "21-things");
 
@@ -402,7 +403,7 @@ export function UnifiedNineGameStats({
                     </p>
                   ) : (
                     <div className="space-y-1 overflow-hidden">
-                      {oneWinHistory.slice(0, 2).map((entry) => (
+                      {(showAllOneWin ? oneWinHistory : oneWinHistory.slice(0, 2)).map((entry) => (
                         <div
                           key={`${entry.dateKey}-${entry.normalizedKey}`}
                           className="flex items-center justify-between gap-2 rounded-lg border border-black/10 bg-white px-2 py-1 text-[11px] overflow-hidden"
@@ -418,6 +419,17 @@ export function UnifiedNineGameStats({
                           </span>
                         </div>
                       ))}
+                      {oneWinHistory.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllOneWin((v) => !v)}
+                          className="w-full pt-0.5 text-center text-[10px] font-black text-[#9D50BB] hover:underline cursor-pointer"
+                        >
+                          {showAllOneWin
+                            ? "Show less"
+                            : `Show all ${oneWinHistory.length} daily wins →`}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

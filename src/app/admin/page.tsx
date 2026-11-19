@@ -59,18 +59,25 @@ import {
   getPuzzleNumberForDate,
 } from "@/lib/daily-engine";
 import {
-  fetchRemote17SyllablesOverride,
-  fetchRemote21ThingsOverride,
-  fetchRemoteConnect5Override,
+  findConnect5TitleSpoiler,
+  isPlaceholderConnect5Connection,
+  sanitizeCustomWordChunks,
+} from "@/lib/puzzle-sanitizers";
+import {
+  deleteAdminOverrideForGame,
+  fetchRemoteOverrideForGame,
   getAdmin17SyllablesOverrides,
   getAdmin21ThingsOverrides,
   getAdminConnect5Overrides,
+  getAdminOverridesForGame,
+  getPuzzlesStoreSnapshot,
   saveAdmin17SyllablesOverride,
   saveAdmin21ThingsOverride,
   saveAdminConnect5Override,
   saveAdminOverrideForGame,
+  subscribeToPuzzlesUpdated,
 } from "@/lib/game-storage";
-import type { AllGameSlug } from "@/lib/games-config";
+import { ALL_GAME_SLUGS, type AllGameSlug } from "@/lib/games-config";
 import { collectPayloadStrings } from "@/lib/custom-puzzles";
 import type { GenericPublishRequest } from "@/components/admin/generic-publish";
 import { NineRhymesStudioTab } from "@/components/admin/nine-rhymes-studio-tab";
@@ -80,6 +87,7 @@ import { FourScoreStudioTab } from "@/components/admin/four-score-studio-tab";
 import { MoveTwoStudioTab } from "@/components/admin/move-two-studio-tab";
 import { OneWinStudioTab } from "@/components/admin/one-win-studio-tab";
 import { HaikuSliceCutter } from "@/components/admin/haiku-slice-cutter";
+import { AdminPuzzlePreviewModal } from "@/components/admin/admin-puzzle-preview-modal";
 import {
   classifyDiagnosticError,
   type DiagnosticReport,
@@ -115,6 +123,77 @@ import { cn } from "@/lib/utils";
 const SSR_ANCHOR_DATE = "2026-11-05";
 const subscribeNoop = () => () => {};
 
+type TwentyOneThingsBoardWithAttribution = TwentyOneThingsBoard & {
+  author?: string;
+  editor?: string;
+};
+
+type SeventeenSyllablesWithAttribution = SeventeenSyllablesPuzzle & {
+  editor?: string;
+};
+
+const GAME_STUDIO_TITLES: Record<AllGameSlug, string> = {
+  "21-things": "21 Things",
+  "17-syllables": "17 Syllables",
+  "9-rhymes": "9 Rhymes",
+  "eightfold-echo": "Eightfold Echo",
+  "6-pics": "6 Pics",
+  "connect-5": "Connect 5",
+  "four-score": "Four Score",
+  "move-2": "Move Two",
+  "1-win": "1 Win",
+};
+
+function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y || 2026, (m || 1) - 1, (d || 1) + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+function realignLineCustomChunks(
+  prevLine: string,
+  nextLine: string,
+  lineIdx: 0 | 1 | 2,
+  prevCustom: Record<string, string[]>,
+  nextAllLines: [string, string, string]
+): Record<string, string[]> {
+  const normWords = (line: string) =>
+    line
+      .toUpperCase()
+      .split(/\s+/)
+      .map((w) => w.replace(/[^A-Z]/g, ""))
+      .filter(Boolean);
+
+  const oldWords = normWords(prevLine);
+  const newWords = normWords(nextLine);
+  const candidate: Record<string, string[]> = {};
+
+  for (const [key, val] of Object.entries(prevCustom)) {
+    if (!key.startsWith(`${lineIdx}-`)) {
+      candidate[key] = val;
+    }
+  }
+
+  const usedOldIndices = new Set<number>();
+  newWords.forEach((word, newIdx) => {
+    const samePosMatch =
+      oldWords[newIdx] === word && !usedOldIndices.has(newIdx) ? newIdx : -1;
+    const matchedOldIdx =
+      samePosMatch >= 0
+        ? samePosMatch
+        : oldWords.findIndex((w, i) => w === word && !usedOldIndices.has(i));
+    if (matchedOldIdx >= 0) {
+      usedOldIndices.add(matchedOldIdx);
+      const prevSlices = prevCustom[`${lineIdx}-${matchedOldIdx}`];
+      if (prevSlices) {
+        candidate[`${lineIdx}-${newIdx}`] = prevSlices;
+      }
+    }
+  });
+
+  return sanitizeCustomWordChunks(nextAllLines, candidate) ?? {};
+}
+
 interface PendingPublishState {
   isOpen: boolean;
   gameSlug: AllGameSlug;
@@ -143,15 +222,29 @@ export default function AdminPage() {
     () => false
   );
 
+  const puzzlesStoreRev = useSyncExternalStore(
+    subscribeToPuzzlesUpdated,
+    getPuzzlesStoreSnapshot,
+    () => 0
+  );
+
   useEffect(() => {
     if (mounted && !authLoading && !canAccessPuzzleStudio(profile)) {
       router.replace("/");
     }
   }, [mounted, authLoading, profile, router]);
+
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const todayDateKey = mounted ? getLocalDateKey() : SSR_ANCHOR_DATE;
   const targetDate = selectedDate ?? todayDateKey;
-  const [activeTab, setActiveTab] = useState<string>("connect-5");
+  const [rawActiveTab, setActiveTab] = useState<string>("connect-5");
+  const [cloudSyncVersion, setCloudSyncVersion] = useState<number>(0);
+  const [isDraftDirty, setIsDraftDirty] = useState<boolean>(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const [isUnpublishing, setIsUnpublishing] = useState<boolean>(false);
+  const [childDrafts, setChildDrafts] = useState<
+    Partial<Record<AllGameSlug, unknown>>
+  >({});
 
   // Confirmation Modal State before Publishing Puzzles
   const [pendingPublish, setPendingPublish] = useState<PendingPublishState | null>(null);
@@ -166,9 +259,62 @@ export default function AdminPage() {
 
   // Authorization and permission calculations
   const isGM = isGameMaster(profile);
-  const editPerm = useMemo(() => {
+  const activeTab = !isGM && rawActiveTab === "users" ? "connect-5" : rawActiveTab;
+  const rawEditPerm = useMemo(() => {
     return checkDateEditPermission(profile, targetDate, todayDateKey);
   }, [profile, targetDate, todayDateKey]);
+
+  const editPerm = useMemo(() => {
+    if (!isGM && targetDate <= todayDateKey) {
+      return {
+        ...rawEditPerm,
+        canEdit: false,
+        reason:
+          "Editors can schedule & edit future dates (tomorrow onward). Root Game Masters can edit today/past dates.",
+      };
+    }
+    return rawEditPerm;
+  }, [isGM, rawEditPerm, targetDate, todayDateKey]);
+
+  useEffect(() => {
+    if (!isDraftDirty || typeof window === "undefined") return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDraftDirty]);
+
+  const confirmDiscardIfDirty = useCallback((): boolean => {
+    if (!isDraftDirty || typeof window === "undefined") return true;
+    return window.confirm(
+      "You have unsaved draft changes. Discard them and switch?"
+    );
+  }, [isDraftDirty]);
+
+  const handleDateChange = useCallback(
+    (nextDate: string) => {
+      if (!nextDate || nextDate === targetDate) return;
+      if (!confirmDiscardIfDirty()) return;
+      setSelectedDate(nextDate);
+      setIsDraftDirty(false);
+    },
+    [confirmDiscardIfDirty, targetDate]
+  );
+
+  const handleTabChange = useCallback(
+    (nextTab: string) => {
+      if (nextTab === activeTab) return;
+      if (!confirmDiscardIfDirty()) return;
+      setActiveTab(nextTab);
+      setIsDraftDirty(false);
+    },
+    [activeTab, confirmDiscardIfDirty]
+  );
+
+  const defaultAuthorLabel = profile?.displayName || "SOL Theory";
+  const defaultEditorLabel = profile?.displayName || "Daily Editorial";
 
   const openDiagnosticError = useCallback(
     (
@@ -176,7 +322,7 @@ export default function AdminPage() {
       context: {
         gameSlug: AllGameSlug;
         targetDate: string;
-        action: "save" | "fetch" | "sync" | "validate";
+        action: "save" | "delete" | "fetch" | "sync" | "validate";
         customMessage?: string;
       },
       retryHandler?: () => Promise<void>
@@ -229,6 +375,7 @@ export default function AdminPage() {
   // ==========================================================================
   const [t21Title, setT21Title] = useState("Everyday Magic & Small Joys");
   const [t21Creator, setT21Creator] = useState("");
+  const [t21Editor, setT21Editor] = useState("Daily Editorial");
   const [t21Bio, setT21Bio] = useState(
     "21 little things that make ordinary days feel extraordinary."
   );
@@ -242,6 +389,7 @@ export default function AdminPage() {
   // ==========================================================================
   const [s17Theme, setS17Theme] = useState<string>("Golden Autumn");
   const [s17Author, setS17Author] = useState<string>("SOL Theory");
+  const [s17Editor, setS17Editor] = useState<string>("Daily Editorial");
   const [s17Line1, setS17Line1] = useState<string>("Gold leaves drift along");
   const [s17Line2, setS17Line2] = useState<string>("Cool winds whisper in the dusk");
   const [s17Line3, setS17Line3] = useState<string>("Soft earth waits for dawn");
@@ -267,45 +415,112 @@ export default function AdminPage() {
     }
   }, []);
 
-  const handleManualCloudSync = async () => {
-    setIsManualSyncing(true);
-    try {
-      const [remoteC5, remote21, remote17] = await Promise.all([
-        fetchRemoteConnect5Override(targetDate),
-        fetchRemote21ThingsOverride(targetDate),
-        fetchRemote17SyllablesOverride(targetDate),
-      ]);
+  const hasAdminOverrideForDate = useCallback(
+    (gameSlug: AllGameSlug, dateKey: string): boolean => {
+      void puzzlesStoreRev;
+      void cloudSyncVersion;
+      if (!mounted) return false;
+      return Boolean(getAdminOverridesForGame(gameSlug)[dateKey]);
+    },
+    [cloudSyncVersion, mounted, puzzlesStoreRev]
+  );
+
+  const overrideStatusByGame = useMemo(() => {
+    const out: Record<AllGameSlug, boolean> = {
+      "21-things": false,
+      "17-syllables": false,
+      "9-rhymes": false,
+      "eightfold-echo": false,
+      "6-pics": false,
+      "connect-5": false,
+      "four-score": false,
+      "move-2": false,
+      "1-win": false,
+    };
+    for (const slug of ALL_GAME_SLUGS) {
+      out[slug] = hasAdminOverrideForDate(slug, targetDate);
+    }
+    return out;
+  }, [hasAdminOverrideForDate, targetDate]);
+
+  const activeGameSlug: AllGameSlug | null = useMemo(
+    () =>
+      (ALL_GAME_SLUGS as readonly string[]).includes(activeTab)
+        ? (activeTab as AllGameSlug)
+        : null,
+    [activeTab]
+  );
+
+  const applyFetchedLegacyOverrides = useCallback(
+    (
+      remoteBySlug: Record<string, unknown | null>,
+      fallbackAuthor: string,
+      fallbackEditor: string
+    ) => {
+      const remoteC5 = remoteBySlug["connect-5"] as Connect5Puzzle | null;
       if (remoteC5) {
         setC5Title(remoteC5.title);
-        setC5Author(remoteC5.author);
-        setC5Editor(remoteC5.editor);
+        setC5Author(remoteC5.author || fallbackAuthor);
+        setC5Editor(remoteC5.editor || fallbackEditor);
         setC5Words([...remoteC5.words]);
         setC5Connections([...remoteC5.connections]);
         setC5Hints([...remoteC5.revealedHints]);
       }
+      const remote21 = remoteBySlug["21-things"] as
+        | TwentyOneThingsBoardWithAttribution
+        | null;
       if (remote21) {
         setT21Title(remote21.title);
-        setT21Creator(remote21.creatorName);
+        setT21Creator(remote21.author || remote21.creatorName || fallbackAuthor);
+        setT21Editor(remote21.editor || fallbackEditor);
         setT21Bio(remote21.creatorBio);
         setT21Items(remote21.items.slice(0, 21));
       }
+      const remote17 = remoteBySlug["17-syllables"] as
+        | SeventeenSyllablesWithAttribution
+        | null;
       if (remote17) {
         setS17Theme(remote17.theme || "");
-        setS17Author(remote17.author || "SOL Theory");
+        setS17Author(remote17.author || fallbackAuthor);
+        setS17Editor(remote17.editor || fallbackEditor);
         setS17Line1(remote17.lines[0] || "");
         setS17Line2(remote17.lines[1] || "");
         setS17Line3(remote17.lines[2] || "");
-        setS17CustomWordChunks(remote17.customWordChunks ?? {});
+        setS17CustomWordChunks(
+          sanitizeCustomWordChunks(remote17.lines, remote17.customWordChunks) ?? {}
+        );
       }
+    },
+    []
+  );
+
+  const handleManualCloudSync = async () => {
+    setIsManualSyncing(true);
+    try {
+      const entries = await Promise.all(
+        ALL_GAME_SLUGS.map(
+          async (slug) =>
+            [slug, await fetchRemoteOverrideForGame(slug, targetDate)] as const
+        )
+      );
+      const remoteBySlug = Object.fromEntries(entries);
+      applyFetchedLegacyOverrides(
+        remoteBySlug,
+        defaultAuthorLabel,
+        defaultEditorLabel
+      );
+      setCloudSyncVersion((v) => v + 1);
+      setIsDraftDirty(false);
+      const syncedCount = entries.filter(([, val]) => Boolean(val)).length;
       toast({
         title: "Cloud Sync Complete",
-        description: `Refreshed puzzle overrides from Supabase for ${targetDate}.`,
+        description: `Checked all 9 games on Supabase for ${targetDate} (${syncedCount} custom override${syncedCount === 1 ? "" : "s"} active).`,
       });
     } catch (err) {
       openDiagnosticError(
         err,
         {
-          gameSlug: activeTab === "21-things" || activeTab === "17-syllables" ? activeTab : "connect-5",
+          gameSlug: activeGameSlug ?? "connect-5",
           targetDate,
           action: "fetch",
           customMessage: "Cloud Sync Failed: Unable to fetch daily puzzle overrides from Supabase.",
@@ -324,52 +539,70 @@ export default function AdminPage() {
     setC5Words(["", "", "", "", ""]);
     setC5Connections(["", "", "", ""]);
     setC5Hints([]);
+    setIsDraftDirty(true);
   };
 
-  const handleRevertConnect5Default = () => {
+  const handleRevertConnect5Default = (markDirty = true) => {
     const defaultC5 = getConnect5PuzzleForDate(targetDate, {});
     setC5Title(defaultC5.title);
-    setC5Author(defaultC5.author);
-    setC5Editor(defaultC5.editor);
+    setC5Author(defaultC5.author || defaultAuthorLabel);
+    setC5Editor(defaultC5.editor || defaultEditorLabel);
     setC5Words([...defaultC5.words]);
     setC5Connections([...defaultC5.connections]);
     setC5Hints([...defaultC5.revealedHints]);
+    if (markDirty) setIsDraftDirty(true);
   };
 
   const handleClear21Things = () => {
     setT21Title("");
     setT21Creator("");
+    setT21Editor("");
     setT21Bio("");
     setT21Stream("");
     setT21Items(Array.from({ length: 21 }, () => ""));
+    setIsDraftDirty(true);
   };
 
-  const handleRevert21ThingsDefault = () => {
-    const default21 = get21ThingsBoardForDate(targetDate, {});
+  const handleRevert21ThingsDefault = (markDirty = true) => {
+    const default21 = get21ThingsBoardForDate(
+      targetDate,
+      {}
+    ) as TwentyOneThingsBoardWithAttribution;
     setT21Title(default21.title);
-    setT21Creator(default21.creatorName);
+    setT21Creator(default21.author || default21.creatorName || defaultAuthorLabel);
+    setT21Editor(default21.editor || defaultEditorLabel);
     setT21Bio(default21.creatorBio);
     setT21Stream("");
     setT21Items(default21.items.slice(0, 21));
+    if (markDirty) setIsDraftDirty(true);
   };
 
   const handleClear17Syllables = () => {
     setS17Theme("");
     setS17Author("");
+    setS17Editor("");
     setS17Line1("");
     setS17Line2("");
     setS17Line3("");
     setS17CustomWordChunks({});
+    setIsDraftDirty(true);
   };
 
-  const handleRevert17SyllablesDefault = () => {
-    const default17 = get17SyllablesPuzzleForDate(targetDate, {});
+  const handleRevert17SyllablesDefault = (markDirty = true) => {
+    const default17 = get17SyllablesPuzzleForDate(
+      targetDate,
+      {}
+    ) as SeventeenSyllablesWithAttribution;
     setS17Theme(default17.theme || "");
-    setS17Author(default17.author || "SOL Theory");
+    setS17Author(default17.author || defaultAuthorLabel);
+    setS17Editor(default17.editor || defaultEditorLabel);
     setS17Line1(default17.lines[0] || "");
     setS17Line2(default17.lines[1] || "");
     setS17Line3(default17.lines[2] || "");
-    setS17CustomWordChunks(default17.customWordChunks ?? {});
+    setS17CustomWordChunks(
+      sanitizeCustomWordChunks(default17.lines, default17.customWordChunks) ?? {}
+    );
+    if (markDirty) setIsDraftDirty(true);
   };
 
   useEffect(() => {
@@ -380,58 +613,56 @@ export default function AdminPage() {
       const scheduledC5 = localC5 ?? getConnect5PuzzleForDate(dateKey);
       if (cancelled) return;
       setC5Title(scheduledC5.title);
-      setC5Author(scheduledC5.author);
-      setC5Editor(scheduledC5.editor);
+      setC5Author(scheduledC5.author || defaultAuthorLabel);
+      setC5Editor(scheduledC5.editor || defaultEditorLabel);
       setC5Words([...scheduledC5.words]);
       setC5Connections([...scheduledC5.connections]);
       setC5Hints([...scheduledC5.revealedHints]);
 
       const local21 = getAdmin21ThingsOverrides()[dateKey];
-      const scheduled21 = local21 ?? get21ThingsBoardForDate(dateKey);
+      const scheduled21 = (local21 ??
+        get21ThingsBoardForDate(dateKey)) as TwentyOneThingsBoardWithAttribution;
       setT21Title(scheduled21.title);
-      setT21Creator(scheduled21.creatorName);
+      setT21Creator(
+        scheduled21.author || scheduled21.creatorName || defaultAuthorLabel
+      );
+      setT21Editor(scheduled21.editor || defaultEditorLabel);
       setT21Bio(scheduled21.creatorBio);
       setT21Stream("");
       setT21Items(scheduled21.items.slice(0, 21));
 
       const local17 = getAdmin17SyllablesOverrides()[dateKey];
-      const scheduled17 = local17 ?? get17SyllablesPuzzleForDate(dateKey);
+      const scheduled17 = (local17 ??
+        get17SyllablesPuzzleForDate(dateKey)) as SeventeenSyllablesWithAttribution;
       setS17Theme(scheduled17.theme || "");
-      setS17Author(scheduled17.author || "SOL Theory");
+      setS17Author(scheduled17.author || defaultAuthorLabel);
+      setS17Editor(scheduled17.editor || defaultEditorLabel);
       setS17Line1(scheduled17.lines[0] || "");
       setS17Line2(scheduled17.lines[1] || "");
       setS17Line3(scheduled17.lines[2] || "");
-      setS17CustomWordChunks(scheduled17.customWordChunks ?? {});
+      setS17CustomWordChunks(
+        sanitizeCustomWordChunks(
+          scheduled17.lines,
+          scheduled17.customWordChunks
+        ) ?? {}
+      );
 
-      // 2. Unconditionally fetch remote overrides in parallel to prevent stale local cache
+      // 2. Unconditionally fetch remote overrides across all 9 games in parallel
       try {
-        const [remoteC5, remote21, remote17] = await Promise.all([
-          fetchRemoteConnect5Override(dateKey),
-          fetchRemote21ThingsOverride(dateKey),
-          fetchRemote17SyllablesOverride(dateKey),
-        ]);
+        const entries = await Promise.all(
+          ALL_GAME_SLUGS.map(
+            async (slug) =>
+              [slug, await fetchRemoteOverrideForGame(slug, dateKey)] as const
+          )
+        );
         if (cancelled) return;
-        if (remoteC5) {
-          setC5Title(remoteC5.title);
-          setC5Author(remoteC5.author);
-          setC5Editor(remoteC5.editor);
-          setC5Words([...remoteC5.words]);
-          setC5Connections([...remoteC5.connections]);
-          setC5Hints([...remoteC5.revealedHints]);
-        }
-        if (remote21) {
-          setT21Title(remote21.title);
-          setT21Creator(remote21.creatorName);
-          setT21Bio(remote21.creatorBio);
-          setT21Items(remote21.items.slice(0, 21));
-        }
-        if (remote17) {
-          setS17Theme(remote17.theme || "");
-          setS17Author(remote17.author || "SOL Theory");
-          setS17Line1(remote17.lines[0] || "");
-          setS17Line2(remote17.lines[1] || "");
-          setS17Line3(remote17.lines[2] || "");
-          setS17CustomWordChunks(remote17.customWordChunks ?? {});
+        applyFetchedLegacyOverrides(
+          Object.fromEntries(entries),
+          defaultAuthorLabel,
+          defaultEditorLabel
+        );
+        if (entries.some(([, v]) => Boolean(v))) {
+          setCloudSyncVersion((v) => v + 1);
         }
       } catch {
         // Fallback silently to local cache
@@ -442,7 +673,7 @@ export default function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, targetDate]);
+  }, [applyFetchedLegacyOverrides, defaultAuthorLabel, defaultEditorLabel, targetDate]);
 
   useEffect(() => {
     if (!isGM || activeTab !== "users") return;
@@ -456,8 +687,24 @@ export default function AdminPage() {
     };
   }, [isGM, activeTab]);
 
+  const c5TitleSpoiler = useMemo(
+    () => findConnect5TitleSpoiler(c5Title, c5Words),
+    [c5Title, c5Words]
+  );
+
+  const c5PlaceholderBridges = useMemo(
+    () =>
+      c5Connections
+        .map((conn, idx) =>
+          !conn.trim() || isPlaceholderConnect5Connection(conn) ? idx + 1 : null
+        )
+        .filter((v): v is number => v !== null),
+    [c5Connections]
+  );
+
   const toggleC5HintLetter = (rowIdx: number, colIdx: number) => {
     if (rowIdx < 1 || rowIdx > 4 || !editPerm.canEdit) return;
+    setIsDraftDirty(true);
     setC5Hints((prev) => {
       const exists = prev.some((h) => h.row === rowIdx && h.col === colIdx);
       if (exists) {
@@ -469,6 +716,7 @@ export default function AdminPage() {
 
   const handleC5WordChange = (rowIdx: number, rawVal: string) => {
     if (!editPerm.canEdit) return;
+    setIsDraftDirty(true);
     const clean = rawVal.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
     const prevWords = c5Words;
     const nextWords = [...c5Words] as [string, string, string, string, string];
@@ -516,6 +764,7 @@ export default function AdminPage() {
 
   const handleAutoFillConnect5Explanations = () => {
     if (!editPerm.canEdit) return;
+    setIsDraftDirty(true);
     const filled = [0, 1, 2, 3].map((idx) => {
       const w1 = c5Words[idx] ?? "";
       const w2 = c5Words[idx + 1] ?? "";
@@ -538,10 +787,140 @@ export default function AdminPage() {
       words: sanitizedWords,
       connections: c5Connections,
       revealedHints: c5Hints,
-      author: c5Author.trim() || "Puzzle Master",
-      editor: c5Editor.trim() || "Daily Editor",
+      author: c5Author.trim() || defaultAuthorLabel,
+      editor: c5Editor.trim() || defaultEditorLabel,
       customDate: targetDate,
     });
+  };
+
+  const build21BoardDraftObject = (): TwentyOneThingsBoardWithAttribution => {
+    const authorVal = t21Creator.trim() || defaultAuthorLabel;
+    const editorVal = t21Editor.trim() || defaultEditorLabel;
+    const sanitized = t21Items.map((it, idx) => {
+      const { text } = enforceTileConstraints(it);
+      return text || `Item #${idx + 1}`;
+    });
+    return {
+      id: `21t-custom-${targetDate}`,
+      puzzleNumber: getPuzzleNumberForDate(targetDate),
+      title: t21Title.trim() || "Daily 21 Things",
+      creatorName: authorVal,
+      creatorHandle: `@${(authorVal || "curator")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toLowerCase()}`,
+      creatorBio: t21Bio.trim(),
+      author: authorVal,
+      editor: editorVal,
+      items: sanitized,
+      sampleJourneys: [],
+      customDate: targetDate,
+    };
+  };
+
+  const build17SyllablesDraftObject = (): SeventeenSyllablesWithAttribution => {
+    const lines: [string, string, string] = [
+      s17Line1.trim(),
+      s17Line2.trim(),
+      s17Line3.trim(),
+    ];
+    const cleanedCustom = sanitizeCustomWordChunks(lines, s17CustomWordChunks);
+    const hasCustomCuts = Boolean(
+      cleanedCustom && Object.keys(cleanedCustom).length > 0
+    );
+    const chunks = hasCustomCuts
+      ? buildStructuredHaikuLines(lines, cleanedCustom).flatMap((l) =>
+          l.words.flatMap((w) => w.chunks)
+        )
+      : sliceHaikuIntoChunks(lines, 16);
+    const puzzleNumber = getPuzzleNumberForDate(targetDate);
+    return {
+      id: `17s-custom-${targetDate}`,
+      puzzleNumber,
+      dateKey: targetDate,
+      theme: s17Theme.trim() || `17 Syllables #${puzzleNumber}`,
+      author: s17Author.trim() || defaultAuthorLabel,
+      editor: s17Editor.trim() || defaultEditorLabel,
+      lines,
+      chunks,
+      ...(hasCustomCuts && cleanedCustom
+        ? { customWordChunks: cleanedCustom }
+        : {}),
+    };
+  };
+
+  const getDraftPayloadForGame = (slug: AllGameSlug): unknown => {
+    if (slug === "connect-5") return buildC5PuzzleObject();
+    if (slug === "21-things") return build21BoardDraftObject();
+    if (slug === "17-syllables") return build17SyllablesDraftObject();
+    return childDrafts[slug] ?? getAdminOverridesForGame(slug)[targetDate] ?? null;
+  };
+
+  const handleUnpublishActiveOverride = async () => {
+    if (!activeGameSlug) return;
+    if (!editPerm.canEdit) {
+      toast({
+        title: "Permission Denied",
+        description:
+          editPerm.reason ||
+          "Editors can schedule & edit future dates (tomorrow onward). Root Game Masters can edit today/past dates.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const gameTitle = GAME_STUDIO_TITLES[activeGameSlug];
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Unpublish the live custom ${gameTitle} override for ${targetDate}? This removes it from Supabase daily_puzzles and reverts ${targetDate} to the canonical curated puzzle.`
+      )
+    ) {
+      return;
+    }
+
+    setIsUnpublishing(true);
+    const authCtx = {
+      userEmail: profile?.email ?? null,
+      userRole: profile?.role ?? null,
+    };
+    try {
+      const res = await deleteAdminOverrideForGame(
+        activeGameSlug,
+        targetDate,
+        authCtx
+      );
+      if (!res.ok) {
+        openDiagnosticError(
+          res.rawError ||
+            res.error ||
+            `Failed to unpublish ${gameTitle} override for ${targetDate}.`,
+          {
+            gameSlug: activeGameSlug,
+            targetDate,
+            action: "delete",
+            customMessage: `Unpublish Failed: Could not delete ${gameTitle} override from Supabase.`,
+          },
+          handleUnpublishActiveOverride
+        );
+        return;
+      }
+
+      if (activeGameSlug === "connect-5") {
+        handleRevertConnect5Default(false);
+      } else if (activeGameSlug === "21-things") {
+        handleRevert21ThingsDefault(false);
+      } else if (activeGameSlug === "17-syllables") {
+        handleRevert17SyllablesDefault(false);
+      }
+      setCloudSyncVersion((v) => v + 1);
+      setIsDraftDirty(false);
+      toast({
+        title: `${gameTitle} Override Unpublished`,
+        description: `${targetDate} has reverted to its canonical curated puzzle across all sessions.`,
+      });
+    } finally {
+      setIsUnpublishing(false);
+    }
   };
 
   const handleSaveConnect5 = async (playImmediately = false) => {
@@ -605,7 +984,7 @@ export default function AdminPage() {
         details: [
           `Chain: ${puzzleObj.words.join(" → ")}`,
           `Hints Pre-Revealed: ${puzzleObj.revealedHints.length}`,
-          `Editor: ${puzzleObj.editor}`,
+          `Author: ${puzzleObj.author} · Editor: ${puzzleObj.editor}`,
         ],
       },
       onConfirm: async () => {
@@ -623,6 +1002,7 @@ export default function AdminPage() {
 
           if (res.remotePersisted) {
             setPendingPublish(null);
+            setIsDraftDirty(false);
             toast({
               title: `Connect 5 Saved Globally for ${targetDate}!`,
               description: `Persisted to Supabase and browser cache: ${puzzleObj.words.join(" → ")}.`,
@@ -645,6 +1025,7 @@ export default function AdminPage() {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
                   setRetrySyncFn(null);
+                  setIsDraftDirty(false);
                   toast({
                     title: `Connect 5 Saved Globally for ${targetDate}!`,
                     description: `Persisted to Supabase: ${puzzleObj.words.join(" → ")}.`,
@@ -703,6 +1084,7 @@ export default function AdminPage() {
       if (idx < 21) next[idx] = it;
     });
     setT21Items(next);
+    setIsDraftDirty(true);
     toast({
       title: `Parsed ${items.length} Tiles`,
       description:
@@ -728,15 +1110,20 @@ export default function AdminPage() {
     });
     setT21Items(sanitized);
 
-    const boardObj: TwentyOneThingsBoard = {
+    const authorVal = t21Creator.trim() || defaultAuthorLabel;
+    const editorVal = t21Editor.trim() || defaultEditorLabel;
+
+    const boardObj: TwentyOneThingsBoardWithAttribution = {
       id: `21t-custom-${targetDate}-${Date.now()}`,
       puzzleNumber: getPuzzleNumberForDate(targetDate),
       title: t21Title.trim() || "Daily 21 Things",
-      creatorName: t21Creator.trim() || "Daily Curator",
-      creatorHandle: `@${(t21Creator.trim() || "curator")
+      creatorName: authorVal,
+      creatorHandle: `@${(authorVal || "curator")
         .replace(/[^a-zA-Z0-9]/g, "")
         .toLowerCase()}`,
       creatorBio: t21Bio.trim(),
+      author: authorVal,
+      editor: editorVal,
       items: sanitized,
       sampleJourneys: [],
       customDate: targetDate,
@@ -751,11 +1138,12 @@ export default function AdminPage() {
       },
       { mode: "public" }
     );
+    const editorMod = moderateFields({ editor: editorVal }, "public");
 
-    if (!modCheck.allowed) {
+    if (!modCheck.allowed || !editorMod.allowed) {
       toast({
         title: "Content Moderation Error",
-        description: modCheck.reason,
+        description: modCheck.reason || editorMod.reason,
         variant: "destructive",
       });
       return;
@@ -781,7 +1169,7 @@ export default function AdminPage() {
         preview: `21 items: "${boardObj.items[0]}", "${boardObj.items[1]}", "${boardObj.items[2]}"...`,
         details: [
           `Theme: "${boardObj.title}"`,
-          `Creator: ${boardObj.creatorName} (${boardObj.creatorHandle})`,
+          `Author: ${boardObj.author} · Editor: ${boardObj.editor}`,
           `Total items: ${boardObj.items.length} tiles`,
         ],
       },
@@ -800,6 +1188,7 @@ export default function AdminPage() {
 
           if (res.remotePersisted) {
             setPendingPublish(null);
+            setIsDraftDirty(false);
             toast({
               title: `21 Things Saved Globally for ${targetDate}!`,
               description: `Persisted to Supabase: "${boardObj.title}" by ${boardObj.creatorName} is now live across all sessions.`,
@@ -822,6 +1211,7 @@ export default function AdminPage() {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
                   setRetrySyncFn(null);
+                  setIsDraftDirty(false);
                   toast({
                     title: `21 Things Saved Globally for ${targetDate}!`,
                     description: `Persisted to Supabase: "${boardObj.title}" is now live.`,
@@ -898,22 +1288,28 @@ export default function AdminPage() {
       return;
     }
 
-    const hasCustomCuts = Object.keys(s17CustomWordChunks).length > 0;
+    const cleanedCustom = sanitizeCustomWordChunks(lines, s17CustomWordChunks);
+    const hasCustomCuts = Boolean(
+      cleanedCustom && Object.keys(cleanedCustom).length > 0
+    );
     const chunks = hasCustomCuts
-      ? buildStructuredHaikuLines(lines, s17CustomWordChunks).flatMap((l) =>
+      ? buildStructuredHaikuLines(lines, cleanedCustom).flatMap((l) =>
           l.words.flatMap((w) => w.chunks)
         )
       : sliceHaikuIntoChunks(lines, 16);
     const puzzleNumber = getPuzzleNumberForDate(targetDate);
-    const puzzleObj: SeventeenSyllablesPuzzle = {
+    const puzzleObj: SeventeenSyllablesWithAttribution = {
       id: `17s-custom-${targetDate}-${Date.now()}`,
       puzzleNumber,
       dateKey: targetDate,
       theme: s17Theme.trim() || `17 Syllables #${puzzleNumber}`,
-      author: s17Author.trim() || "SOL Theory",
+      author: s17Author.trim() || defaultAuthorLabel,
+      editor: s17Editor.trim() || defaultEditorLabel,
       lines,
       chunks,
-      ...(hasCustomCuts ? { customWordChunks: s17CustomWordChunks } : {}),
+      ...(hasCustomCuts && cleanedCustom
+        ? { customWordChunks: cleanedCustom }
+        : {}),
     };
 
     const modCheck = check17SyllablesPuzzleModeration(
@@ -924,11 +1320,15 @@ export default function AdminPage() {
       },
       { mode: "public" }
     );
+    const editorMod = moderateFields(
+      { editor: puzzleObj.editor ?? "" },
+      "public"
+    );
 
-    if (!modCheck.allowed) {
+    if (!modCheck.allowed || !editorMod.allowed) {
       toast({
         title: "Content Moderation Error",
-        description: modCheck.reason,
+        description: modCheck.reason || editorMod.reason,
         variant: "destructive",
       });
       return;
@@ -954,7 +1354,7 @@ export default function AdminPage() {
         preview: lines.join(" / "),
         details: [
           `Theme: "${puzzleObj.theme}"`,
-          `Author: ${puzzleObj.author}`,
+          `Author: ${puzzleObj.author} · Editor: ${puzzleObj.editor}`,
           `17 Syllables: Line 1 (5), Line 2 (7), Line 3 (5)`,
           `Sliced into ${chunks.length} uppercase chunks`,
         ],
@@ -974,6 +1374,7 @@ export default function AdminPage() {
 
           if (res.remotePersisted) {
             setPendingPublish(null);
+            setIsDraftDirty(false);
             toast({
               title: `17 Syllables Saved Globally for ${targetDate}!`,
               description: `Persisted to Supabase: "${puzzleObj.theme}" is now live across all sessions.`,
@@ -996,6 +1397,7 @@ export default function AdminPage() {
                   setIsDiagnosticOpen(false);
                   setDiagnosticReport(null);
                   setRetrySyncFn(null);
+                  setIsDraftDirty(false);
                   toast({
                     title: `17 Syllables Saved Globally for ${targetDate}!`,
                     description: `Persisted to Supabase: "${puzzleObj.theme}".`,
@@ -1073,6 +1475,7 @@ export default function AdminPage() {
 
     const finish = (playImmediately: boolean) => {
       setPendingPublish(null);
+      setIsDraftDirty(false);
       toast({
         title: `${req.gameTitle} Saved Globally for ${date}!`,
         description: `Persisted to Supabase: "${req.meta.title}" is now live across all sessions.`,
@@ -1297,69 +1700,149 @@ export default function AdminPage() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 space-y-6">
-        {/* Global Date Picker Banner */}
-        <div className="rounded-2xl border-2 border-black bg-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="font-headline font-black text-lg">
-              Target Daily Schedule Date
-            </h2>
-            <p className="text-xs text-gray-600">
-              Choose which date you want to schedule or override, or load any of
-              the {CONNECT_5_PUZZLES.length} pre-seeded daily puzzles.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isManualSyncing}
-              onClick={() => void handleManualCloudSync()}
-              className="border-2 border-black font-headline font-black text-xs h-10 px-3 hover:bg-gray-100 shadow-[2px_2px_0px_#000]"
-              title="Refreshes puzzle overrides from Supabase cloud database"
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isManualSyncing && "animate-spin")} />
-              {isManualSyncing ? "Syncing..." : "Sync Cloud"}
-            </Button>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-gray-600" />
-              <Input
-                type="date"
-                value={targetDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-40 sm:w-44 font-mono font-bold border-2 border-black h-10 shadow-[2px_2px_0px_#000]"
-              />
+        {/* Global Date Picker Banner + 9-Game Schedule Status */}
+        <div className="rounded-2xl border-2 border-black bg-white p-4 sm:p-5 space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="font-headline font-black text-lg">
+                Target Daily Schedule Date
+              </h2>
+              <p className="text-xs text-gray-600">
+                Choose which date you want to schedule or override across all 9
+                daily games, or load any of the {CONNECT_5_PUZZLES.length} pre-seeded puzzles.
+              </p>
             </div>
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isManualSyncing}
+                onClick={() => void handleManualCloudSync()}
+                className="border-2 border-black font-headline font-black text-xs h-10 px-3 hover:bg-gray-100 shadow-[2px_2px_0px_#000]"
+                title="Refreshes puzzle overrides across all 9 games from Supabase cloud database"
+                data-testid="admin-sync-cloud-btn"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isManualSyncing && "animate-spin")} />
+                {isManualSyncing ? "Syncing..." : "Sync Cloud"}
+              </Button>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-gray-600" />
+                <Input
+                  type="date"
+                  value={targetDate}
+                  onChange={(e) => handleDateChange(e.target.value)}
+                  className="w-44 font-mono font-bold border-2 border-black h-10 shadow-[2px_2px_0px_#000] text-base sm:text-sm"
+                  data-testid="admin-target-date-input"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 9-Game Override Schedule Status Strip */}
+          <div
+            className="pt-2.5 border-t border-gray-100 flex flex-wrap items-center gap-1.5"
+            data-testid="admin-schedule-status-strip"
+          >
+            <span className="text-[11px] font-bold uppercase text-gray-500 mr-1">
+              {targetDate} Schedule:
+            </span>
+            {ALL_GAME_SLUGS.map((slug) => {
+              const hasOverride = overrideStatusByGame[slug];
+              const isCurrent = activeTab === slug;
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => handleTabChange(slug)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition-colors cursor-pointer",
+                    isCurrent
+                      ? "border-black bg-black text-white"
+                      : hasOverride
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+                      : "border-gray-300 bg-gray-50 text-gray-600 hover:border-black"
+                  )}
+                  title={
+                    hasOverride
+                      ? `${GAME_STUDIO_TITLES[slug]}: Custom Live Override active on ${targetDate}`
+                      : `${GAME_STUDIO_TITLES[slug]}: Default curated/seeded puzzle on ${targetDate}`
+                  }
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      hasOverride ? "bg-[#2ECC71]" : "bg-gray-400"
+                    )}
+                  />
+                  {GAME_STUDIO_TITLES[slug]}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Date Guarding Banner (for Admins on Today or Past Dates) */}
-        {!editPerm.canEdit && (
-          <div className="rounded-2xl border-2 border-black bg-amber-50 p-4 sm:p-5 flex items-start gap-3.5 shadow-xs">
-            <div className="h-9 w-9 rounded-xl bg-amber-100 border-2 border-black flex items-center justify-center shrink-0 text-black">
-              <Lock className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-headline font-black text-sm uppercase tracking-wide text-black">
-                  Read-Only Mode: {editPerm.isToday ? "Today's Live Game" : "Past Archive Game"}
-                </h3>
-                <Badge
-                  variant="outline"
-                  className="text-[10px] uppercase font-mono border-black bg-white"
-                >
-                  Locked for Admins
-                </Badge>
+        {/* Role-Scoped Future-Date Authoring Banner for Editors (Admins) */}
+        {!isGM && (
+          <div
+            data-testid="admin-editor-date-policy-banner"
+            className={cn(
+              "rounded-2xl border-2 border-black p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 shadow-xs",
+              !editPerm.canEdit ? "bg-amber-50" : "bg-emerald-50/70"
+            )}
+          >
+            <div className="flex items-start gap-3.5 min-w-0">
+              <div
+                className={cn(
+                  "h-9 w-9 rounded-xl border-2 border-black flex items-center justify-center shrink-0 text-black",
+                  !editPerm.canEdit ? "bg-amber-100" : "bg-[#2ECC71]/40"
+                )}
+              >
+                {!editPerm.canEdit ? (
+                  <Lock className="h-5 w-5" />
+                ) : (
+                  <Calendar className="h-5 w-5" />
+                )}
               </div>
-              <p className="text-xs text-gray-700 mt-1 leading-relaxed">
-                {editPerm.reason ||
-                  "Admins can only curate upcoming future puzzles. Only Game Masters can edit today's live game or past archives."}{" "}
-                Select tomorrow or a future date to edit or schedule puzzles.
-              </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-headline font-black text-sm uppercase tracking-wide text-black">
+                    {!editPerm.canEdit
+                      ? `Read-Only Mode: ${
+                          editPerm.isToday
+                            ? "Today's Live Game"
+                            : "Past Archive Game"
+                        }`
+                      : `Future Schedule Unlocked (${targetDate})`}
+                  </h3>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] uppercase font-mono border-black bg-white"
+                  >
+                    {!editPerm.canEdit ? "Locked for Editors" : "Editor Access"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-gray-800 mt-1 leading-relaxed font-medium">
+                  Editors can schedule &amp; edit future dates (tomorrow onward). Root Game Masters can edit today/past dates.
+                </p>
+              </div>
             </div>
+            {!editPerm.canEdit && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  handleDateChange(addDaysToDateKey(todayDateKey, 1))
+                }
+                className="border-2 border-black bg-white font-headline font-black text-xs shrink-0 shadow-[2px_2px_0px_#000]"
+              >
+                Jump to Tomorrow →
+              </Button>
+            )}
           </div>
         )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="w-full h-auto min-h-11 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 rounded-2xl border-2 border-black bg-gray-100 p-2.5 shadow-[3px_3px_0px_#000]">
             <TabsTrigger value="connect-5">
               🔗 Connect 5 Creator
@@ -1398,6 +1881,71 @@ export default function AdminPage() {
             )}
           </TabsList>
 
+          {/* Active Game Sandbox Preview & Unpublish Live Override Toolbar */}
+          {activeGameSlug && (
+            <div
+              className="mt-4 rounded-2xl border-2 border-black bg-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-[3px_3px_0px_#000]"
+              data-testid="admin-studio-action-toolbar"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-headline font-black text-sm text-black">
+                  {GAME_STUDIO_TITLES[activeGameSlug]} · {targetDate}
+                </span>
+                {overrideStatusByGame[activeGameSlug] ? (
+                  <Badge
+                    variant="green"
+                    className="border border-black font-bold text-[11px]"
+                  >
+                    Live Custom Override Active
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="border-gray-400 text-gray-600 text-[11px]"
+                  >
+                    Default Curated / Seeded Bank
+                  </Badge>
+                )}
+                {isDraftDirty && (
+                  <Badge className="bg-amber-100 text-amber-950 border border-amber-500 text-[10px] font-bold">
+                    Unsaved Draft Changes
+                  </Badge>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsPreviewOpen(true)}
+                  data-testid="admin-preview-draft-btn"
+                  className="border-2 border-black bg-[#F9D423] hover:bg-[#f0ca14] text-black font-headline font-black text-xs shadow-[2px_2px_0px_#000]"
+                >
+                  <Eye className="h-3.5 w-3.5 mr-1.5" />
+                  Preview Draft
+                </Button>
+
+                {overrideStatusByGame[activeGameSlug] && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!editPerm.canEdit || isUnpublishing}
+                    onClick={() => void handleUnpublishActiveOverride()}
+                    data-testid="admin-unpublish-override-btn"
+                    className="border-2 border-red-600 text-red-700 hover:bg-red-50 font-headline font-black text-xs disabled:opacity-50"
+                  >
+                    {isUnpublishing ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Unpublish Live Override
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ================================================================
            * TAB 1: CONNECT 5 PUZZLE CREATOR
            * ================================================================ */}
@@ -1432,7 +1980,7 @@ export default function AdminPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={handleRevertConnect5Default}
+                      onClick={() => handleRevertConnect5Default(true)}
                       data-testid="admin-connect-5-revert-default"
                       className="border-2 border-black font-bold text-xs"
                     >
@@ -1442,6 +1990,44 @@ export default function AdminPage() {
                   </div>
                 </div>
 
+                {/* Authoring Safeguards: Title Spoiler & Placeholder Bridges */}
+                {(c5TitleSpoiler || c5PlaceholderBridges.length > 0) && (
+                  <div className="space-y-2">
+                    {c5TitleSpoiler && (
+                      <div
+                        data-testid="admin-c5-spoiler-warning"
+                        className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 text-xs text-amber-950 flex items-start gap-2"
+                      >
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700 mt-0.5" />
+                        <div>
+                          <p className="font-bold">
+                            Title Spoiler Warning: Chain title leaks hidden answer &ldquo;{c5TitleSpoiler}&rdquo;
+                          </p>
+                          <p className="text-[11px] text-amber-900">
+                            Choose a thematic title that does not include any of Rows 2–5.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {c5PlaceholderBridges.length > 0 && (
+                      <div
+                        data-testid="admin-c5-bridge-warning"
+                        className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 text-xs text-amber-950 flex items-start gap-2"
+                      >
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700 mt-0.5" />
+                        <div>
+                          <p className="font-bold">
+                            Generic/Blank Bridge Explanation on Bridge #{c5PlaceholderBridges.join(", #")}
+                          </p>
+                          <p className="text-[11px] text-amber-900">
+                            Replace auto-generated &ldquo;compound phrase linking...&rdquo; text with a real definition for the win modal.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
@@ -1450,7 +2036,11 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={c5Title}
-                      onChange={(e) => setC5Title(e.target.value)}
+                      onChange={(e) => {
+                        setC5Title(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
+                      className="text-base sm:text-sm"
                     />
                   </div>
                   <div>
@@ -1460,8 +2050,13 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={c5Author}
-                      onChange={(e) => setC5Author(e.target.value)}
-                      placeholder="e.g. Puzzle Master"
+                      onChange={(e) => {
+                        setC5Author(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
+                      placeholder={defaultAuthorLabel}
+                      className="text-base sm:text-sm"
+                      data-testid="admin-connect-5-author"
                     />
                   </div>
                   <div>
@@ -1471,8 +2066,13 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={c5Editor}
-                      onChange={(e) => setC5Editor(e.target.value)}
-                      placeholder="e.g. Daily Editor"
+                      onChange={(e) => {
+                        setC5Editor(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
+                      placeholder={defaultEditorLabel}
+                      className="text-base sm:text-sm"
+                      data-testid="admin-connect-5-editor"
                     />
                   </div>
                 </div>
@@ -1495,7 +2095,7 @@ export default function AdminPage() {
                         value={w}
                         onChange={(e) => handleC5WordChange(idx, e.target.value)}
                         placeholder={`Row ${idx + 1} Word`}
-                        className="font-mono font-bold uppercase tracking-wider"
+                        className="font-mono font-bold uppercase tracking-wider text-base sm:text-sm"
                       />
                       <span className="text-xs font-mono text-gray-500 w-16 text-right">
                         {w.length} chars
@@ -1536,9 +2136,10 @@ export default function AdminPage() {
                         ];
                         next[idx] = e.target.value;
                         setC5Connections(next);
+                        setIsDraftDirty(true);
                       }}
                       placeholder={`${c5Words[idx] || `WORD${idx + 1}`} ${c5Words[idx + 1] || `WORD${idx + 2}`} — definition`}
-                      className="text-xs"
+                      className="text-base sm:text-sm"
                     />
                   ))}
                 </div>
@@ -1566,7 +2167,10 @@ export default function AdminPage() {
                       size="xs"
                       variant="outline"
                       disabled={!editPerm.canEdit}
-                      onClick={() => setC5Hints([])}
+                      onClick={() => {
+                        setC5Hints([]);
+                        setIsDraftDirty(true);
+                      }}
                       className="font-bold border border-black shrink-0 disabled:opacity-50"
                     >
                       Clear Hints (0)
@@ -1722,7 +2326,7 @@ export default function AdminPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handleRevert21ThingsDefault}
+                    onClick={() => handleRevert21ThingsDefault(true)}
                     data-testid="admin-21-things-revert-default"
                     className="border-2 border-black font-bold text-xs"
                   >
@@ -1732,7 +2336,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
                     Board Theme Title
@@ -1740,18 +2344,43 @@ export default function AdminPage() {
                   <Input
                     disabled={!editPerm.canEdit}
                     value={t21Title}
-                    onChange={(e) => setT21Title(e.target.value)}
+                    onChange={(e) => {
+                      setT21Title(e.target.value);
+                      setIsDraftDirty(true);
+                    }}
+                    className="text-base sm:text-sm"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
-                    Creator Name
+                    Author / Creator
                   </label>
                   <Input
                     disabled={!editPerm.canEdit}
                     value={t21Creator}
-                    onChange={(e) => setT21Creator(e.target.value)}
-                    placeholder="e.g. Daily Curator"
+                    onChange={(e) => {
+                      setT21Creator(e.target.value);
+                      setIsDraftDirty(true);
+                    }}
+                    placeholder={defaultAuthorLabel}
+                    className="text-base sm:text-sm"
+                    data-testid="admin-21-things-author"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                    Editor
+                  </label>
+                  <Input
+                    disabled={!editPerm.canEdit}
+                    value={t21Editor}
+                    onChange={(e) => {
+                      setT21Editor(e.target.value);
+                      setIsDraftDirty(true);
+                    }}
+                    placeholder={defaultEditorLabel}
+                    className="text-base sm:text-sm"
+                    data-testid="admin-21-things-editor"
                   />
                 </div>
                 <div>
@@ -1761,7 +2390,11 @@ export default function AdminPage() {
                   <Input
                     disabled={!editPerm.canEdit}
                     value={t21Bio}
-                    onChange={(e) => setT21Bio(e.target.value)}
+                    onChange={(e) => {
+                      setT21Bio(e.target.value);
+                      setIsDraftDirty(true);
+                    }}
+                    className="text-base sm:text-sm"
                   />
                 </div>
               </div>
@@ -1786,13 +2419,16 @@ export default function AdminPage() {
                 <Textarea
                   disabled={!editPerm.canEdit}
                   value={t21Stream}
-                  onChange={(e) => setT21Stream(e.target.value)}
+                  onChange={(e) => {
+                    setT21Stream(e.target.value);
+                    setIsDraftDirty(true);
+                  }}
                   placeholder="Paste comma-separated items to auto-format into the 21 tiles below..."
-                  className="min-h-[68px]"
+                  className="min-h-[68px] text-base sm:text-sm"
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {t21Items.slice(0, 21).map((item, idx) => {
                   const words = item.trim().split(/\s+/).filter(Boolean).length;
                   const isOverLimit = words > 5 || item.length > 30;
@@ -1823,6 +2459,7 @@ export default function AdminPage() {
                           const next = [...t21Items];
                           next[idx] = e.target.value;
                           setT21Items(next);
+                          setIsDraftDirty(true);
                         }}
                         onBlur={() => {
                           const { text } = enforceTileConstraints(
@@ -1834,7 +2471,7 @@ export default function AdminPage() {
                             setT21Items(next);
                           }
                         }}
-                        className="w-full rounded bg-white border border-black/15 px-2 py-1 text-xs font-bold disabled:opacity-75 disabled:cursor-not-allowed"
+                        className="w-full rounded bg-white border border-black/15 px-2 py-1 text-base sm:text-sm font-bold disabled:opacity-75 disabled:cursor-not-allowed"
                       />
                       {isOverLimit && suggestion && editPerm.canEdit && (
                         <button
@@ -1844,6 +2481,7 @@ export default function AdminPage() {
                             const next = [...t21Items];
                             next[idx] = suggestion;
                             setT21Items(next);
+                            setIsDraftDirty(true);
                           }}
                           className="mt-1 w-full text-left text-[10px] font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 rounded px-1.5 py-0.5 truncate transition-colors"
                           title={`Apply automated edit: "${suggestion}"`}
@@ -1921,7 +2559,7 @@ export default function AdminPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={handleRevert17SyllablesDefault}
+                      onClick={() => handleRevert17SyllablesDefault(true)}
                       data-testid="admin-17-syllables-revert-default"
                       className="border-2 border-black font-bold text-xs"
                     >
@@ -1931,7 +2569,7 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
                       Haiku Theme / Title
@@ -1939,8 +2577,12 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={s17Theme}
-                      onChange={(e) => setS17Theme(e.target.value)}
+                      onChange={(e) => {
+                        setS17Theme(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
                       placeholder="e.g. Golden Autumn"
+                      className="text-base sm:text-sm"
                     />
                   </div>
                   <div>
@@ -1950,8 +2592,29 @@ export default function AdminPage() {
                     <Input
                       disabled={!editPerm.canEdit}
                       value={s17Author}
-                      onChange={(e) => setS17Author(e.target.value)}
-                      placeholder="SOL Theory"
+                      onChange={(e) => {
+                        setS17Author(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
+                      placeholder={defaultAuthorLabel}
+                      className="text-base sm:text-sm"
+                      data-testid="admin-17-syllables-author"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-gray-600 mb-1">
+                      Editor
+                    </label>
+                    <Input
+                      disabled={!editPerm.canEdit}
+                      value={s17Editor}
+                      onChange={(e) => {
+                        setS17Editor(e.target.value);
+                        setIsDraftDirty(true);
+                      }}
+                      placeholder={defaultEditorLabel}
+                      className="text-base sm:text-sm"
+                      data-testid="admin-17-syllables-editor"
                     />
                   </div>
                 </div>
@@ -1974,15 +2637,20 @@ export default function AdminPage() {
                       disabled={!editPerm.canEdit}
                       value={s17Line1}
                       onChange={(e) => {
-                        setS17Line1(e.target.value);
+                        const nextVal = e.target.value;
+                        const prevVal = s17Line1;
+                        setS17Line1(nextVal);
                         setS17CustomWordChunks((prev) =>
-                          Object.fromEntries(
-                            Object.entries(prev).filter(([k]) => !k.startsWith("0-"))
-                          )
+                          realignLineCustomChunks(prevVal, nextVal, 0, prev, [
+                            nextVal,
+                            s17Line2,
+                            s17Line3,
+                          ])
                         );
+                        setIsDraftDirty(true);
                       }}
                       placeholder="Gold leaves drift along"
-                      className="font-serif text-sm"
+                      className="font-serif text-base sm:text-sm"
                     />
                   </div>
 
@@ -2003,15 +2671,20 @@ export default function AdminPage() {
                       disabled={!editPerm.canEdit}
                       value={s17Line2}
                       onChange={(e) => {
-                        setS17Line2(e.target.value);
+                        const nextVal = e.target.value;
+                        const prevVal = s17Line2;
+                        setS17Line2(nextVal);
                         setS17CustomWordChunks((prev) =>
-                          Object.fromEntries(
-                            Object.entries(prev).filter(([k]) => !k.startsWith("1-"))
-                          )
+                          realignLineCustomChunks(prevVal, nextVal, 1, prev, [
+                            s17Line1,
+                            nextVal,
+                            s17Line3,
+                          ])
                         );
+                        setIsDraftDirty(true);
                       }}
                       placeholder="Cool winds whisper in the dusk"
-                      className="font-serif text-sm"
+                      className="font-serif text-base sm:text-sm"
                     />
                   </div>
 
@@ -2032,15 +2705,20 @@ export default function AdminPage() {
                       disabled={!editPerm.canEdit}
                       value={s17Line3}
                       onChange={(e) => {
-                        setS17Line3(e.target.value);
+                        const nextVal = e.target.value;
+                        const prevVal = s17Line3;
+                        setS17Line3(nextVal);
                         setS17CustomWordChunks((prev) =>
-                          Object.fromEntries(
-                            Object.entries(prev).filter(([k]) => !k.startsWith("2-"))
-                          )
+                          realignLineCustomChunks(prevVal, nextVal, 2, prev, [
+                            s17Line1,
+                            s17Line2,
+                            nextVal,
+                          ])
                         );
+                        setIsDraftDirty(true);
                       }}
                       placeholder="Soft earth waits for dawn"
-                      className="font-serif text-sm"
+                      className="font-serif text-base sm:text-sm"
                     />
                   </div>
                 </div>
@@ -2084,7 +2762,15 @@ export default function AdminPage() {
                   <HaikuSliceCutter
                     lines={[s17Line1, s17Line2, s17Line3]}
                     customWordChunks={s17CustomWordChunks}
-                    onChangeCustomWordChunks={setS17CustomWordChunks}
+                    onChangeCustomWordChunks={(next) => {
+                      setS17CustomWordChunks(
+                        sanitizeCustomWordChunks(
+                          [s17Line1, s17Line2, s17Line3],
+                          next
+                        ) ?? {}
+                      );
+                      setIsDraftDirty(true);
+                    }}
                     disabled={!editPerm.canEdit}
                   />
 
@@ -2096,7 +2782,7 @@ export default function AdminPage() {
                       &quot;{s17Line3 || "..."}&quot;
                     </p>
                     <p className="text-[11px] text-gray-500 font-medium pt-1">
-                      — {s17Author || "SOL Theory"} ({s17Theme || "Untitled"})
+                      — {s17Author || defaultAuthorLabel} · Edited by {s17Editor || defaultEditorLabel} ({s17Theme || "Untitled"})
                     </p>
                   </div>
                 </div>
@@ -2108,19 +2794,7 @@ export default function AdminPage() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        const hasCustom = Object.keys(s17CustomWordChunks).length > 0;
-                        const chunks = hasCustom
-                          ? buildStructuredHaikuLines([s17Line1, s17Line2, s17Line3], s17CustomWordChunks).flatMap((l) =>
-                              l.words.flatMap((w) => w.chunks)
-                            )
-                          : sliceHaikuIntoChunks([s17Line1, s17Line2, s17Line3], 16);
-                        const copyPayload = {
-                          theme: s17Theme,
-                          author: s17Author,
-                          lines: [s17Line1, s17Line2, s17Line3],
-                          chunks,
-                          ...(hasCustom ? { customWordChunks: s17CustomWordChunks } : {}),
-                        };
+                        const copyPayload = build17SyllablesDraftObject();
                         void navigator.clipboard.writeText(JSON.stringify(copyPayload, null, 2));
                         toast({
                           title: "17 Syllables JSON Copied!",
@@ -2170,13 +2844,20 @@ export default function AdminPage() {
           </TabsContent>
 
           {/* ================================================================
-           * TAB 3: PRE-SEEDED 66-DAY PUZZLE BANK
+           * NEWER STUDIO TABS (9 Rhymes, Echo, 6 Pics, Four Score, Move 2, 1 Win)
            * ================================================================ */}
           <TabsContent value="9-rhymes">
             <NineRhymesStudioTab
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "9-rhymes": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2186,6 +2867,13 @@ export default function AdminPage() {
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "eightfold-echo": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2195,6 +2883,13 @@ export default function AdminPage() {
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "6-pics": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2204,6 +2899,13 @@ export default function AdminPage() {
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "four-score": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2213,6 +2915,13 @@ export default function AdminPage() {
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "move-2": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2222,6 +2931,13 @@ export default function AdminPage() {
               targetDate={targetDate}
               canEdit={editPerm.canEdit}
               editReason={editPerm.reason}
+              syncVersion={cloudSyncVersion}
+              defaultAuthor={defaultAuthorLabel}
+              defaultEditor={defaultEditorLabel}
+              onDirty={() => setIsDraftDirty(true)}
+              onDraftChange={(draft) =>
+                setChildDrafts((prev) => ({ ...prev, "1-win": draft }))
+              }
               onPublish={requestGenericPublish}
             />
           </TabsContent>
@@ -2271,6 +2987,7 @@ export default function AdminPage() {
                         variant="outline"
                         disabled={!editPerm.canEdit}
                         onClick={() => {
+                          if (!confirmDiscardIfDirty()) return;
                           setC5Title(p.title);
                           setC5Words([...p.words]);
                           setC5Connections([...p.connections]);
@@ -2284,6 +3001,7 @@ export default function AdminPage() {
                             setT21Items([...b.items]);
                           }
                           setActiveTab("connect-5");
+                          setIsDraftDirty(true);
                           toast({
                             title: `Loaded Day #${p.puzzleNumber} into Studio`,
                             description:
@@ -2351,7 +3069,7 @@ export default function AdminPage() {
                       placeholder="Search accounts by name, handle, or email..."
                       value={userSearch}
                       onChange={(e) => setUserSearch(e.target.value)}
-                      className="pl-9 font-medium border-2 border-black text-xs"
+                      className="pl-9 font-medium border-2 border-black text-base sm:text-sm"
                     />
                   </div>
                 </div>
@@ -2664,6 +3382,17 @@ export default function AdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Playable Draft Preview Sandbox Modal */}
+      {activeGameSlug && (
+        <AdminPuzzlePreviewModal
+          open={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          gameSlug={activeGameSlug}
+          targetDate={targetDate}
+          draftPayload={getDraftPayloadForGame(activeGameSlug)}
+        />
+      )}
 
       {/* Diagnostic Error Modal Popup when save/sync fails */}
       <DiagnosticErrorModal

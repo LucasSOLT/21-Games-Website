@@ -1,11 +1,38 @@
 import React, { Suspense } from "react";
+import type { Metadata } from "next";
 import { SeventeenSyllablesGame } from "@/components/games/seventeen-syllables";
 import { GameErrorBoundary } from "@/components/game-error-boundary";
 
-export const metadata = {
-  title: "17 Syllables | SOL GaMES",
-  description:
-    "Reconstruct the daily 5-7-5 haiku from poetical fragments in an authentic NYT-style word puzzle.",
+const DESCRIPTION =
+  "Reconstruct the daily 5-7-5 haiku from poetical fragments in an authentic editorial word puzzle.";
+
+export const metadata: Metadata = {
+  title: "17 Syllables",
+  description: DESCRIPTION,
+  alternates: {
+    canonical: "/games/17-syllables",
+  },
+  openGraph: {
+    title: "17 Syllables · 21 Games",
+    description: DESCRIPTION,
+    url: "https://21games.ai/games/17-syllables",
+    siteName: "21 Games",
+    images: [
+      {
+        url: "/og/17-syllables.png",
+        width: 1200,
+        height: 630,
+        alt: "17 Syllables · 21 Games",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "17 Syllables · 21 Games",
+    description: DESCRIPTION,
+    images: ["/og/17-syllables.png"],
+  },
 };
 
 export default function SeventeenSyllablesPage() {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   buildStructuredHaikuLines,
+  get17SyllablesPuzzleForDate,
   sliceHaikuIntoChunks,
   validateHaikuStructure,
   countLineSyllables,
@@ -12,13 +13,10 @@ import {
   type HaikuLineInfo,
 } from "@/data/puzzles/17-syllables";
 import {
-  getLocalDateKey,
-  get17SyllablesPuzzleForDate,
-} from "@/lib/daily-engine";
-import {
   get17SyllablesProgress,
   save17SyllablesProgress,
   record17SyllablesWin,
+  recordGameRevealed,
   isDateCompleted,
   getAdmin17SyllablesOverrides,
   fetchRemote17SyllablesOverride,
@@ -26,17 +24,30 @@ import {
 } from "@/lib/game-storage";
 import { computePuzzleContentHash } from "@/lib/seeded-random";
 import {
-  generateShortGameId,
+  generateCustomGameId,
+  isValidCustomGameId,
   build17SyllablesShareUrl,
   shareCustomGame,
-  nativeShareResultsOnly,
-  copyResultsOnly,
   decodeShareable17Haiku,
   type ShareResultsOptions,
 } from "@/lib/custom-game-share";
+import { fetchCustomPuzzle, saveCustomPuzzle } from "@/lib/custom-puzzles";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playRevealSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import { check17SyllablesPuzzleModeration } from "@/lib/moderation";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { GameShell, formatTimerSeconds } from "@/components/game-shell";
+import { WinFlourish } from "@/components/games/win-flourish";
+import { ResultShareButtons } from "./result-share-buttons";
 import { useAuth } from "@/components/account/auth-provider";
 import { AccountNavButton } from "@/components/account/account-nav-button";
 import { PuzzleCheckRevealModal } from "./puzzle-check-reveal-modal";
@@ -54,9 +65,6 @@ import {
   Sparkles,
   Loader2,
   Lock,
-  Share2,
-  Copy,
-  Check,
   Trophy,
   CheckCircle2,
   PlusCircle,
@@ -70,6 +78,8 @@ import {
   BarChart3,
   Calendar,
   RotateCcw,
+  Shuffle,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -96,6 +106,52 @@ interface FocusedCell {
   wordIdx: number;
   slotIdx: number;
   charIdx: number;
+}
+
+/** Deterministic seeded Fisher-Yates shuffle using FNV-1a + Mulberry32. */
+function seededShuffleChunks(chunks: TrayChunk[], seedText: string): TrayChunk[] {
+  const arr = [...chunks];
+  if (arr.length <= 1) return arr;
+
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seedText.length; i++) {
+    h ^= seedText.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const nextRand = () => {
+    h = (h + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(nextRand() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+
+  // Ensure tray isn't accidentally in exact solved order
+  if (arr.every((c, idx) => c.text === chunks[idx]?.text)) {
+    const first = arr[0]!;
+    arr[0] = arr[arr.length - 1]!;
+    arr[arr.length - 1] = first;
+  }
+  return arr;
+}
+
+function isHaikuMarkedRevealed(dateKey: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.localStorage.getItem(
+        `solgames_v1_revealed_17-syllables_${dateKey}`
+      ) === "1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function createInitialGameState(
@@ -133,19 +189,14 @@ function createInitialGameState(
     });
   });
 
-  // Deterministic shuffle of initialChunks for the tray
-  const shuffled = [...initialChunks].sort((a, b) => {
-    let hashA = 0;
-    let hashB = 0;
-    for (let i = 0; i < a.text.length; i++) hashA += a.text.charCodeAt(i) * (i + 1);
-    for (let i = 0; i < b.text.length; i++) hashB += b.text.charCodeAt(i) * (i + 1);
-    return (hashA % 7) - (hashB % 7);
-  });
+  const shuffled = seededShuffleChunks(
+    initialChunks,
+    `${puzzleId}::${dateKey}`
+  );
 
   if (!isCustomMode && typeof window !== "undefined") {
     const saved = get17SyllablesProgress(dateKey, puzzleId);
     if (saved) {
-      // Invalidate saved progress if puzzle content hash was updated remotely
       if (saved.puzzleHash && currentHash && saved.puzzleHash !== currentHash) {
         clear17SyllablesProgress(dateKey);
       } else {
@@ -154,9 +205,11 @@ function createInitialGameState(
 
         Object.entries(saved.placedChunks).forEach(([k, placedText]) => {
           if (placedText && updatedSlots[k]) {
-            const trayIdx = reconstructedTray.findIndex((c) => c.text === placedText);
+            const trayIdx = reconstructedTray.findIndex(
+              (c) => c.text === placedText
+            );
             if (trayIdx !== -1) {
-              const matchedChunk = reconstructedTray[trayIdx];
+              const matchedChunk = reconstructedTray[trayIdx]!;
               reconstructedTray.splice(trayIdx, 1);
               updatedSlots[k] = {
                 ...updatedSlots[k],
@@ -175,6 +228,8 @@ function createInitialGameState(
           tileHintsUsed: saved.tileHintsUsed || 0,
           elapsedSeconds: saved.elapsedSeconds || 0,
           isGameWon: saved.status === "won",
+          wasRevealed:
+            Boolean(saved.wasRevealed) || isHaikuMarkedRevealed(dateKey),
         };
       }
     }
@@ -187,39 +242,62 @@ function createInitialGameState(
     tileHintsUsed: 0,
     elapsedSeconds: 0,
     isGameWon: false,
+    wasRevealed: !isCustomMode && isHaikuMarkedRevealed(dateKey),
   };
 }
 
 function resolvePuzzle(
   customParam: string | null,
   todayKey: string
-): { puzzle: SeventeenSyllablesPuzzle; isCustomMode: boolean } {
-  if (customParam && typeof window !== "undefined") {
-    const stored = window.localStorage.getItem(`solgames_v1_17s_custom_${customParam}`);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (parsed && Array.isArray(parsed.lines)) {
-          const customLines = parsed.lines as [string, string, string];
-          return {
-            puzzle: {
-              id: customParam,
-              puzzleNumber: 0,
-              dateKey: todayKey,
-              theme: parsed.theme || "Custom Haiku",
-              author: parsed.creatorName || "Friend",
-              lines: customLines,
-              chunks: sliceHaikuIntoChunks(customLines, 16),
-            },
-            isCustomMode: true,
-          };
+): {
+  puzzle: SeventeenSyllablesPuzzle;
+  isCustomMode: boolean;
+  needsAsyncCustomFetch: boolean;
+  customNotFound: boolean;
+} {
+  if (customParam !== null) {
+    const trimmed = customParam.trim();
+    if (!trimmed) {
+      const fallback = get17SyllablesPuzzleForDate(todayKey);
+      return {
+        puzzle: fallback,
+        isCustomMode: true,
+        needsAsyncCustomFetch: false,
+        customNotFound: true,
+      };
+    }
+
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem(
+        `solgames_v1_17s_custom_${trimmed}`
+      );
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          if (parsed && Array.isArray(parsed.lines) && parsed.lines.length === 3) {
+            const customLines = parsed.lines as [string, string, string];
+            return {
+              puzzle: {
+                id: trimmed,
+                puzzleNumber: 0,
+                dateKey: todayKey,
+                theme: parsed.theme || "Custom Haiku",
+                author: parsed.creatorName || "Friend",
+                lines: customLines,
+                chunks: sliceHaikuIntoChunks(customLines, 16),
+              },
+              isCustomMode: true,
+              needsAsyncCustomFetch: false,
+              customNotFound: false,
+            };
+          }
+        } catch {
+          // ignore corrupted local custom
         }
-      } catch {
-        // ignore corrupted local custom
       }
     }
 
-    const decoded = decodeShareable17Haiku(customParam);
+    const decoded = decodeShareable17Haiku(trimmed);
     if (decoded) {
       return {
         puzzle: {
@@ -232,8 +310,27 @@ function resolvePuzzle(
           chunks: sliceHaikuIntoChunks(decoded.lines, 16),
         },
         isCustomMode: true,
+        needsAsyncCustomFetch: false,
+        customNotFound: false,
       };
     }
+
+    const fallback = get17SyllablesPuzzleForDate(todayKey);
+    if (isValidCustomGameId(trimmed) && trimmed.startsWith("17s-")) {
+      return {
+        puzzle: { ...fallback, id: trimmed, puzzleNumber: 0 },
+        isCustomMode: true,
+        needsAsyncCustomFetch: true,
+        customNotFound: false,
+      };
+    }
+
+    return {
+      puzzle: { ...fallback, id: trimmed, puzzleNumber: 0 },
+      isCustomMode: true,
+      needsAsyncCustomFetch: false,
+      customNotFound: true,
+    };
   }
 
   const overrides =
@@ -241,21 +338,25 @@ function resolvePuzzle(
   return {
     puzzle: get17SyllablesPuzzleForDate(todayKey, overrides),
     isCustomMode: false,
+    needsAsyncCustomFetch: false,
+    customNotFound: false,
   };
 }
 
 export function SeventeenSyllablesGame() {
   const searchParams = useSearchParams();
-  const customParam = searchParams.get("b");
+  const hasCustomQuery = searchParams.has("b");
+  const rawCustom = searchParams.get("b");
+  const customParam = hasCustomQuery ? rawCustom ?? "" : null;
   const modeParam = searchParams.get("mode");
   const dateParam = searchParams.get("date");
-  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const todayKey = useLiveLocalDateKey();
   const activeDateKey =
     dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayKey;
 
   return (
     <SeventeenSyllablesGameInner
-      key={`${activeDateKey}::${customParam ?? ""}::${modeParam ?? ""}`}
+      key={`${activeDateKey}::${customParam ?? "daily"}::${modeParam ?? ""}`}
       customParam={customParam}
       modeParam={modeParam}
       activeDateKey={activeDateKey}
@@ -287,6 +388,12 @@ function SeventeenSyllablesGameInner({
   const [puzzle, setPuzzle] = useState<SeventeenSyllablesPuzzle>(
     resolvedInitial.puzzle
   );
+  const [loadingCustomHaiku, setLoadingCustomHaiku] = useState<boolean>(
+    resolvedInitial.needsAsyncCustomFetch
+  );
+  const [customHaikuNotFound, setCustomHaikuNotFound] = useState<boolean>(
+    resolvedInitial.customNotFound
+  );
   const puzzleRef = useRef<SeventeenSyllablesPuzzle>(puzzle);
   useEffect(() => {
     puzzleRef.current = puzzle;
@@ -317,7 +424,9 @@ function SeventeenSyllablesGameInner({
   );
 
   // Game state
-  const [splashDismissed, setSplashDismissed] = useState(false);
+  const [splashDismissed, setSplashDismissed] = useState(
+    () => isCustomMode && !resolvedInitial.needsAsyncCustomFetch && !resolvedInitial.customNotFound
+  );
   const [slots, setSlots] = useState<Record<string, SlotState>>(initialData.slots);
   const [trayChunks, setTrayChunks] = useState<TrayChunk[]>(initialData.trayChunks);
   const [selectedTrayChunkId, setSelectedTrayChunkId] = useState<string | null>(null);
@@ -332,11 +441,12 @@ function SeventeenSyllablesGameInner({
 
   // Timer & completion
   const [elapsedSeconds, setElapsedSeconds] = useState(initialData.elapsedSeconds);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [isTimerRunning, setIsTimerRunning] = useState(
+    () => isCustomMode && !resolvedInitial.needsAsyncCustomFetch && !resolvedInitial.customNotFound
+  );
   const [isGameWon, setIsGameWon] = useState(initialData.isGameWon);
+  const [wasRevealed, setWasRevealed] = useState<boolean>(initialData.wasRevealed);
   const [victoryModalOpen, setVictoryModalOpen] = useState(false);
-  const [resultsCopied, setResultsCopied] = useState(false);
-  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Square Focus, Slashed Visuals, & Header Modals
   const [focusedCell, setFocusedCell] = useState<FocusedCell | null>(null);
@@ -347,13 +457,79 @@ function SeventeenSyllablesGameInner({
   const [helpOpen, setHelpOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
 
+  // Async Supabase custom haiku fetch (?b=17s-xxxxxxxx)
   useEffect(() => {
+    if (!resolvedInitial.needsAsyncCustomFetch || !customParam) return;
+    let cancelled = false;
+    const trimmed = customParam.trim();
+    void fetchCustomPuzzle<{
+      theme?: string;
+      creatorName?: string;
+      lines?: [string, string, string];
+      customWordChunks?: Record<string, string[]>;
+    }>(trimmed)
+      .then((record) => {
+        if (cancelled) return;
+        const lines = record?.payload?.lines;
+        if (
+          !record ||
+          !Array.isArray(lines) ||
+          lines.length !== 3 ||
+          !lines.every((l) => typeof l === "string" && l.trim().length > 0)
+        ) {
+          setLoadingCustomHaiku(false);
+          setCustomHaikuNotFound(true);
+          return;
+        }
+        const cleanLines = lines.map((l) => l.trim().toUpperCase()) as [
+          string,
+          string,
+          string,
+        ];
+        const loadedPuzzle: SeventeenSyllablesPuzzle = {
+          id: record.id,
+          puzzleNumber: 0,
+          dateKey: activeDateKey,
+          theme: record.payload.theme || record.title || "Custom Haiku",
+          author:
+            record.creatorName || record.payload.creatorName || "Friend",
+          lines: cleanLines,
+          chunks: sliceHaikuIntoChunks(cleanLines, 16),
+          customWordChunks: record.payload.customWordChunks,
+        };
+        const nextStructured = buildStructuredHaikuLines(
+          loadedPuzzle.lines,
+          loadedPuzzle.customWordChunks
+        );
+        const fresh = createInitialGameState(
+          nextStructured,
+          activeDateKey,
+          loadedPuzzle.id,
+          true
+        );
+        setPuzzle(loadedPuzzle);
+        setSlots(fresh.slots);
+        setTrayChunks(fresh.trayChunks);
+        setSelectedTrayChunkId(null);
+        setWordHintsUsed(0);
+        setTileHintsUsed(0);
+        setElapsedSeconds(0);
+        setIsGameWon(false);
+        setWasRevealed(false);
+        setSplashDismissed(true);
+        setIsTimerRunning(true);
+        setLoadingCustomHaiku(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadingCustomHaiku(false);
+          setCustomHaikuNotFound(true);
+        }
+      });
     return () => {
-      if (copyFeedbackTimerRef.current) {
-        clearTimeout(copyFeedbackTimerRef.current);
-      }
+      cancelled = true;
     };
-  }, []);
+  }, [activeDateKey, customParam, resolvedInitial.needsAsyncCustomFetch]);
 
   // Creator modal (gated strictly behind verified authentication)
   const [creatorModalOpen, setCreatorModalOpen] = useState(false);
@@ -482,12 +658,8 @@ function SeventeenSyllablesGameInner({
         setElapsedSeconds(0);
         setIsTimerRunning(false);
         setIsGameWon(false);
+        setWasRevealed(false);
         setVictoryModalOpen(false);
-        if (copyFeedbackTimerRef.current) {
-          clearTimeout(copyFeedbackTimerRef.current);
-          copyFeedbackTimerRef.current = null;
-        }
-        setResultsCopied(false);
 
         save17SyllablesProgress({
           dateKey: activeDateKey,
@@ -500,6 +672,7 @@ function SeventeenSyllablesGameInner({
           stars: 3.0,
           elapsedSeconds: 0,
           status: "playing",
+          wasRevealed: false,
           puzzleHash: remoteHash,
         });
       }
@@ -545,10 +718,11 @@ function SeventeenSyllablesGameInner({
     };
   }, [isCustomMode, activeDateKey, applyRemotePuzzleIfChanged]);
 
-  // Timer effect
+  // Timer effect (pauses automatically when tab is hidden or any modal dialog is open)
   useEffect(() => {
     if (!isTimerRunning || isGameWon) return;
     const interval = setInterval(() => {
+      if (isGameTimerExternallyPaused()) return;
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
@@ -556,9 +730,10 @@ function SeventeenSyllablesGameInner({
 
   // Star calculation: 3.0 initial - (1/3 per word hint) - (1/2 per tile hint)
   const currentStars = useMemo(() => {
+    if (wasRevealed) return 0;
     const penalty = wordHintsUsed * (1 / 3) + tileHintsUsed * 0.5;
     return Math.max(0, Math.round((3.0 - penalty) * 10) / 10);
-  }, [wordHintsUsed, tileHintsUsed]);
+  }, [wasRevealed, wordHintsUsed, tileHintsUsed]);
 
   // Auto-save progress
   useEffect(() => {
@@ -583,6 +758,7 @@ function SeventeenSyllablesGameInner({
       stars: currentStars,
       elapsedSeconds,
       status: isGameWon ? "won" : "playing",
+      wasRevealed,
       puzzleHash: currentContentHash,
     });
   }, [
@@ -593,6 +769,7 @@ function SeventeenSyllablesGameInner({
     currentStars,
     elapsedSeconds,
     isGameWon,
+    wasRevealed,
     isCustomMode,
     splashDismissed,
     puzzle.dateKey,
@@ -621,13 +798,16 @@ function SeventeenSyllablesGameInner({
       if (allCorrect) {
         setIsGameWon(true);
         setIsTimerRunning(false);
-        if (!isCustomMode) {
-          record17SyllablesWin(puzzle.dateKey, currentStars, elapsedSeconds);
-        }
+        playWinChimeSfx();
+        record17SyllablesWin(puzzle.dateKey, currentStars, elapsedSeconds, {
+          isCustom: isCustomMode,
+          isRevealed: wasRevealed || isHaikuMarkedRevealed(puzzle.dateKey),
+        });
         setTimeout(() => {
           setVictoryModalOpen(true);
         }, 600);
       } else {
+        playErrorSfx();
         setSlots(nextSlots);
         toast({
           title: "Not quite, try again",
@@ -636,10 +816,10 @@ function SeventeenSyllablesGameInner({
         });
       }
     },
-    [currentStars, elapsedSeconds, isCustomMode, puzzle.dateKey]
+    [currentStars, elapsedSeconds, isCustomMode, puzzle.dateKey, wasRevealed]
   );
 
-  // Placement Action
+  // Placement / Swap Action
   const handlePlaceChunk = useCallback(
     (targetSlotKey: string, chunkIdToPlace?: string) => {
       const chunkId = chunkIdToPlace || selectedTrayChunkId;
@@ -649,15 +829,23 @@ function SeventeenSyllablesGameInner({
       const slot = slots[targetSlotKey];
       if (!chunk || !slot) return;
 
-      // Strict Collision Rule (Q8):
-      // Non-empty target or mismatched length returns chunk to tray with subtle shake
-      if (slot.placedChunk !== null || slot.expectedLength !== chunk.text.length) {
+      // Reject locked target or mismatched length with subtle shake + error SFX
+      if (slot.isLocked || slot.expectedLength !== chunk.text.length) {
+        playErrorSfx();
         setShakingSlotKey(targetSlotKey);
         setTimeout(() => setShakingSlotKey(null), 450);
         return;
       }
 
-      // Valid placement
+      const prevPlacedChunk =
+        slot.placedChunk !== null
+          ? {
+              id: slot.placedChunkId || `chunk-${Date.now()}`,
+              text: slot.placedChunk,
+            }
+          : null;
+
+      // Valid placement (or same-length swap)
       const nextSlots: Record<string, SlotState> = {
         ...slots,
         [targetSlotKey]: {
@@ -668,8 +856,12 @@ function SeventeenSyllablesGameInner({
         },
       };
 
+      playSnapSfx();
       setSlots(nextSlots);
-      setTrayChunks((prev) => prev.filter((c) => c.id !== chunk.id));
+      setTrayChunks((prev) => {
+        const filtered = prev.filter((c) => c.id !== chunk.id);
+        return prevPlacedChunk ? [...filtered, prevPlacedChunk] : filtered;
+      });
       setSelectedTrayChunkId(null);
 
       // Clear any previous error slashes for this slot
@@ -687,13 +879,14 @@ function SeventeenSyllablesGameInner({
     [selectedTrayChunkId, trayChunks, slots, checkFullBoard]
   );
 
-  // Remove placed chunk
+  // Remove placed chunk on single tap
   const handleRemoveChunk = useCallback(
     (slotKey: string) => {
       const slot = slots[slotKey];
       if (!slot || slot.placedChunk === null) return;
 
       if (slot.isLocked) {
+        playErrorSfx();
         toast({
           title: "Tile is Locked",
           description: "This chunk was locked by a hint and cannot be removed.",
@@ -701,6 +894,7 @@ function SeventeenSyllablesGameInner({
         return;
       }
 
+      playTapSfx();
       const returnedChunk: TrayChunk = {
         id: slot.placedChunkId || `chunk-${Date.now()}`,
         text: slot.placedChunk,
@@ -730,13 +924,37 @@ function SeventeenSyllablesGameInner({
     [slots]
   );
 
+  const handleShuffleTray = useCallback(() => {
+    if (trayChunks.length <= 1) return;
+    playTapSfx();
+    setTrayChunks((prev) => {
+      const next = [...prev];
+      for (let i = next.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = next[i]!;
+        next[i] = next[j]!;
+        next[j] = tmp;
+      }
+      if (next.length > 1 && next.every((c, idx) => c.id === prev[idx]?.id)) {
+        const first = next[0]!;
+        next[0] = next[next.length - 1]!;
+        next[next.length - 1] = first;
+      }
+      return next;
+    });
+  }, [trayChunks.length]);
+
   // Hint 1: Word Hint (max 3, costs 1/3 star)
   const handleConfirmWordHint = useCallback(() => {
     if (wordHintsUsed >= 3) return;
 
-    // Find first word with unplaced or wrong slots
     let targetWordKey: string | null = null;
-    let targetWordInfo: { lineIdx: number; wordIdx: number; text: string; chunkLengths: number[] } | null = null;
+    let targetWordInfo: {
+      lineIdx: number;
+      wordIdx: number;
+      text: string;
+      chunkLengths: number[];
+    } | null = null;
 
     for (let l = 0; l < structuredLines.length; l++) {
       for (let w = 0; w < structuredLines[l].words.length; w++) {
@@ -760,6 +978,7 @@ function SeventeenSyllablesGameInner({
       if (targetWordKey) break;
     }
 
+    playRevealSfx();
     setWordHintsUsed((prev) => prev + 1);
     setWordHintConfirmOpen(false);
 
@@ -777,7 +996,6 @@ function SeventeenSyllablesGameInner({
   const handleConfirmTileHint = useCallback(() => {
     if (tileHintsUsed >= 2) return;
 
-    // Find first slot that is not locked and not yet correctly filled
     const targetSlot = Object.values(slots).find(
       (s) => !s.isLocked && s.placedChunk !== s.expectedChunk
     );
@@ -790,7 +1008,6 @@ function SeventeenSyllablesGameInner({
     const nextTray = [...trayChunks];
     const nextSlots = { ...slots };
 
-    // If target slot currently has a wrong chunk, return it to tray
     if (targetSlot.placedChunk && targetSlot.placedChunk !== correctText) {
       nextTray.push({
         id: targetSlot.placedChunkId || `chunk-${Date.now()}`,
@@ -798,21 +1015,22 @@ function SeventeenSyllablesGameInner({
       });
     }
 
-    // Pull correct chunk from tray (or dislodge from another slot if wrongly placed elsewhere)
     let chunkToPlaceId = `chunk-locked-${Date.now()}`;
     const trayIdx = nextTray.findIndex((c) => c.text === correctText);
     if (trayIdx !== -1) {
-      chunkToPlaceId = nextTray[trayIdx].id;
+      chunkToPlaceId = nextTray[trayIdx]!.id;
       nextTray.splice(trayIdx, 1);
     } else {
-      // Dislodge from another wrong slot where it might be sitting
       const otherSlotKey = Object.keys(nextSlots).find(
-        (k) => k !== targetSlot.key && nextSlots[k].placedChunk === correctText && !nextSlots[k].isLocked
+        (k) =>
+          k !== targetSlot.key &&
+          nextSlots[k]!.placedChunk === correctText &&
+          !nextSlots[k]!.isLocked
       );
       if (otherSlotKey) {
-        chunkToPlaceId = nextSlots[otherSlotKey].placedChunkId || chunkToPlaceId;
+        chunkToPlaceId = nextSlots[otherSlotKey]!.placedChunkId || chunkToPlaceId;
         nextSlots[otherSlotKey] = {
-          ...nextSlots[otherSlotKey],
+          ...nextSlots[otherSlotKey]!,
           placedChunk: null,
           placedChunkId: null,
           isMisplaced: false,
@@ -820,7 +1038,6 @@ function SeventeenSyllablesGameInner({
       }
     }
 
-    // Lock chunk into target slot
     nextSlots[targetSlot.key] = {
       ...targetSlot,
       placedChunk: correctText,
@@ -829,6 +1046,7 @@ function SeventeenSyllablesGameInner({
       isMisplaced: false,
     };
 
+    playRevealSfx();
     setSlots(nextSlots);
     setTrayChunks(nextTray);
     setTileHintsUsed((prev) => prev + 1);
@@ -843,7 +1061,7 @@ function SeventeenSyllablesGameInner({
   }, [tileHintsUsed, slots, trayChunks, checkFullBoard]);
 
   // Custom Haiku Creation (strictly requires verified non-banned auth session)
-  const handlePublishCustomHaiku = useCallback(() => {
+  const handlePublishCustomHaiku = useCallback(async () => {
     setCreatorErrors([]);
 
     if (!isAuthenticated || !profile) {
@@ -869,6 +1087,7 @@ function SeventeenSyllablesGameInner({
 
     const val = validateHaikuStructure([creatorLine1, creatorLine2, creatorLine3]);
     if (!val.isValid) {
+      playErrorSfx();
       setCreatorErrors(val.errors);
       return;
     }
@@ -880,7 +1099,6 @@ function SeventeenSyllablesGameInner({
       "Friend"
     ).trim();
 
-    // Content moderation check across theme, creator name, and all 3 haiku lines (private mode)
     const mod = check17SyllablesPuzzleModeration(
       {
         theme: effectiveTheme,
@@ -891,6 +1109,7 @@ function SeventeenSyllablesGameInner({
     );
 
     if (!mod.allowed) {
+      playErrorSfx();
       setCreatorErrors([
         mod.reason ||
           mod.flaggedReason ||
@@ -899,32 +1118,56 @@ function SeventeenSyllablesGameInner({
       return;
     }
 
-    const shortId = generateShortGameId("17s");
+    const shortId = generateCustomGameId("17-syllables");
+    const cleanLines: [string, string, string] = [
+      creatorLine1.trim().toUpperCase(),
+      creatorLine2.trim().toUpperCase(),
+      creatorLine3.trim().toUpperCase(),
+    ];
     const customPayload = {
       id: shortId,
       theme: effectiveTheme,
       creatorName: effectiveCreatorName,
-      lines: [
-        creatorLine1.trim().toUpperCase(),
-        creatorLine2.trim().toUpperCase(),
-        creatorLine3.trim().toUpperCase(),
-      ] as [string, string, string],
+      lines: cleanLines,
+      chunks: sliceHaikuIntoChunks(cleanLines, 16),
     };
 
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(
-        `solgames_v1_17s_custom_${shortId}`,
-        JSON.stringify(customPayload)
-      );
+    const saved = await saveCustomPuzzle({
+      id: shortId,
+      gameSlug: "17-syllables",
+      title: effectiveTheme,
+      creatorId: profile.id,
+      creatorName: effectiveCreatorName,
+      creatorHandle: profile.handle,
+      payload: customPayload,
+    });
+
+    if (!saved.ok) {
+      playErrorSfx();
+      setCreatorErrors([saved.error]);
+      return;
     }
 
-    const shareUrl = build17SyllablesShareUrl({ id: shortId });
-    setCreatedShareLink(shareUrl);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(
+          `solgames_v1_17s_custom_${shortId}`,
+          JSON.stringify(customPayload)
+        );
+      } catch {
+        // Ignore storage errors
+      }
+    }
 
-    void shareCustomGame({
+    const shareUrl = saved.shareUrl || build17SyllablesShareUrl({ id: shortId });
+    setCreatedShareLink(shareUrl);
+    playSnapSfx(3);
+
+    await shareCustomGame({
       title: customPayload.theme,
       shareUrl,
       creatorName: customPayload.creatorName,
+      creatorHandle: profile.handle,
       gameName: "17 Syllables",
     });
   }, [
@@ -940,14 +1183,15 @@ function SeventeenSyllablesGameInner({
 
   // Build share/copy payload for both daily/archive and custom haiku completions
   const buildResultsShareOptions = useCallback((): ShareResultsOptions => {
-    const starStr =
-      currentStars >= 3
-        ? "⭐⭐⭐"
-        : currentStars >= 2
-        ? "⭐⭐"
-        : currentStars >= 1
-        ? "⭐"
-        : "✨";
+    const starStr = wasRevealed
+      ? "📖 Revealed"
+      : currentStars >= 3
+      ? "⭐⭐⭐"
+      : currentStars >= 2
+      ? "⭐⭐"
+      : currentStars >= 1
+      ? "⭐"
+      : "✨";
 
     const shareUrl =
       typeof window !== "undefined" && window.location?.href
@@ -960,19 +1204,20 @@ function SeventeenSyllablesGameInner({
       ? `17 Syllables — "${puzzle.theme}"`
       : `17 Syllables #${puzzle.puzzleNumber || "Daily"}`;
 
-    const text = [
-      headerLine,
-      `${starStr} (${currentStars.toFixed(1)}/3)`,
-      `⏱️ ${formatTimerSeconds(elapsedSeconds)} · ${wordHintsUsed + tileHintsUsed} hints`,
-      "🟩🟩🟩",
-      "🟩🟩🟩🟩",
-      "🟩🟩🟩",
-    ].join("\n");
+    const statusLine = wasRevealed
+      ? `${starStr} · ${formatTimerSeconds(elapsedSeconds)}`
+      : `${starStr} (${currentStars.toFixed(1)}/3)\n⏱️ ${formatTimerSeconds(elapsedSeconds)} · ${wordHintsUsed + tileHintsUsed} hints`;
+
+    const gridStr = wasRevealed
+      ? ["⬜⬜⬜", "⬜⬜⬜⬜", "⬜⬜⬜"].join("\n")
+      : ["🟩🟩🟩", "🟩🟩🟩🟩", "🟩🟩🟩"].join("\n");
+
+    const text = [headerLine, statusLine, gridStr].join("\n");
 
     return {
       title: isCustomMode
         ? `17 Syllables — ${puzzle.theme}`
-        : "17 Syllables Victory",
+        : "17 Syllables",
       text,
       url: shareUrl,
     };
@@ -984,28 +1229,9 @@ function SeventeenSyllablesGameInner({
     puzzle.puzzleNumber,
     puzzle.theme,
     tileHintsUsed,
+    wasRevealed,
     wordHintsUsed,
   ]);
-
-  // R3: "Share" action — native share sheet ONLY (never writes to clipboard or triggers "Copied!")
-  const handleNativeShareResults = useCallback(async () => {
-    await nativeShareResultsOnly(buildResultsShareOptions());
-  }, [buildResultsShareOptions]);
-
-  // R3: "Copy results" action — clipboard ONLY (never calls navigator.share)
-  const handleCopyResults = useCallback(async () => {
-    const { copied } = await copyResultsOnly(buildResultsShareOptions());
-    if (copied) {
-      setResultsCopied(true);
-      if (copyFeedbackTimerRef.current) {
-        clearTimeout(copyFeedbackTimerRef.current);
-      }
-      copyFeedbackTimerRef.current = setTimeout(() => {
-        setResultsCopied(false);
-        copyFeedbackTimerRef.current = null;
-      }, 1500);
-    }
-  }, [buildResultsShareOptions]);
 
   const isPartiallyFilled = useMemo(() => {
     const slotList = Object.values(slots);
@@ -1013,9 +1239,34 @@ function SeventeenSyllablesGameInner({
     return filledCount < slotList.length;
   }, [slots]);
 
+  const resolveEffectiveFocusedCell = useCallback((): FocusedCell | null => {
+    if (focusedCell) {
+      const slot = slots[`${focusedCell.lineIdx}-${focusedCell.wordIdx}-${focusedCell.slotIdx}`];
+      if (slot && slot.placedChunk) return focusedCell;
+    }
+    const fallbackSlot = Object.values(slots).find(
+      (s) => s.placedChunk !== null && !s.isLocked
+    );
+    if (!fallbackSlot) return focusedCell;
+    return {
+      lineIdx: fallbackSlot.lineIndex,
+      wordIdx: fallbackSlot.wordIndex,
+      slotIdx: fallbackSlot.slotIndex,
+      charIdx: 0,
+    };
+  }, [focusedCell, slots]);
+
   const handleCheckSquare = useCallback(() => {
-    if (!focusedCell || isGameWon) return;
-    const { lineIdx, wordIdx, slotIdx, charIdx } = focusedCell;
+    if (isGameWon) return;
+    const effective = resolveEffectiveFocusedCell();
+    if (!effective) {
+      toast({
+        title: "Square is empty",
+        description: "Place a fragment first to check a square.",
+      });
+      return;
+    }
+    const { lineIdx, wordIdx, slotIdx, charIdx } = effective;
     const slotKey = `${lineIdx}-${wordIdx}-${slotIdx}`;
     const slot = slots[slotKey];
     if (!slot || !slot.placedChunk) {
@@ -1034,22 +1285,32 @@ function SeventeenSyllablesGameInner({
       return next;
     });
     if (!isCorrect) {
+      playErrorSfx();
       toast({
         title: "Letter is incorrect",
         description:
-          "Marked with a red slash. Tap again to return chunk to tray.",
+          "Marked with a red slash. Tap the chunk to return it to the tray.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Square is correct!",
         description: "Nice! Keep going.",
       });
     }
-  }, [focusedCell, isGameWon, slots]);
+  }, [isGameWon, resolveEffectiveFocusedCell, slots]);
 
   const handleCheckWord = useCallback(() => {
-    if (!focusedCell || isGameWon) return;
-    const { lineIdx, wordIdx } = focusedCell;
+    if (isGameWon) return;
+    const effective = resolveEffectiveFocusedCell();
+    if (!effective) {
+      toast({
+        title: "Word is empty",
+        description: "Place syllable chunks in a word first to check them.",
+      });
+      return;
+    }
+    const { lineIdx, wordIdx } = effective;
     const targetWord = structuredLines[lineIdx]?.words[wordIdx];
     if (!targetWord) return;
 
@@ -1081,11 +1342,13 @@ function SeventeenSyllablesGameInner({
         description: "Place syllable chunks in this word first to check them.",
       });
     } else if (errorsFound > 0) {
+      playErrorSfx();
       toast({
         title: `Word checked: ${errorsFound} error(s) found`,
         description: "Incorrect letters have been marked with a red slash.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Word checked: All entered letters correct!",
         description:
@@ -1094,7 +1357,7 @@ function SeventeenSyllablesGameInner({
             : "Entered letters are correct so far!",
       });
     }
-  }, [focusedCell, isGameWon, structuredLines, slots, slashedCells]);
+  }, [isGameWon, resolveEffectiveFocusedCell, structuredLines, slots, slashedCells]);
 
   const handleCheckPuzzle = useCallback(() => {
     if (isGameWon) return;
@@ -1124,11 +1387,13 @@ function SeventeenSyllablesGameInner({
     }
 
     if (errorsFound > 0) {
+      playErrorSfx();
       toast({
         title: `Puzzle checked: ${errorsFound} error(s) found`,
         description: "Incorrect letters marked with red slashes.",
       });
     } else {
+      playSnapSfx();
       toast({
         title: "Puzzle checked: All placed letters correct!",
         description: "Looking great! Keep going to complete the haiku.",
@@ -1140,27 +1405,30 @@ function SeventeenSyllablesGameInner({
     const nextSlots: Record<string, SlotState> = { ...slots };
     Object.keys(nextSlots).forEach((k) => {
       nextSlots[k] = {
-        ...nextSlots[k],
-        placedChunk: nextSlots[k].expectedChunk,
+        ...nextSlots[k]!,
+        placedChunk: nextSlots[k]!.expectedChunk,
         placedChunkId: `revealed-${k}`,
         isLocked: true,
         isMisplaced: false,
       };
     });
+    playRevealSfx();
+    setWasRevealed(true);
     setSlots(nextSlots);
     setTrayChunks([]);
     setSlashedCells(new Set());
     setIsTimerRunning(false);
     setIsGameWon(true);
     if (!isCustomMode) {
-      record17SyllablesWin(puzzle.dateKey, 0, elapsedSeconds);
+      recordGameRevealed("17-syllables", puzzle.dateKey);
     }
     setTimeout(() => {
       setVictoryModalOpen(true);
     }, 400);
-  }, [slots, isCustomMode, puzzle.dateKey, elapsedSeconds]);
+  }, [slots, isCustomMode, puzzle.dateKey]);
 
   const handleClearPuzzle = useCallback(() => {
+    playTapSfx();
     const nextSlots: Record<string, SlotState> = { ...slots };
     const returned: TrayChunk[] = [...trayChunks];
 
@@ -1194,7 +1462,10 @@ function SeventeenSyllablesGameInner({
       open={isCreatorDialogOpen}
       onOpenChange={handleCreatorDialogOpenChange}
     >
-      <DialogContent className="max-w-lg">
+      <DialogContent
+        data-game-dialog-open={isCreatorDialogOpen ? "true" : undefined}
+        className="max-w-lg max-h-[90dvh] overflow-y-auto"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-emerald-600" />
@@ -1215,7 +1486,7 @@ function SeventeenSyllablesGameInner({
               value={creatorTheme}
               onChange={(e) => setCreatorTheme(e.target.value)}
               placeholder="e.g. Autumn Whisper"
-              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-base sm:text-sm focus:border-black focus:outline-hidden"
             />
           </div>
 
@@ -1228,7 +1499,7 @@ function SeventeenSyllablesGameInner({
               value={creatorName}
               onChange={(e) => setCreatorName(e.target.value)}
               placeholder="Your Name or @handle"
-              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-sm focus:border-black focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 font-medium text-base sm:text-sm focus:border-black focus:outline-hidden"
             />
           </div>
 
@@ -1250,7 +1521,7 @@ function SeventeenSyllablesGameInner({
               value={creatorLine1}
               onChange={(e) => setCreatorLine1(e.target.value)}
               placeholder="OLD GOLD AUTUMN LEAVES"
-              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-base sm:text-sm focus:border-black focus:outline-hidden"
             />
           </div>
 
@@ -1272,7 +1543,7 @@ function SeventeenSyllablesGameInner({
               value={creatorLine2}
               onChange={(e) => setCreatorLine2(e.target.value)}
               placeholder="DRIFTING DOWN TO FROZEN SOIL"
-              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-base sm:text-sm focus:border-black focus:outline-hidden"
             />
           </div>
 
@@ -1294,7 +1565,7 @@ function SeventeenSyllablesGameInner({
               value={creatorLine3}
               onChange={(e) => setCreatorLine3(e.target.value)}
               placeholder="WINTER REACHES IN"
-              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-sm focus:border-black focus:outline-hidden"
+              className="w-full px-3 py-2 rounded-xl border-2 border-neutral-300 uppercase font-mono text-base sm:text-sm focus:border-black focus:outline-hidden"
             />
           </div>
 
@@ -1319,7 +1590,7 @@ function SeventeenSyllablesGameInner({
                 type="text"
                 readOnly
                 value={createdShareLink}
-                className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded font-mono text-[11px]"
+                className="w-full px-2.5 py-1.5 bg-white border border-emerald-300 rounded font-mono text-base sm:text-xs"
               />
             </div>
           )}
@@ -1335,7 +1606,7 @@ function SeventeenSyllablesGameInner({
           </button>
           <button
             type="button"
-            onClick={handlePublishCustomHaiku}
+            onClick={() => void handlePublishCustomHaiku()}
             className="px-5 py-2.5 bg-black text-white rounded-full font-bold text-xs hover:bg-neutral-800 cursor-pointer shadow-xs"
           >
             Generate &amp; Share Link
@@ -1344,6 +1615,74 @@ function SeventeenSyllablesGameInner({
       </DialogContent>
     </Dialog>
   ) : null;
+
+  // Custom Haiku Loading / Not Found states
+  if (loadingCustomHaiku) {
+    return (
+      <GameShell
+        gameSlug="17-syllables"
+        gameTitle="17 Syllables"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="Friend"
+        subtitle="Haiku Fragment Reconstruction"
+      >
+        <div className="mx-auto max-w-md my-12 p-8 text-center bg-white border-2 border-black rounded-2xl shadow-[0_4px_0_#111111] space-y-3">
+          <Loader2 className="h-7 w-7 animate-spin mx-auto text-black" />
+          <p className="font-headline font-bold text-sm text-neutral-700">
+            Loading custom 17 Syllables haiku…
+          </p>
+        </div>
+      </GameShell>
+    );
+  }
+
+  if (customHaikuNotFound) {
+    return (
+      <GameShell
+        gameSlug="17-syllables"
+        gameTitle="17 Syllables"
+        puzzleNumber={0}
+        dateKey={activeDateKey}
+        author="21 Games"
+        subtitle="Haiku Fragment Reconstruction"
+      >
+        <div
+          data-testid="custom-haiku-not-found"
+          className="mx-auto max-w-md my-12 p-6 sm:p-8 text-center bg-white border-2 border-black rounded-2xl shadow-[0_4px_0_#111111] space-y-4"
+        >
+          <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-red-100 border-2 border-black mx-auto">
+            <AlertCircle className="h-6 w-6 text-red-600" />
+          </div>
+          <h2 className="font-headline font-black text-xl sm:text-2xl text-black">
+            Custom Haiku Not Found
+          </h2>
+          <p className="text-xs sm:text-sm text-neutral-600 leading-relaxed">
+            We couldn&apos;t find a custom 17 Syllables haiku matching{" "}
+            <span className="font-mono font-bold text-black bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200">
+              {customParam?.trim() || "(empty)"}
+            </span>
+            . The link may be mistyped or removed.
+          </p>
+          <div className="flex flex-col gap-2 pt-1">
+            <Link
+              href="/games/17-syllables"
+              className="w-full inline-flex items-center justify-center h-11 rounded-xl bg-black text-white hover:bg-neutral-800 font-headline font-black text-xs sm:text-sm border-2 border-black transition-colors"
+            >
+              Play Today&apos;s Haiku
+              <ArrowRight className="h-4 w-4 ml-1.5" />
+            </Link>
+            <Link
+              href="/"
+              className="w-full inline-flex items-center justify-center h-10 rounded-xl bg-white text-black hover:bg-neutral-100 font-bold text-xs border-2 border-black transition-colors"
+            >
+              All Games
+            </Link>
+          </div>
+        </div>
+      </GameShell>
+    );
+  }
 
   // Gate direct ?mode=create navigation for unauthenticated guests or suspended accounts
   if (modeParam === "create" && !dismissedUrlCreateMode && !isAuthenticated) {
@@ -1406,10 +1745,25 @@ function SeventeenSyllablesGameInner({
 
   // If splash screen not yet dismissed
   if (!splashDismissed) {
-    const isCompleted = !isCustomMode && isDateCompleted("17-syllables", puzzle.dateKey);
+    const isCompleted =
+      !isCustomMode && isDateCompleted("17-syllables", puzzle.dateKey);
+    const savedProg = !isCustomMode
+      ? get17SyllablesProgress(puzzle.dateKey, puzzle.id)
+      : null;
+    const placedCount = Object.values(slots).filter(
+      (s) => s.placedChunk !== null
+    ).length;
+    const savedPlacedCount = savedProg?.placedChunks
+      ? Object.values(savedProg.placedChunks).filter((v) => v !== null).length
+      : 0;
     const hasProgress =
       !isCustomMode &&
-      Boolean(get17SyllablesProgress(puzzle.dateKey, puzzle.id)?.placedChunks);
+      !isCompleted &&
+      !isGameWon &&
+      (placedCount > 0 ||
+        savedPlacedCount > 0 ||
+        elapsedSeconds >= 5 ||
+        (savedProg?.elapsedSeconds ?? 0) >= 5);
 
     return (
       <GameShell
@@ -1432,6 +1786,7 @@ function SeventeenSyllablesGameInner({
           isCompletedToday={isCompleted}
           hasSavedProgress={hasProgress}
           onPlay={() => {
+            playTapSfx();
             setSplashDismissed(true);
             if (isGameWon) {
               setVictoryModalOpen(true);
@@ -1446,6 +1801,8 @@ function SeventeenSyllablesGameInner({
       </GameShell>
     );
   }
+
+  const shareOpts = buildResultsShareOptions();
 
   // Active Playable Game Board
   return (
@@ -1474,7 +1831,10 @@ function SeventeenSyllablesGameInner({
           {/* Lifesaver (Check & Reveal) */}
           <button
             type="button"
-            onClick={() => setCheckRevealModalOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setCheckRevealModalOpen(true);
+            }}
             disabled={isGameWon}
             className={cn(
               "h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40",
@@ -1491,7 +1851,10 @@ function SeventeenSyllablesGameInner({
           {/* Hints */}
           <button
             type="button"
-            onClick={() => setHintsModalOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setHintsModalOpen(true);
+            }}
             disabled={isGameWon || (wordHintsUsed >= 3 && tileHintsUsed >= 2)}
             className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95 disabled:opacity-40"
             title="Hints"
@@ -1503,7 +1866,10 @@ function SeventeenSyllablesGameInner({
           {/* How to Play */}
           <button
             type="button"
-            onClick={() => setHelpOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setHelpOpen(true);
+            }}
             className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
             title="How to Play"
             aria-label="How to Play"
@@ -1514,7 +1880,10 @@ function SeventeenSyllablesGameInner({
           {/* Settings */}
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              playTapSfx();
+              setSettingsOpen(true);
+            }}
             className="h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-9 sm:w-9 rounded-lg sm:rounded-xl border-2 border-black/20 hover:border-black bg-white text-black flex items-center justify-center transition-all cursor-pointer active:scale-95"
             title="Settings & Tools"
             aria-label="Settings"
@@ -1524,6 +1893,8 @@ function SeventeenSyllablesGameInner({
         </div>
       }
     >
+      <WinFlourish active={isGameWon && !wasRevealed} />
+
       <div className="space-y-6 max-w-3xl mx-auto pb-12">
         {/* Top Control Bar: Theme Pill + Hints */}
         <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white rounded-2xl border-2 border-black/10 shadow-xs">
@@ -1537,10 +1908,12 @@ function SeventeenSyllablesGameInner({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Word Hint Button */}
             <button
               type="button"
-              onClick={() => setWordHintConfirmOpen(true)}
+              onClick={() => {
+                playTapSfx();
+                setWordHintConfirmOpen(true);
+              }}
               disabled={wordHintsUsed >= 3 || isGameWon}
               className={cn(
                 "px-3 py-1.5 rounded-full border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer",
@@ -1553,10 +1926,12 @@ function SeventeenSyllablesGameInner({
               <span>Word Hint ({3 - wordHintsUsed})</span>
             </button>
 
-            {/* Tile Lock Hint Button */}
             <button
               type="button"
-              onClick={() => setTileHintConfirmOpen(true)}
+              onClick={() => {
+                playTapSfx();
+                setTileHintConfirmOpen(true);
+              }}
               disabled={tileHintsUsed >= 2 || isGameWon}
               className={cn(
                 "px-3 py-1.5 rounded-full border-2 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer",
@@ -1572,178 +1947,222 @@ function SeventeenSyllablesGameInner({
         </div>
 
         {/* Haiku Board: 3 Horizontal Lines (5 - 7 - 5) */}
-        <div className="bg-white border-2 border-black rounded-3xl p-4 sm:p-8 shadow-[0_6px_0_#111111] space-y-6 sm:space-y-8">
-          {structuredLines.map((lineInfo, lineIdx) => (
-            <div key={lineIdx} className="space-y-2">
-              {/* Syllable Pill */}
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full bg-neutral-100 border border-neutral-300 text-neutral-600">
-                  Line {lineIdx + 1} ({lineInfo.syllables} syllables)
-                </span>
-              </div>
+        <div className="bg-white border-2 border-black rounded-3xl p-3 min-[375px]:p-4 sm:p-8 shadow-[0_6px_0_#111111] space-y-5 sm:space-y-8 overflow-x-hidden">
+          {structuredLines.map((lineInfo, lineIdx) => {
+            const lineCharCount = lineInfo.words.reduce(
+              (sum, w) => sum + w.text.length,
+              0
+            );
+            const lineChunkCount = lineInfo.words.reduce(
+              (sum, w) => sum + w.chunks.length,
+              0
+            );
+            const isVeryDenseLine = lineCharCount >= 16 || lineChunkCount >= 6;
+            const isDenseLine = lineCharCount >= 10 || lineChunkCount >= 4;
 
-              {/* Word Spans with fixed gaps */}
-              <div className="flex flex-wrap items-center gap-x-4 sm:gap-x-6 gap-y-3">
-                {lineInfo.words.map((wordInfo, wordIdx) => {
-                  const isWordHintActive = activeWordHintKey === `${lineIdx}-${wordIdx}`;
+            return (
+              <div key={lineIdx} className="space-y-2">
+                {/* Syllable Pill */}
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full bg-neutral-100 border border-neutral-300 text-neutral-600">
+                    Line {lineIdx + 1} ({lineInfo.syllables} syllables)
+                  </span>
+                </div>
 
-                  return (
-                    <div
-                      key={wordIdx}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 p-1 rounded-xl transition-all",
-                        isWordHintActive &&
-                          "ring-2 ring-purple-500 bg-purple-50/50 scale-105 shadow-sm"
-                      )}
-                    >
-                      {wordInfo.chunks.map((_, slotIdx) => {
-                        const slotKey = `${lineIdx}-${wordIdx}-${slotIdx}`;
-                        const slot = slots[slotKey];
-                        if (!slot) return null;
+                {/* Word Spans with adaptive gaps so long lines never overflow 375px */}
+                <div
+                  className={cn(
+                    "flex flex-wrap items-center gap-y-2.5",
+                    isVeryDenseLine
+                      ? "gap-x-1.5 min-[390px]:gap-x-2.5 sm:gap-x-5"
+                      : isDenseLine
+                      ? "gap-x-2 min-[390px]:gap-x-3 sm:gap-x-6"
+                      : "gap-x-3.5 sm:gap-x-6"
+                  )}
+                >
+                  {lineInfo.words.map((wordInfo, wordIdx) => {
+                    const isWordHintActive =
+                      activeWordHintKey === `${lineIdx}-${wordIdx}`;
 
-                        const isShaking = shakingSlotKey === slotKey;
-                        const isFilled = slot.placedChunk !== null;
+                    return (
+                      <div
+                        key={wordIdx}
+                        className={cn(
+                          "inline-flex items-center rounded-xl transition-all max-w-full",
+                          isDenseLine ? "gap-1 p-0.5 sm:p-1" : "gap-1.5 p-1",
+                          isWordHintActive &&
+                            "ring-2 ring-purple-500 bg-purple-50/50 scale-105 shadow-sm"
+                        )}
+                      >
+                        {wordInfo.chunks.map((_, slotIdx) => {
+                          const slotKey = `${lineIdx}-${wordIdx}-${slotIdx}`;
+                          const slot = slots[slotKey];
+                          if (!slot) return null;
 
-                        return (
-                          <div
-                            key={slotIdx}
-                            onClick={() => {
-                              if (isGameWon) return;
-                              const isSlotFocused =
-                                focusedCell?.lineIdx === lineIdx &&
-                                focusedCell?.wordIdx === wordIdx &&
-                                focusedCell?.slotIdx === slotIdx;
+                          const isShaking = shakingSlotKey === slotKey;
+                          const isFilled = slot.placedChunk !== null;
 
-                              if (isFilled) {
-                                if (isSlotFocused && !slot.isLocked) {
-                                  // Two-tap return: tapping already-focused slot returns to tray
-                                  handleRemoveChunk(slotKey);
-                                } else {
-                                  setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
-                                }
-                              } else if (selectedTrayChunkId) {
+                          const handleSlotInteraction = (charIdx = 0) => {
+                            if (isGameWon) return;
+                            if (isFilled) {
+                              if (selectedTrayChunkId) {
                                 handlePlaceChunk(slotKey);
-                                setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
+                                setFocusedCell({
+                                  lineIdx,
+                                  wordIdx,
+                                  slotIdx,
+                                  charIdx: 0,
+                                });
                               } else {
-                                setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
+                                handleRemoveChunk(slotKey);
+                                setFocusedCell({
+                                  lineIdx,
+                                  wordIdx,
+                                  slotIdx,
+                                  charIdx,
+                                });
                               }
-                            }}
-                            onDragOver={(e) => {
-                              if (isGameWon) return;
-                              e.preventDefault();
-                            }}
-                            onDrop={(e) => {
-                              if (isGameWon) return;
-                              e.preventDefault();
-                              const chunkId = e.dataTransfer.getData("text/plain");
-                              handlePlaceChunk(slotKey, chunkId);
-                              setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
-                            }}
-                            className={cn(
-                              "relative inline-flex items-center gap-0.5 sm:gap-1 p-0.5 sm:p-1 rounded-lg border-2 transition-all select-none cursor-pointer",
-                              isShaking && "animate-bounce ring-2 ring-red-500",
-                              !isFilled &&
-                                "border-dashed border-neutral-300 bg-neutral-50/60 hover:border-black/50 hover:bg-neutral-100",
-                              isFilled &&
-                                !slot.isMisplaced &&
-                                !slot.isLocked &&
-                                !isGameWon &&
-                                "border-black bg-white shadow-xs hover:border-red-400",
-                              slot.isLocked &&
-                                "border-emerald-500 bg-emerald-50/70 text-emerald-950",
-                              slot.isMisplaced &&
-                                "border-red-500 bg-red-50 text-red-700 animate-pulse",
-                              isGameWon &&
-                                "border-emerald-500 bg-emerald-50 text-emerald-950 shadow-[0_0_10px_rgba(46,204,113,0.4)]"
-                            )}
-                          >
-                            {/* Individual character boxes inside slot */}
-                            {Array.from({ length: slot.expectedLength }).map((_, charIdx) => {
-                              const char = slot.placedChunk ? slot.placedChunk[charIdx] : "";
-                              const cellId = `${slotKey}-${charIdx}`;
-                              const isSlashed = slashedCells.has(cellId);
-                              const isCellFocused =
-                                focusedCell?.lineIdx === lineIdx &&
-                                focusedCell?.wordIdx === wordIdx &&
-                                focusedCell?.slotIdx === slotIdx &&
-                                focusedCell?.charIdx === charIdx;
-                              const isSlotFocused =
-                                focusedCell?.lineIdx === lineIdx &&
-                                focusedCell?.wordIdx === wordIdx &&
-                                focusedCell?.slotIdx === slotIdx;
+                            } else if (selectedTrayChunkId) {
+                              handlePlaceChunk(slotKey);
+                              setFocusedCell({
+                                lineIdx,
+                                wordIdx,
+                                slotIdx,
+                                charIdx: 0,
+                              });
+                            } else {
+                              playTapSfx();
+                              setFocusedCell({
+                                lineIdx,
+                                wordIdx,
+                                slotIdx,
+                                charIdx,
+                              });
+                            }
+                          };
 
-                              return (
-                                <div
-                                  key={charIdx}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (isGameWon) return;
-                                    if (isFilled) {
-                                      if (isSlotFocused && !slot.isLocked) {
-                                        // Two-tap return: tapping already-focused slot returns to tray
-                                        handleRemoveChunk(slotKey);
-                                      } else {
-                                        setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx });
-                                      }
-                                    } else if (selectedTrayChunkId) {
-                                      handlePlaceChunk(slotKey);
-                                      setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx: 0 });
-                                    } else {
-                                      setFocusedCell({ lineIdx, wordIdx, slotIdx, charIdx });
-                                    }
-                                  }}
-                                  className={cn(
-                                    "relative w-7 h-8 sm:w-9 sm:h-11 rounded flex items-center justify-center font-mono font-black text-sm sm:text-lg uppercase transition-all select-none cursor-pointer",
-                                    !isFilled && "bg-neutral-100/70 text-transparent",
-                                    isFilled &&
-                                      !slot.isMisplaced &&
-                                      !slot.isLocked &&
-                                      !isSlashed &&
-                                      "bg-white text-black border border-neutral-200",
-                                    slot.isLocked && "bg-emerald-100 text-emerald-950",
-                                    (slot.isMisplaced || isSlashed) &&
-                                      "bg-red-50 text-red-700 border-2 border-red-500",
-                                    isCellFocused && "ring-2 ring-black scale-105 z-10 shadow-xs"
-                                  )}
-                                >
-                                  {char}
+                          return (
+                            <div
+                              key={slotIdx}
+                              onClick={() => handleSlotInteraction(0)}
+                              onDragOver={(e) => {
+                                if (isGameWon) return;
+                                e.preventDefault();
+                              }}
+                              onDrop={(e) => {
+                                if (isGameWon) return;
+                                e.preventDefault();
+                                const chunkId =
+                                  e.dataTransfer.getData("text/plain");
+                                handlePlaceChunk(slotKey, chunkId);
+                                setFocusedCell({
+                                  lineIdx,
+                                  wordIdx,
+                                  slotIdx,
+                                  charIdx: 0,
+                                });
+                              }}
+                              className={cn(
+                                "relative inline-flex items-center rounded-lg border-2 transition-all select-none cursor-pointer",
+                                isDenseLine
+                                  ? "gap-0.5 p-0.5 sm:gap-1 sm:p-1"
+                                  : "gap-0.5 sm:gap-1 p-0.5 sm:p-1",
+                                isShaking && "animate-bounce ring-2 ring-red-500",
+                                !isFilled &&
+                                  "border-dashed border-neutral-300 bg-neutral-50/60 hover:border-black/50 hover:bg-neutral-100",
+                                isFilled &&
+                                  !slot.isMisplaced &&
+                                  !slot.isLocked &&
+                                  !isGameWon &&
+                                  "border-black bg-white shadow-xs hover:border-red-400",
+                                slot.isLocked &&
+                                  "border-emerald-500 bg-emerald-50/70 text-emerald-950",
+                                slot.isMisplaced &&
+                                  "border-red-500 bg-red-50 text-red-700 animate-pulse",
+                                isGameWon &&
+                                  "border-emerald-500 bg-emerald-50 text-emerald-950 shadow-[0_0_10px_rgba(46,204,113,0.4)]"
+                              )}
+                            >
+                              {Array.from({ length: slot.expectedLength }).map(
+                                (_, charIdx) => {
+                                  const char = slot.placedChunk
+                                    ? slot.placedChunk[charIdx]
+                                    : "";
+                                  const cellId = `${slotKey}-${charIdx}`;
+                                  const isSlashed = slashedCells.has(cellId);
+                                  const isCellFocused =
+                                    focusedCell?.lineIdx === lineIdx &&
+                                    focusedCell?.wordIdx === wordIdx &&
+                                    focusedCell?.slotIdx === slotIdx &&
+                                    focusedCell?.charIdx === charIdx;
 
-                                  {/* NYT Red Diagonal Slash */}
-                                  {isSlashed && (
-                                    <svg
-                                      viewBox="0 0 48 48"
-                                      className="pointer-events-none absolute inset-0 h-full w-full text-red-600/85"
+                                  return (
+                                    <div
+                                      key={charIdx}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSlotInteraction(charIdx);
+                                      }}
+                                      className={cn(
+                                        "relative rounded flex items-center justify-center font-mono font-black uppercase transition-all select-none cursor-pointer",
+                                        isVeryDenseLine
+                                          ? "w-5 h-7 text-xs min-[390px]:w-6 min-[390px]:h-8 sm:w-9 sm:h-11 sm:text-lg"
+                                          : isDenseLine
+                                          ? "w-6 h-8 text-xs min-[390px]:w-7 sm:w-9 sm:h-11 sm:text-lg"
+                                          : "w-7 h-8 text-sm sm:w-9 sm:h-11 sm:text-lg",
+                                        !isFilled &&
+                                          "bg-neutral-100/70 text-transparent",
+                                        isFilled &&
+                                          !slot.isMisplaced &&
+                                          !slot.isLocked &&
+                                          !isSlashed &&
+                                          "bg-white text-black border border-neutral-200",
+                                        slot.isLocked &&
+                                          "bg-emerald-100 text-emerald-950",
+                                        (slot.isMisplaced || isSlashed) &&
+                                          "bg-red-50 text-red-700 border-2 border-red-500",
+                                        isCellFocused &&
+                                          "ring-2 ring-black scale-105 z-10 shadow-xs"
+                                      )}
                                     >
-                                      <line
-                                        x1="8"
-                                        y1="40"
-                                        x2="40"
-                                        y2="8"
-                                        stroke="currentColor"
-                                        strokeWidth="3.5"
-                                        strokeLinecap="round"
-                                      />
-                                    </svg>
-                                  )}
-                                </div>
-                              );
-                            })}
+                                      {char}
 
-                            {/* Lock badge if locked */}
-                            {slot.isLocked && (
-                              <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-                                <Lock className="w-2.5 h-2.5" />
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
+                                      {isSlashed && (
+                                        <svg
+                                          viewBox="0 0 48 48"
+                                          className="pointer-events-none absolute inset-0 h-full w-full text-red-600/85"
+                                        >
+                                          <line
+                                            x1="8"
+                                            y1="40"
+                                            x2="40"
+                                            y2="8"
+                                            stroke="currentColor"
+                                            strokeWidth="3.5"
+                                            strokeLinecap="round"
+                                          />
+                                        </svg>
+                                      )}
+                                    </div>
+                                  );
+                                }
+                              )}
+
+                              {slot.isLocked && (
+                                <div className="absolute -top-2 -right-2 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
+                                  <Lock className="w-2.5 h-2.5" />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Bottom Section: Inline Completion Card (when won) or Available Chunks Tray */}
@@ -1756,7 +2175,7 @@ function SeventeenSyllablesGameInner({
                 </div>
                 <div>
                   <h2 className="font-headline font-black text-lg sm:text-xl text-black leading-tight">
-                    Haiku Reconstructed!
+                    {wasRevealed ? "Haiku Revealed" : "Haiku Reconstructed!"}
                   </h2>
                   <p className="text-xs font-medium text-neutral-600">
                     {isCustomMode
@@ -1767,52 +2186,28 @@ function SeventeenSyllablesGameInner({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-xs font-bold text-black">
-                  <Star className="w-3.5 h-3.5 fill-[#F9D423] text-black" />
-                  <span>{currentStars.toFixed(1)}</span>
-                </span>
+                {!wasRevealed && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-xs font-bold text-black">
+                    <Star className="w-3.5 h-3.5 fill-[#F9D423] text-black" />
+                    <span>{currentStars.toFixed(1)}</span>
+                  </span>
+                )}
                 <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-black">
                   {formatTimerSeconds(elapsedSeconds)}
                 </span>
                 <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-full bg-white border border-neutral-300 text-neutral-700">
-                  {wordHintsUsed + tileHintsUsed} hints
+                  {wasRevealed
+                    ? "Revealed"
+                    : `${wordHintsUsed + tileHintsUsed} hints`}
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 w-full">
-              <button
-                type="button"
-                onClick={() => void handleNativeShareResults()}
-                className="w-full py-2.5 sm:py-3 px-3 sm:px-4 bg-black text-white hover:bg-neutral-800 active:translate-y-0.5 rounded-full font-bold text-xs sm:text-sm border-2 border-black flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:shadow-none transition-all whitespace-nowrap"
-              >
-                <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                <span>Share</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void handleCopyResults()}
-                className={cn(
-                  "w-full py-2.5 sm:py-3 px-3 sm:px-4 rounded-full font-bold text-xs sm:text-sm border-2 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:translate-y-0.5 active:shadow-none transition-all whitespace-nowrap",
-                  resultsCopied
-                    ? "bg-emerald-600 text-white border-black"
-                    : "bg-white text-black border-black hover:bg-emerald-50"
-                )}
-              >
-                {resultsCopied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                    <span>Copy results</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <ResultShareButtons
+              title={shareOpts.title}
+              text={shareOpts.text}
+              url={shareOpts.url}
+            />
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-emerald-200/80">
               <button
@@ -1836,13 +2231,27 @@ function SeventeenSyllablesGameInner({
           </div>
         ) : (
           <div className="bg-neutral-50 border-2 border-black/10 rounded-3xl p-4 sm:p-6 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
                 Poetic Fragments ({trayChunks.length} remaining)
               </span>
-              <span className="text-[11px] text-neutral-400 font-medium hidden sm:inline">
-                Tap a chunk to select, then tap a matching empty slot on the board
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-neutral-400 font-medium hidden md:inline">
+                  Tap a chunk to place · Tap a placed chunk to return
+                </span>
+                {trayChunks.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleShuffleTray}
+                    data-testid="shuffle-tray-button"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border-2 border-black/25 hover:border-black bg-white text-[11px] font-bold text-black transition-colors cursor-pointer active:scale-95"
+                    title="Shuffle remaining fragments"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    <span>Shuffle</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 min-h-[70px]">
@@ -1858,6 +2267,7 @@ function SeventeenSyllablesGameInner({
                       e.dataTransfer.setData("text/plain", chunk.id);
                     }}
                     onClick={() => {
+                      playTapSfx();
                       setSelectedTrayChunkId(isSelected ? null : chunk.id);
                     }}
                     className={cn(
@@ -1884,7 +2294,10 @@ function SeventeenSyllablesGameInner({
 
       {/* Word Hint Confirmation Modal */}
       <Dialog open={wordHintConfirmOpen} onOpenChange={setWordHintConfirmOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          data-game-dialog-open={wordHintConfirmOpen ? "true" : undefined}
+          className="max-w-sm"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lightbulb className="w-5 h-5 text-amber-500" />
@@ -1916,7 +2329,10 @@ function SeventeenSyllablesGameInner({
 
       {/* Tile Lock Hint Confirmation Modal */}
       <Dialog open={tileHintConfirmOpen} onOpenChange={setTileHintConfirmOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          data-game-dialog-open={tileHintConfirmOpen ? "true" : undefined}
+          className="max-w-sm"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="w-5 h-5 text-emerald-600" />
@@ -1948,13 +2364,16 @@ function SeventeenSyllablesGameInner({
 
       {/* Victory & Share Modal */}
       <Dialog open={victoryModalOpen} onOpenChange={setVictoryModalOpen}>
-        <DialogContent className="max-w-md text-center">
+        <DialogContent
+          data-game-dialog-open={victoryModalOpen ? "true" : undefined}
+          className="max-w-md text-center"
+        >
           <DialogHeader className="sm:text-center">
             <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2">
               <Trophy className="w-6 h-6" />
             </div>
             <DialogTitle className="text-2xl font-black font-headline">
-              Haiku Reconstructed!
+              {wasRevealed ? "Haiku Revealed" : "Haiku Reconstructed!"}
             </DialogTitle>
             <DialogDescription>
               {isCustomMode
@@ -1977,8 +2396,14 @@ function SeventeenSyllablesGameInner({
             <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-200">
               <div className="text-[10px] font-bold text-neutral-500 uppercase">Rating</div>
               <div className="font-black text-lg text-black flex items-center justify-center gap-1">
-                <Star className="w-4 h-4 fill-[#F9D423] text-black" />
-                <span>{currentStars.toFixed(1)}</span>
+                {wasRevealed ? (
+                  <span className="text-sm">Revealed</span>
+                ) : (
+                  <>
+                    <Star className="w-4 h-4 fill-[#F9D423] text-black" />
+                    <span>{currentStars.toFixed(1)}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1998,39 +2423,12 @@ function SeventeenSyllablesGameInner({
           </div>
 
           <DialogFooter className="flex flex-col sm:flex-col sm:space-x-0 gap-2.5 pt-2 w-full">
-            <div className="grid grid-cols-2 gap-2.5 w-full">
-              <button
-                type="button"
-                onClick={() => void handleNativeShareResults()}
-                className="w-full py-2.5 sm:py-3 px-3 sm:px-4 bg-black text-white hover:bg-neutral-800 active:translate-y-0.5 rounded-full font-bold text-xs sm:text-sm border-2 border-black flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:shadow-none transition-all whitespace-nowrap"
-              >
-                <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                <span>Share</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void handleCopyResults()}
-                className={cn(
-                  "w-full py-2.5 sm:py-3 px-3 sm:px-4 rounded-full font-bold text-xs sm:text-sm border-2 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shadow-[0_2px_0_#111111] active:translate-y-0.5 active:shadow-none transition-all whitespace-nowrap",
-                  resultsCopied
-                    ? "bg-emerald-600 text-white border-black"
-                    : "bg-white text-black border-black hover:bg-emerald-50"
-                )}
-              >
-                {resultsCopied ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-                    <span>Copy results</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <ResultShareButtons
+              title={shareOpts.title}
+              text={shareOpts.text}
+              url={shareOpts.url}
+              className="w-full"
+            />
 
             <button
               type="button"
@@ -2051,7 +2449,10 @@ function SeventeenSyllablesGameInner({
 
       {/* Settings & Tools Modal */}
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+        <DialogContent
+          data-game-dialog-open={settingsOpen ? "true" : undefined}
+          className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
               <Settings className="h-5 w-5 text-gray-700" />
@@ -2130,7 +2531,10 @@ function SeventeenSyllablesGameInner({
 
       {/* Hints Modal */}
       <Dialog open={hintsModalOpen} onOpenChange={setHintsModalOpen}>
-        <DialogContent className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl">
+        <DialogContent
+          data-game-dialog-open={hintsModalOpen ? "true" : undefined}
+          className="max-w-xs sm:max-w-sm rounded-2xl p-5 border-2 border-black shadow-2xl"
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-headline font-black">
               <Lightbulb className="h-5 w-5 text-amber-500 fill-amber-500/20" />

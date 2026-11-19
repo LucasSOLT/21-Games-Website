@@ -577,7 +577,11 @@ create policy "daily_puzzles_select_public"
   on public.daily_puzzles
   for select
   to anon, authenticated
-  using (true);
+  using (
+    puzzle_date <= (current_date + 1)
+    or public.is_root_game_master()
+    or public.is_active_admin()
+  );
 
 create policy "daily_puzzles_insert_authorized"
   on public.daily_puzzles
@@ -585,7 +589,10 @@ create policy "daily_puzzles_insert_authorized"
   to authenticated
   with check (
     public.is_root_game_master()
-    or (public.is_active_admin() and puzzle_date > current_date)
+    or (
+      public.is_active_admin()
+      and puzzle_date > (now() at time zone 'America/Los_Angeles')::date
+    )
   );
 
 create policy "daily_puzzles_update_authorized"
@@ -594,11 +601,17 @@ create policy "daily_puzzles_update_authorized"
   to authenticated
   using (
     public.is_root_game_master()
-    or (public.is_active_admin() and puzzle_date > current_date)
+    or (
+      public.is_active_admin()
+      and puzzle_date > (now() at time zone 'America/Los_Angeles')::date
+    )
   )
   with check (
     public.is_root_game_master()
-    or (public.is_active_admin() and puzzle_date > current_date)
+    or (
+      public.is_active_admin()
+      and puzzle_date > (now() at time zone 'America/Los_Angeles')::date
+    )
   );
 
 create policy "daily_puzzles_delete_gm_only"
@@ -1098,7 +1111,7 @@ update auth.users
 update public.user_profiles
   set role = 'user'
   where lower(btrim(email)) not in ('lucas@soltheory.com', 'steve@soltheory.com')
-    and role <> 'user';
+    and role = 'game_master';
 
 update public.user_profiles
   set role = 'game_master',

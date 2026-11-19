@@ -28,7 +28,17 @@ import {
   type EchoDifficulty,
   type EightfoldEchoPuzzle,
 } from "@/data/puzzles/eightfold-echo";
-import { getDailyPuzzleForGame, getLocalDateKey } from "@/lib/daily-engine";
+import { getDailyPuzzleForGame } from "@/lib/daily-engine";
+import {
+  isGameTimerExternallyPaused,
+  useLiveLocalDateKey,
+} from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import {
   getAdminOverridesForGame,
   getGameProgress,
@@ -51,6 +61,7 @@ import {
 } from "@/components/ui/dialog";
 import { EchoTileSvg } from "./echo-tile-svg";
 import { ResultShareButtons } from "./result-share-buttons";
+import { WinFlourish } from "./win-flourish";
 import { cn } from "@/lib/utils";
 
 const WRONG_PENALTY_SECONDS = 5;
@@ -135,7 +146,7 @@ export function EightfoldEchoGame() {
 function EightfoldEchoDaily() {
   const searchParams = useSearchParams();
   const dateParam = searchParams.get("date");
-  const todayKey = useMemo(() => getLocalDateKey(), []);
+  const todayKey = useLiveLocalDateKey();
   const dateKey =
     isValidDateKey(dateParam) && dateParam <= todayKey ? dateParam : todayKey;
   const [syncVersion, setSyncVersion] = useState(0);
@@ -179,6 +190,7 @@ function EightfoldEchoBoard({
   puzzleHash,
   dateKey,
 }: EightfoldEchoBoardProps) {
+  const liveTodayKey = useLiveLocalDateKey();
   const initialSaved = useMemo<{
     activeDifficulty: EchoDifficulty;
     stages: Record<EchoDifficulty, EchoStageProgress>;
@@ -237,10 +249,12 @@ function EightfoldEchoBoard({
   const [hintCandidates, setHintCandidates] = useState<number[]>([]);
   const [shakeTile, setShakeTile] = useState<number | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [kbCursor, setKbCursor] = useState<number | null>(null);
 
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordedStagesRef = useRef<Set<EchoDifficulty>>(new Set());
+  const tileRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const currentStage = useMemo(
     () => getEchoStage(puzzle, difficulty),
@@ -250,6 +264,7 @@ function EightfoldEchoBoard({
   const { visited, mistakes, baseSeconds, penaltySeconds } = curProgress;
 
   const complete = visited.length >= ECHO_GRID_SIZE;
+  const currentModeSolved = complete;
   const easyComplete = stagesState.easy.visited.length >= ECHO_GRID_SIZE;
   const hardComplete = stagesState.hard.visited.length >= ECHO_GRID_SIZE;
   const activeTileIndex = complete
@@ -263,16 +278,20 @@ function EightfoldEchoBoard({
     isDateCompleted("eightfold-echo", dateKey) || easyComplete || hardComplete;
 
   const switchDifficulty = useCallback((nextDiff: EchoDifficulty) => {
+    playTapSfx();
     setDifficulty(nextDiff);
     setHintCandidates([]);
     setShakeTile(null);
     setToastMsg(null);
+    setKbCursor(null);
   }, []);
 
-  // Count-up stopwatch starts ONLY after splash screen is dismissed (Q22) on the active unsolved stage.
+  // Count-up stopwatch starts ONLY after splash screen is dismissed (Q22) on the active unsolved stage,
+  // and pauses automatically whenever tab is hidden or any dialog is open.
   useEffect(() => {
     if (!splashDismissed || complete) return;
     const id = setInterval(() => {
+      if (isGameTimerExternallyPaused()) return;
       setStagesState((prev) => ({
         ...prev,
         [difficulty]: {
@@ -349,6 +368,11 @@ function EightfoldEchoBoard({
 
       const expectedNext = currentStage.solution[visited.length];
       if (gridIndex === expectedNext) {
+        const nextLen = visited.length + 1;
+        playSnapSfx(visited.length);
+        if (nextLen >= ECHO_GRID_SIZE) {
+          playWinChimeSfx();
+        }
         setStagesState((prev) => ({
           ...prev,
           [difficulty]: {
@@ -359,6 +383,7 @@ function EightfoldEchoBoard({
         setHintCandidates([]);
         setToastMsg(null);
       } else {
+        playErrorSfx();
         setStagesState((prev) => ({
           ...prev,
           [difficulty]: {
@@ -384,9 +409,88 @@ function EightfoldEchoBoard({
     ]
   );
 
+  // Desktop keyboard navigation: Arrow keys move cursor across the 3×3 grid (Enter/Space selects),
+  // and 1–9 number keys directly select tiles 1..9 when no modal/input is focused.
+  useEffect(() => {
+    if (!splashDismissed || complete) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isGameTimerExternallyPaused()) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (/^[1-9]$/.test(e.key)) {
+        e.preventDefault();
+        const idx = Number(e.key) - 1;
+        setKbCursor(idx);
+        const btn = tileRefs.current[idx];
+        if (btn && !btn.disabled) {
+          btn.focus();
+        }
+        if (!visited.includes(idx)) {
+          handleTileTap(idx);
+        }
+        return;
+      }
+
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        e.preventDefault();
+        const base =
+          kbCursor ?? (activeTileIndex >= 0 ? activeTileIndex : ECHO_START_INDEX);
+        let row = Math.floor(base / 3);
+        let col = base % 3;
+        if (e.key === "ArrowUp") row = (row + 2) % 3;
+        if (e.key === "ArrowDown") row = (row + 1) % 3;
+        if (e.key === "ArrowLeft") col = (col + 2) % 3;
+        if (e.key === "ArrowRight") col = (col + 1) % 3;
+        const nextIdx = row * 3 + col;
+        setKbCursor(nextIdx);
+        playTapSfx(0.95);
+        const nextBtn = tileRefs.current[nextIdx];
+        if (nextBtn && !nextBtn.disabled) {
+          nextBtn.focus();
+        } else if (
+          document.activeElement instanceof HTMLElement &&
+          tileRefs.current.includes(document.activeElement as HTMLButtonElement)
+        ) {
+          document.activeElement.blur();
+        }
+        return;
+      }
+
+      if (
+        (e.key === "Enter" || e.key === " ") &&
+        kbCursor !== null &&
+        document.activeElement !== tileRefs.current[kbCursor]
+      ) {
+        if (!visited.includes(kbCursor)) {
+          e.preventDefault();
+          handleTileTap(kbCursor);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [splashDismissed, complete, kbCursor, activeTileIndex, visited, handleTileTap]);
+
   const confirmHint = useCallback(() => {
     setHintConfirmOpen(false);
     if (complete) return;
+    playTapSfx(1.15);
     setStagesState((prev) => ({
       ...prev,
       [difficulty]: {
@@ -420,6 +524,10 @@ function EightfoldEchoBoard({
       }),
     [puzzle.puzzleNumber, currentStage.solution, totalElapsed, mistakes, difficulty]
   );
+  const shareUrl =
+    dateKey !== liveTodayKey
+      ? `https://21games.ai/games/eightfold-echo?date=${dateKey}`
+      : "https://21games.ai/games/eightfold-echo";
 
   const renderDifficultyTabs = (compact = false) => (
     <div
@@ -443,7 +551,7 @@ function EightfoldEchoBoard({
             onClick={() => switchDifficulty(diff)}
             data-testid={`echo-diff-${diff}`}
             className={cn(
-              "rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+              "rounded-lg px-2.5 py-1.5 text-xs font-bold transition-all motion-reduce:transition-none flex items-center justify-center gap-1.5 cursor-pointer",
               isSelected
                 ? "bg-black text-white shadow-sm"
                 : "text-neutral-700 hover:bg-white/80"
@@ -479,28 +587,39 @@ function EightfoldEchoBoard({
 
   if (!splashDismissed) {
     return (
-      <GameSplashScreen
+      <GameShell
         gameSlug="eightfold-echo"
         gameTitle="Eightfold Echo"
-        tagline="Follow the single-change shape echo from the emerald center across all 9 tiles."
-        theme={puzzle.title}
-        author={puzzle.author}
         puzzleNumber={puzzle.puzzleNumber}
         dateKey={dateKey}
-        showCreate={false}
-        isCompletedToday={complete || completedAlready}
-        hasSavedProgress={hasSavedProgress && !complete}
-        onPlay={() => setSplashDismissed(true)}
+        author={puzzle.author}
       >
-        <div className="space-y-1.5">
-          {renderDifficultyTabs(false)}
-          <p className="text-[11px] text-neutral-500 font-medium">
-            {difficulty === "easy"
-              ? "Easy: 1 direct match per step + subtle 2-change decoys. Solving either counts for your streak!"
-              : "Hard: Full shape vocabulary with multi-step lookahead."}
-          </p>
-        </div>
-      </GameSplashScreen>
+        <GameSplashScreen
+          gameSlug="eightfold-echo"
+          gameTitle="Eightfold Echo"
+          tagline="Follow the single-change shape echo from the emerald center across all 9 tiles."
+          theme={puzzle.title}
+          author={puzzle.author}
+          puzzleNumber={puzzle.puzzleNumber}
+          dateKey={dateKey}
+          showCreate={false}
+          isCompletedToday={complete || completedAlready}
+          hasSavedProgress={hasSavedProgress && !complete}
+          onPlay={() => {
+            playTapSfx();
+            setSplashDismissed(true);
+          }}
+        >
+          <div className="space-y-1.5">
+            {renderDifficultyTabs(false)}
+            <p className="text-[11px] text-neutral-500 font-medium">
+              {difficulty === "easy"
+                ? "Easy: 1 direct match per step + subtle 2-change decoys. Solving either counts for your streak!"
+                : "Hard: Full shape vocabulary with multi-step lookahead."}
+            </p>
+          </div>
+        </GameSplashScreen>
+      </GameShell>
     );
   }
 
@@ -515,6 +634,7 @@ function EightfoldEchoBoard({
       dateKey={dateKey}
       author={puzzle.author}
     >
+      <WinFlourish active={currentModeSolved} />
       <div className="max-w-lg mx-auto px-2 sm:px-4 py-1 sm:py-2 flex flex-col items-center gap-2 sm:gap-2.5">
         {/* Easy / Hard Difficulty Switcher */}
         {renderDifficultyTabs(true)}
@@ -545,7 +665,10 @@ function EightfoldEchoBoard({
               size="sm"
               variant="outline"
               disabled={hintCandidates.length > 0 || visited.length >= ECHO_GRID_SIZE - 1}
-              onClick={() => setHintConfirmOpen(true)}
+              onClick={() => {
+                playTapSfx();
+                setHintConfirmOpen(true);
+              }}
               className="h-7 px-2 text-[11px] sm:text-xs font-bold border-2 border-black bg-[#daa8d0]/25 hover:bg-[#daa8d0]/45"
               data-testid="echo-hint-button"
             >
@@ -556,7 +679,7 @@ function EightfoldEchoBoard({
         </div>
 
         {/* Toast / instruction micro-banner (fixed height so layout never shifts) */}
-        <div className="min-h-[1.5rem] flex items-center justify-center px-1">
+        <div className="min-h-[1.5rem] flex items-center justify-center px-1" aria-live="polite">
           {toastMsg ? (
             <span
               role="status"
@@ -588,8 +711,8 @@ function EightfoldEchoBoard({
         {/* 3×3 Square Shape Grid — overflow-proof height derived directly from 3 square row tracks */}
         <div
           className="w-full max-w-[min(88vw,360px)] sm:max-w-[380px] grid grid-cols-3 gap-2 sm:gap-2.5 p-2.5 rounded-2xl border-2 border-black bg-neutral-50 shadow-[4px_4px_0px_#000]"
-          role="grid"
-          aria-label={`Eightfold Echo ${difficulty} 3 by 3 shape grid`}
+          role="group"
+          aria-label="Eightfold Echo 3 by 3 tile grid"
           data-testid="echo-grid"
         >
           {currentStage.tiles.map((tile, idx) => {
@@ -600,19 +723,27 @@ function EightfoldEchoBoard({
               visitedOrder >= 0 && (complete || visitedOrder < visited.length - 1);
             const isHintPulse = hintCandidates.includes(idx) && !isCompletedTile && !isActive;
             const isShaking = shakeTile === idx;
+            const isKbFocused = kbCursor === idx && !complete;
+            const rowNum = Math.floor(idx / 3) + 1;
+            const colNum = (idx % 3) + 1;
 
             return (
               <button
                 key={idx}
+                ref={(el) => {
+                  tileRefs.current[idx] = el;
+                }}
                 type="button"
                 disabled={complete || isCompletedTile || isActive}
+                aria-pressed={isCompletedTile || isActive}
+                onFocus={() => setKbCursor(idx)}
                 onClick={() => handleTileTap(idx)}
                 aria-label={
                   isCompletedTile
-                    ? `Completed tile at position ${idx + 1}`
+                    ? `Tile ${idx + 1} (row ${rowNum}, column ${colNum}): Completed step ${visitedOrder}`
                     : isActive
-                    ? `Current active tile: ${describeEchoTile(tile)}`
-                    : `Unvisited tile: ${describeEchoTile(tile)}`
+                    ? `Tile ${idx + 1} (row ${rowNum}, column ${colNum}): Current active tile, ${describeEchoTile(tile)}`
+                    : `Tile ${idx + 1} (row ${rowNum}, column ${colNum}): Unvisited tile, ${describeEchoTile(tile)}`
                 }
                 data-testid={`echo-tile-${idx}`}
                 data-state={
@@ -641,14 +772,15 @@ function EightfoldEchoBoard({
                       }
                 }
                 className={cn(
-                  "relative w-full aspect-square min-w-0 min-h-0 overflow-hidden rounded-xl flex items-center justify-center p-2 sm:p-2.5 transition-all select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-black",
+                  "relative w-full aspect-square min-w-0 min-h-0 overflow-hidden rounded-xl flex items-center justify-center p-2 sm:p-2.5 transition-all motion-reduce:transition-none select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-black",
                   !isCompletedTile &&
                     !isActive &&
                     !complete &&
                     "hover:border-black hover:-translate-y-0.5 active:translate-y-0 cursor-pointer",
                   isActive && "shadow-[0_0_0_3px_rgba(0,0,0,0.06)]",
-                  isHintPulse && "animate-pulse ring-4 ring-amber-400",
-                  isShaking && "animate-bounce bg-red-50"
+                  isKbFocused && "ring-2 ring-black ring-offset-1",
+                  isHintPulse && "animate-pulse motion-reduce:animate-none ring-4 ring-amber-400",
+                  isShaking && "animate-bounce motion-reduce:animate-none bg-red-50"
                 )}
               >
                 {/* Q21: Completed tiles fill 100% solid in their signature color (NO step badges & inner shape hidden). */}
@@ -699,7 +831,7 @@ function EightfoldEchoBoard({
             <ResultShareButtons
               title={`Eightfold Echo #${puzzle.puzzleNumber} (${DIFFICULTY_META[difficulty].label})`}
               text={shareText}
-              url="https://21games.ai/games/eightfold-echo"
+              url={shareUrl}
             />
 
             {/* Ordered 0 → 8 Visual Chain */}

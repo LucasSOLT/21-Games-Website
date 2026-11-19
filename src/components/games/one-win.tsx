@@ -28,9 +28,15 @@ import {
 import {
   formatLongDate,
   getDailyPuzzleForGame,
-  getLocalDateKey,
   getPuzzleNumberForDate,
 } from "@/lib/daily-engine";
+import { useLiveLocalDateKey } from "@/hooks/use-live-date-key";
+import {
+  playErrorSfx,
+  playSnapSfx,
+  playTapSfx,
+  playWinChimeSfx,
+} from "@/lib/game-sfx";
 import {
   fetchRemoteOverrideForGame,
   getAdminOverridesForGame,
@@ -50,6 +56,7 @@ import { useAuth } from "@/components/account/auth-provider";
 import { GameShell } from "@/components/game-shell";
 import { GameSplashScreen } from "@/components/game-splash-screen";
 import { ResultShareButtons } from "@/components/games/result-share-buttons";
+import { WinFlourish } from "@/components/games/win-flourish";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -84,12 +91,13 @@ export function OneWinGame() {
   const { profile } = useAuth();
 
   const dateParam = searchParams.get("date");
-  const liveTodayKey = getLocalDateKey();
+  const liveTodayKey = useLiveLocalDateKey();
   const activeDateKey =
     dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
       ? dateParam
       : liveTodayKey;
   const isArchiveDate = activeDateKey !== liveTodayKey;
+  const isArchiveView = isArchiveDate;
 
   const [puzzle, setPuzzle] = useState<OneWinPromptPuzzle>(() =>
     resolveOneWinPuzzle(activeDateKey)
@@ -100,6 +108,7 @@ export function OneWinGame() {
   const [draftInput, setDraftInput] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [justSubmitted, setJustSubmitted] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   const [submission, setSubmission] = useState<LocalOneWinSubmission | null>(
@@ -115,13 +124,14 @@ export function OneWinGame() {
     };
   });
 
-  // Render-time reset if URL `?date=` changes
+  // Render-time reset if URL `?date=` or live local midnight changes
   if (prevDateKey !== activeDateKey) {
     setPrevDateKey(activeDateKey);
     const nextPuzzle = resolveOneWinPuzzle(activeDateKey);
     const nextSub = getLocalOneWinSubmission(activeDateKey);
     setPuzzle(nextPuzzle);
     setSubmission(nextSub);
+    setJustSubmitted(false);
     setDraftInput("");
     setErrorMsg(null);
     setSearchQuery("");
@@ -148,7 +158,7 @@ export function OneWinGame() {
     [activeDateKey, puzzle]
   );
 
-  // Sync remote puzzle override + live Top 100 leaderboard + Realtime subscription
+  // Sync remote puzzle override + Top 100 leaderboard + Realtime subscription (today only!)
   useEffect(() => {
     let active = true;
 
@@ -165,12 +175,16 @@ export function OneWinGame() {
       setSnapshot(latest);
     });
 
-    const unsubRealtime = subscribeOneWinRealtime(activeDateKey, () => {
-      if (!active) return;
-      void fetchOneWinLeaderboard(activeDateKey, puzzle).then((latest) => {
-        if (active) setSnapshot(latest);
-      });
-    });
+    // Skip opening the live WebSocket channel when viewing a past archive date.
+    const unsubRealtime =
+      activeDateKey === liveTodayKey
+        ? subscribeOneWinRealtime(activeDateKey, () => {
+            if (!active) return;
+            void fetchOneWinLeaderboard(activeDateKey, puzzle).then((latest) => {
+              if (active) setSnapshot(latest);
+            });
+          })
+        : () => {};
 
     const onPuzzleUpdated = (e: Event) => {
       if (!active) return;
@@ -191,7 +205,7 @@ export function OneWinGame() {
       unsubRealtime();
       window.removeEventListener("solgames:puzzles-updated", onPuzzleUpdated);
     };
-  }, [activeDateKey, puzzle, puzzleHash, refreshLeaderboard]);
+  }, [activeDateKey, liveTodayKey, puzzle, puzzleHash, refreshLeaderboard]);
 
   const wordCount = useMemo(() => countOneWinWords(draftInput), [draftInput]);
   const charCount = useMemo(
@@ -204,6 +218,7 @@ export function OneWinGame() {
   );
 
   const showLeaderboard = Boolean(submission) || isArchiveDate;
+  const playerRank = snapshot.playerRank ?? null;
 
   const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -221,6 +236,7 @@ export function OneWinGame() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isArchiveDate || submission || isSubmitting) return;
+    playTapSfx();
     setErrorMsg(null);
     setIsSubmitting(true);
     try {
@@ -232,11 +248,15 @@ export function OneWinGame() {
         todayDateKey: liveTodayKey,
       });
       if (!res.ok) {
+        playErrorSfx();
         setErrorMsg(res.error || "Could not submit your win. Please check length and try again.");
         if (res.submission) setSubmission(res.submission);
         if (res.snapshot) setSnapshot(res.snapshot);
         return;
       }
+      playSnapSfx(2);
+      playWinChimeSfx();
+      setJustSubmitted(true);
       if (res.submission) setSubmission(res.submission);
       if (res.snapshot) setSnapshot(res.snapshot);
       setDraftInput("");
@@ -282,7 +302,10 @@ export function OneWinGame() {
           showCreate={false}
           isCompletedToday={Boolean(submission)}
           hasSavedProgress={false}
-          onPlay={() => setShowSplash(false)}
+          onPlay={() => {
+            playTapSfx();
+            setShowSplash(false);
+          }}
         />
       </GameShell>
     );
@@ -312,13 +335,14 @@ export function OneWinGame() {
               className="inline-flex items-center gap-1 rounded-full border border-black bg-black px-2.5 py-1 text-[11px] font-black uppercase tracking-wider text-white"
               data-testid="one-win-live-badge"
             >
-              <Radio className="h-3 w-3 text-[#2ECC71] animate-pulse" />
+              <Radio className="h-3 w-3 text-[#2ECC71] animate-pulse motion-reduce:animate-none" />
               Top 100
             </span>
           )}
         </div>
       }
     >
+      <WinFlourish active={justSubmitted} />
       <div className="mx-auto w-full max-w-2xl px-3 sm:px-5 py-5 sm:py-8 space-y-6">
         {/* Archive View-Only Notice (Q48) */}
         {isArchiveDate && (
@@ -391,7 +415,7 @@ export function OneWinGame() {
                 spellCheck={false}
                 maxLength={48}
                 placeholder="Your 1 win in 1–4 words..."
-                className="h-14 rounded-2xl border-2 border-black px-4 text-lg sm:text-xl font-headline font-black text-black placeholder:text-gray-400 placeholder:font-medium focus-visible:ring-2 focus-visible:ring-black"
+                className="h-14 rounded-2xl border-2 border-black px-4 text-base sm:text-xl md:text-xl font-headline font-black text-black placeholder:text-gray-400 placeholder:font-medium focus-visible:ring-2 focus-visible:ring-black"
                 data-testid="one-win-input"
               />
 
@@ -513,6 +537,11 @@ export function OneWinGame() {
               <ResultShareButtons
                 title={`1 Win #${puzzle.puzzleNumber}`}
                 text={shareText}
+                url={
+                  isArchiveView
+                    ? `https://21games.ai/games/1-win?date=${activeDateKey}`
+                    : "https://21games.ai/games/1-win"
+                }
               />
               <Link
                 href="/games/1-win/archive"
@@ -543,7 +572,7 @@ export function OneWinGame() {
                 </div>
                 <p className="text-xs text-gray-600 mt-0.5">
                   {snapshot.totalSubmissions.toLocaleString()} community gratitude wins logged ·{" "}
-                  {snapshot.liveConnected
+                  {snapshot.liveConnected && !isArchiveDate
                     ? "Synced live via Supabase Realtime"
                     : "Community Gratitude Board"}
                 </p>
@@ -556,10 +585,37 @@ export function OneWinGame() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Filter Top 100..."
-                  className="h-9 pl-8 rounded-full border-black/30 text-xs"
+                  className="h-10 sm:h-9 pl-8 rounded-full border-black/30 text-base sm:text-sm"
                 />
               </div>
             </div>
+
+            {/* Pinned "Your Win Today" card when player's rank is outside the Top 100 slice */}
+            {submission && playerRank !== null && playerRank > 100 && (
+              <div
+                className="rounded-xl border-2 border-black bg-[#FFFBE6] px-3.5 py-2.5 shadow-[2px_2px_0px_#000] flex items-center justify-between gap-3"
+                data-testid="one-win-pinned-player-entry"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="inline-flex h-7 min-w-7 px-1.5 items-center justify-center rounded-lg border border-black bg-[#F9D423] text-xs font-mono font-black text-black shrink-0">
+                    #{playerRank}
+                  </span>
+                  <span className="font-headline text-sm sm:text-base font-black text-black truncate">
+                    {submission.displayText}
+                  </span>
+                  <Badge className="border border-black bg-[#2ECC71] text-black text-[10px] font-black uppercase px-2 py-0 shrink-0">
+                    Your Win Today
+                  </Badge>
+                </div>
+
+                <span className="font-mono text-xs font-black text-gray-800 shrink-0">
+                  {(snapshot.playerCount ?? 1).toLocaleString()}{" "}
+                  <span className="text-[10px] font-sans font-bold text-gray-500">
+                    {(snapshot.playerCount ?? 1) === 1 ? "win" : "wins"}
+                  </span>
+                </span>
+              </div>
+            )}
 
             <div className="divide-y divide-gray-100 max-h-[540px] overflow-y-auto pr-1 space-y-1.5">
               {filteredEntries.length === 0 ? (
@@ -584,7 +640,7 @@ export function OneWinGame() {
                     <div
                       key={row.normalizedKey}
                       className={cn(
-                        "relative overflow-hidden rounded-xl border px-3.5 py-2.5 transition-all",
+                        "relative overflow-hidden rounded-xl border px-3.5 py-2.5 transition-all motion-reduce:transition-none",
                         row.isPlayerWin
                           ? "border-2 border-black bg-[#FFFBE6] shadow-[2px_2px_0px_#000]"
                           : "border-gray-200 bg-white hover:border-gray-300"
