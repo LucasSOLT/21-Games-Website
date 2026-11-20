@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BarChart3,
@@ -47,6 +48,7 @@ import { getInitials } from "@/lib/user-auth";
 import { cn } from "@/lib/utils";
 import { SolGamesLogo } from "@/components/solgames-logo";
 import { DailySweepModal } from "@/components/games/daily-sweep-modal";
+import { navigateBackToPreviousScreen } from "@/lib/navigation-history";
 
 interface GameShellProps {
   gameSlug: PlayableGameSlug;
@@ -114,6 +116,7 @@ export function GameShell({
   statsOpen: controlledStatsOpen,
   onStatsOpenChange,
 }: GameShellProps) {
+  const router = useRouter();
   const [internalHelpOpen, setInternalHelpOpen] = useState(false);
   const [internalStatsOpen, setInternalStatsOpen] = useState(false);
   const [, setStatsTick] = useState(0);
@@ -152,12 +155,20 @@ export function GameShell({
     ? Math.max(1, ...profileSummary.guessDistribution.map((b) => b.count))
     : 1;
 
+  const handleBackClick = useCallback(() => {
+    playTapSfx(0.95);
+    navigateBackToPreviousScreen(router, "/", {
+      excludePathname: `/games/${gameSlug}`,
+      gameSlug,
+    });
+  }, [router, gameSlug]);
+
   return (
     <div className="min-h-screen bg-[#FCFCFD] text-black flex flex-col">
       {/* Top Game Navigation Bar */}
       <header className="sticky top-0 z-30 border-b-2 border-black/10 bg-white/95 backdrop-blur-xs">
         <div className="mx-auto max-w-6xl px-1.5 min-[375px]:px-2.5 sm:px-6 h-12 sm:h-16 flex items-center justify-between gap-1 sm:gap-3">
-          {/* Left: Brand Mark + Back Home */}
+          {/* Left: Brand Mark + Back Arrow (returns to exact previous screen & scroll position) */}
           <div className="flex items-center gap-1 sm:gap-3 shrink-0 sm:flex-1 min-w-0">
             <Link
               href="/"
@@ -172,15 +183,17 @@ export function GameShell({
               />
             </Link>
 
-            <Link
-              href="/"
-              className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-auto sm:w-auto items-center justify-center gap-1.5 rounded-full border-2 border-black sm:px-3 sm:py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors shrink-0"
-              title="All Games"
-              aria-label="All Games"
+            <button
+              type="button"
+              onClick={handleBackClick}
+              data-testid="game-shell-back-button"
+              className="inline-flex h-7 w-7 min-[375px]:h-8 min-[375px]:w-8 sm:h-auto sm:w-auto items-center justify-center gap-1.5 rounded-full border-2 border-black bg-white sm:px-3 sm:py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
+              title="Back"
+              aria-label="Back to previous screen"
             >
               <ArrowLeft className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
               <span className="hidden sm:inline">All Games</span>
-            </Link>
+            </button>
           </div>
 
           {/* Center: Title + Puzzle # + Date (truncates cleanly with ellipsis on narrow mobile) */}

@@ -2,14 +2,12 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, Flame, HelpCircle, Sparkles, Trophy } from "lucide-react";
+import { Check, Flame, Sparkles, Trophy } from "lucide-react";
 import { useAuth } from "@/components/account/auth-provider";
-import { AccountNavButton } from "@/components/account/account-nav-button";
 import { GameCard } from "@/components/game-card";
 import { GameLogo } from "@/components/game-logo";
 import { DailySweepModal } from "@/components/games/daily-sweep-modal";
 import { Hero } from "@/components/hero";
-import { SolGamesLogo } from "@/components/solgames-logo";
 import {
   ALL_GAMES,
   ALL_GAME_SLUGS,
@@ -80,7 +78,6 @@ export default function Home() {
   const [totalPlayedAcrossAllGames, setTotalPlayedAcrossAllGames] = useState(0);
   const [bestCurrentStreak, setBestCurrentStreak] = useState(0);
   const [bestMaxStreak, setBestMaxStreak] = useState(0);
-  const [manualShowIntro, setManualShowIntro] = useState(false);
 
   useEffect(() => {
     const syncHubState = () => {
@@ -129,7 +126,6 @@ export default function Home() {
   const isReturningPlayer =
     hydrated &&
     (totalPlayedAcrossAllGames > 0 || sweepStatus.completedCount > 0);
-  const showCompactHubHeader = isReturningPlayer && !manualShowIntro;
 
   const activeDateKey = hydrated ? todayKey : SSR_ANCHOR_DATE_KEY;
 
@@ -184,52 +180,11 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
       <DailySweepModal />
-
-      {showCompactHubHeader ? (
-        <header className="sticky top-0 z-30 border-b-2 border-black bg-white/95 backdrop-blur-xs">
-          <div className="mx-auto max-w-5xl px-4 md:px-8 h-14 sm:h-16 flex items-center justify-between gap-3">
-            <Link
-              href="/"
-              className="flex items-center shrink-0 transition-transform hover:translate-y-[-1px]"
-              aria-label="SOL GaMES Home"
-            >
-              <SolGamesLogo
-                variant="full"
-                className="h-8 sm:h-9 w-auto"
-              />
-            </Link>
-
-            <div className="flex items-center gap-2 sm:gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  playTapSfx();
-                  setManualShowIntro(true);
-                }}
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-[#FFFDF5] px-2.5 sm:px-3.5 py-1 sm:py-1.5 text-xs font-headline font-black text-black shadow-[1.5px_1.5px_0_#111111] hover:bg-[#FFFBE6] transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-                <span>How It Works</span>
-              </button>
-              <AccountNavButton variant="compact" />
-            </div>
-          </div>
-        </header>
-      ) : (
-        <Hero
-          onCollapseIntro={
-            isReturningPlayer ? () => setManualShowIntro(false) : undefined
-          }
-        />
-      )}
+      <Hero />
 
       <main
         id="play"
-        className={
-          showCompactHubHeader
-            ? "flex flex-col items-center pt-5 sm:pt-7 px-4 md:px-8 pb-16 scroll-mt-16"
-            : "flex flex-col items-center pt-6 sm:pt-10 px-4 md:px-8 pb-16 scroll-mt-6"
-        }
+        className="flex flex-col items-center pt-6 sm:pt-10 px-4 md:px-8 pb-16 scroll-mt-6"
       >
         {/* Returning Player / Active Progress Banner: Today's 21 -> 1 Daily Sweep */}
         {(isReturningPlayer || (hydrated && sweepStatus.completedCount > 0)) && (

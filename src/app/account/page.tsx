@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Trophy,
@@ -19,6 +20,7 @@ import { getUserCreated21Boards } from "@/lib/game-storage";
 import { getMyCreatedCustomPuzzles } from "@/lib/custom-puzzles";
 import { ALL_GAMES, GAME_COUNTDOWN_NUMBER } from "@/lib/games-config";
 import { Badge } from "@/components/ui/badge";
+import { navigateBackToPreviousScreen } from "@/lib/navigation-history";
 
 function countLocalGuestCreated(): number {
   const ids = new Set<string>([
@@ -29,6 +31,7 @@ function countLocalGuestCreated(): number {
 }
 
 export default function AccountPage() {
+  const router = useRouter();
   const { profile, isLoading } = useAuth();
 
   const [guestCreatedCount, setGuestCreatedCount] = useState<number>(() =>
@@ -62,13 +65,18 @@ export default function AccountPage() {
             <Link href="/" aria-label="21 Games Home" className="shrink-0">
               <SolGamesLogo variant="mark" size={32} />
             </Link>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1.5 rounded-full border-2 border-black px-3 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors shrink-0"
+            <button
+              type="button"
+              onClick={() =>
+                navigateBackToPreviousScreen(router, "/", {
+                  excludePathname: "/account",
+                })
+              }
+              className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-white px-3 py-1.5 text-xs sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
             >
               <ArrowLeft className="h-4 w-4" />
               <span>All 9 Games</span>
-            </Link>
+            </button>
 
             <div className="hidden lg:flex items-center rounded-full bg-gray-100 p-1 border border-gray-200 gap-0.5">
               {ALL_GAMES.map((g) => (

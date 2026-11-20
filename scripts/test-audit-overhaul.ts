@@ -283,11 +283,86 @@ kit.assert(
 );
 
 // ---------------------------------------------------------------------------
-// 3. Phase 3: "21 Games" Branding, 9 OG Cards, Icons & PWA/SEO Routes
+// 3. Phase 3 & 4: "21 Games" Branding, Hands+Phone Promo Hero, Back-Scroll Memory & OG/PWA
 // ---------------------------------------------------------------------------
 kit.eq(fs.existsSync("public/logo.png"), false, "Orphaned public/logo.png removed");
-kit.eq(fs.existsSync("public/hands.png"), false, "2.86 MB public/hands.png removed");
-kit.eq(fs.existsSync("public/boxes-bg.png"), false, "Hidden public/boxes-bg.png removed");
+kit.eq(
+  readPngDimensions("public/hands.png"),
+  { width: 2500, height: 1395 },
+  "Hero two-hands smartphone graphic public/hands.png (2500x1395) is restored"
+);
+kit.eq(
+  fs.existsSync("public/boxes-bg.png"),
+  true,
+  "Hero public/boxes-bg.png asset is present"
+);
+
+const heroSrc = fs.readFileSync("src/components/hero.tsx", "utf8");
+kit.assert(
+  heroSrc.includes('/hands.png') &&
+    heroSrc.includes("hero-demo-container") &&
+    /coming soon/i.test(heroSrc),
+  "Hero renders two hands holding smartphone + in-bezel promo video 'coming soon' effect"
+);
+kit.assert(
+  homePageSrc.includes("<Hero />") && !homePageSrc.includes("showCompactHubHeader"),
+  "Homepage always renders <Hero /> for all visitors"
+);
+
+const navHistory = await import("@/lib/navigation-history");
+memStore.clear();
+(globalThis.window as unknown as Record<string, unknown>).scrollY = 1480;
+(globalThis.window as unknown as { location: { pathname: string; search: string } }).location = {
+  pathname: "/",
+  search: "",
+};
+navHistory.recordRouteVisit("/", "/");
+navHistory.snapshotScrollPosition("/", true);
+(globalThis.window as unknown as Record<string, unknown>).scrollY = 0;
+(globalThis.window as unknown as { location: { pathname: string; search: string } }).location = {
+  pathname: "/games/move-2",
+  search: "",
+};
+navHistory.recordRouteVisit("/games/move-2", "/games/move-2");
+
+let pushedHref: string | null = null;
+let pushedScrollOpt: boolean | undefined = undefined;
+let calledBack = false;
+navHistory.navigateBackToPreviousScreen(
+  {
+    push: (href, opts) => {
+      pushedHref = href;
+      pushedScrollOpt = opts?.scroll;
+    },
+    back: () => {
+      calledBack = true;
+    },
+  },
+  "/",
+  { excludePathname: "/games/move-2", gameSlug: "move-2" }
+);
+const pendingRestore = navHistory.readPendingScrollRestore();
+kit.assert(
+  calledBack || (pushedHref === "/" && pushedScrollOpt === false),
+  "Back arrow navigates to exact previous route without resetting scroll to top"
+);
+kit.eq(
+  pendingRestore?.targetPathname,
+  "/",
+  "Back arrow targets exact previous screen ('/')"
+);
+kit.eq(
+  pendingRestore?.scrollY,
+  1480,
+  "Back arrow preserves exact previous scrollY (1480px)"
+);
+navHistory.writePendingScrollRestore(null);
+
+const gameShellSrc = fs.readFileSync("src/components/game-shell.tsx", "utf8");
+kit.assert(
+  gameShellSrc.includes("navigateBackToPreviousScreen"),
+  "GameShell top-left back arrow uses navigateBackToPreviousScreen"
+);
 
 const rootOgDim = readPngDimensions("public/og-image.png");
 kit.eq(

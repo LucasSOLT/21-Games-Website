@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
+import { useNavigationScrollRestorer } from "@/lib/navigation-history";
 
 const RELOAD_COOLDOWN_KEY = "solgames_css_reload_ts";
 const RELOAD_COOLDOWN_MS = 20_000;
@@ -32,6 +33,7 @@ function triggerSafeHardReload(reason: string): void {
  * at most one clean reload per 20 seconds when styles fail to apply.
  */
 export function CssIntegrityGuard() {
+  useNavigationScrollRestorer();
   const pathname = usePathname();
   const probeRef = useRef<HTMLSpanElement | null>(null);
 

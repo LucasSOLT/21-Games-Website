@@ -358,6 +358,7 @@ export function GameCard({
 
   return (
     <Card
+      id={`game-card-${game.slug}`}
       className={cn(
         "h-full flex flex-col gap-0 py-0 ring-0 overflow-hidden rounded-xl border-2 border-black bg-white shadow-[0_3px_0_#111111] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_6px_0_#111111]",
         className

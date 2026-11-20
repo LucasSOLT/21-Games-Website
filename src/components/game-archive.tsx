@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { AccountNavButton } from "@/components/account/account-nav-button";
 import { SolGamesLogo } from "@/components/solgames-logo";
+import { navigateBackToPreviousScreen } from "@/lib/navigation-history";
 
 const SSR_ANCHOR_DATE = parseDateKeyToLocalNoon("2026-11-05");
 const subscribeNoop = () => () => {};
@@ -163,18 +164,27 @@ export function GameArchiveView({ gameSlug }: GameArchiveViewProps) {
                 className="h-7 w-7 sm:h-8 sm:w-8"
               />
             </Link>
-            <Link
-              href={`/games/${gameSlug}`}
-              className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full border-2 border-black px-2 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap"
+            <button
+              type="button"
+              onClick={() => {
+                playTapSfx(0.95);
+                navigateBackToPreviousScreen(router, `/games/${gameSlug}`, {
+                  excludePathname: `/games/${gameSlug}/archive`,
+                  gameSlug,
+                });
+              }}
+              data-testid="archive-back-button"
+              className="inline-flex items-center gap-1 sm:gap-1.5 rounded-full border-2 border-black bg-white px-2 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-sm font-bold text-black hover:bg-gray-100 transition-colors whitespace-nowrap cursor-pointer"
+              aria-label="Back to previous screen"
             >
               <ArrowLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-              <span className="hidden md:inline">
-                Back to Today&apos;s {gameTitle}
-              </span>
-              <span className="hidden min-[400px]:inline md:hidden">
-                Today&apos;s {gameTitle}
-              </span>
-              <span className="min-[400px]:hidden">Today</span>
+              <span>Back</span>
+            </button>
+            <Link
+              href={`/games/${gameSlug}`}
+              className="text-xs font-bold text-gray-600 hover:text-black hidden sm:inline whitespace-nowrap"
+            >
+              Today&apos;s {gameTitle}
             </Link>
             <Link
               href="/"

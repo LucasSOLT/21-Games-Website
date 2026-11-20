@@ -4,21 +4,20 @@
     --color-text-light: #555555;
     --color-yellow: #FFC107;
     --color-green: #34A853;
-    --color-purple: #9D50BB;
+    --color-purple: #B265E6;
     --color-orange: #FF6D00;
-    --color-black: #111111;
+    --color-black: #000000;
     --color-white: #FFFFFF;
-    --font-main: var(--font-inter), 'Inter', system-ui, sans-serif;
-
-    color: var(--color-text);
+    --font-main: 'Inter', system-ui, sans-serif;
 }
 
 .sol-hero-root .container {
-    max-width: 1320px;
+    max-width: 1600px;
     margin: 0 auto;
-    padding: 0 36px;
+    padding: 0 60px;
     display: flex;
     flex-direction: column;
+    min-height: 100vh;
 }
 
 /* Navbar */
@@ -26,9 +25,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 22px 0 16px;
-    margin-bottom: 8px;
-    gap: 16px;
+    padding: 30px 0;
+    margin-bottom: 20px;
 }
 
 .sol-hero-root .logo {
@@ -37,18 +35,19 @@
     gap: 12px;
     text-decoration: none;
     color: inherit;
-    flex-shrink: 0;
 }
 
-.sol-hero-root .navbar-logo {
-    height: 40px;
+.sol-hero-root .navbar-logo,
+.sol-hero-root .navbar-logo-img {
+    height: 42px;
     width: auto;
     display: block;
     margin: 0;
     transition: transform 0.2s ease;
 }
 
-.sol-hero-root .logo:hover .navbar-logo {
+.sol-hero-root .logo:hover .navbar-logo,
+.sol-hero-root .logo:hover .navbar-logo-img {
     transform: translateY(-1px);
 }
 
@@ -58,8 +57,8 @@
 
 .sol-hero-root .nav-links {
     display: flex;
+    gap: 40px;
     align-items: center;
-    gap: 32px;
 }
 
 .sol-hero-root .nav-link {
@@ -75,14 +74,13 @@
 }
 
 .sol-hero-root .nav-link:hover {
-    color: var(--color-purple);
+    color: var(--color-orange);
 }
 
 .sol-hero-root .navbar-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
+    gap: 12px;
 }
 
 /* Buttons */
@@ -90,155 +88,102 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 11px 24px;
-    border-radius: 999px;
-    font-weight: 700;
-    font-size: 14.5px;
+    padding: 12px 28px;
+    border-radius: 40px;
+    font-weight: 600;
+    font-size: 15px;
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, color 0.18s ease;
-    border: 2px solid transparent;
+    transition: all 0.3s ease;
+    border: none;
 }
 
 .sol-hero-root .btn-primary {
     background-color: var(--color-black);
     color: var(--color-white);
-    border-color: var(--color-black);
-    box-shadow: 0 3px 0 #111111;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
 }
 
 .sol-hero-root .btn-primary:hover {
-    transform: translateY(-1.5px);
-    background-color: #222222;
-    box-shadow: 0 5px 0 #111111;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
 }
 
 .sol-hero-root .btn-secondary {
-    background-color: var(--color-white);
+    background-color: transparent;
     color: var(--color-text);
-    border: 2px solid var(--color-black);
-    box-shadow: 0 3px 0 #111111;
-    gap: 8px;
+    gap: 10px;
 }
 
 .sol-hero-root .btn-secondary:hover {
-    transform: translateY(-1.5px);
-    background-color: #FFFDF2;
-    box-shadow: 0 5px 0 #111111;
-}
-
-.sol-hero-root .btn-ghost-collapse {
-    background-color: #F4F4F5;
-    color: var(--color-text);
-    border: 2px solid var(--color-black);
-    padding: 8px 14px;
-    font-size: 13px;
-    font-weight: 800;
-    box-shadow: 0 2px 0 #111111;
-    gap: 6px;
-}
-
-.sol-hero-root .btn-ghost-collapse:hover {
-    background-color: #E4E4E7;
+    color: var(--color-orange);
 }
 
 .sol-hero-root .btn-lg {
-    padding: clamp(12px, 1.05vw, 15px) clamp(22px, 2vw, 30px);
-    font-size: clamp(14.5px, 1.1vw, 16px);
+    padding: clamp(13px, 1.15vw, 16px) clamp(24px, 2.3vw, 36px);
+    font-size: clamp(14.5px, 1.15vw, 16px);
 }
 
 /* Hero Section */
 .sol-hero-root .hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+    display: flex;
     align-items: center;
-    gap: clamp(28px, 3.6vw, 56px);
-    padding: 16px 0 32px;
+    justify-content: space-between;
+    flex: 1;
+    padding: 12px 0 40px;
+    gap: clamp(24px, 3vw, 48px);
 }
 
 .sol-hero-root .hero-content {
-    max-width: 560px;
-}
-
-.sol-hero-root .hero-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 12px;
-    border-radius: 999px;
-    border: 2px solid var(--color-black);
-    background-color: #FFFBE6;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    margin-bottom: 16px;
-    box-shadow: 2px 2px 0 #111111;
-}
-
-.sol-hero-root .hero-eyebrow-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background-color: #2ECC71;
-    border: 1.5px solid #111111;
+    flex: 0 1 540px;
+    max-width: clamp(380px, 36.5vw, 540px);
+    z-index: 15;
 }
 
 .sol-hero-root .hero-title {
-    font-size: clamp(44px, 4.9vw, 72px);
-    font-weight: 900;
-    line-height: 1.04;
-    letter-spacing: -2px;
-    margin: 0 0 18px;
-    color: var(--color-black);
+    font-size: clamp(56px, 5.7vw, 82px);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -2.5px;
+    margin-bottom: 24px;
 }
 
-.sol-hero-root .highlight-yellow {
-    color: #E5A800;
-}
-
-.sol-hero-root .highlight-green {
-    color: #239B56;
-}
-
-.sol-hero-root .highlight-purple {
-    color: var(--color-purple);
-}
+.sol-hero-root .highlight-yellow { color: var(--color-yellow); }
+.sol-hero-root .highlight-green { color: var(--color-green); }
+.sol-hero-root .highlight-purple { color: var(--color-purple); }
 
 .sol-hero-root .hero-subtitle {
-    font-size: clamp(16px, 1.25vw, 19px);
+    font-size: clamp(17px, 1.4vw, 20px);
     color: var(--color-text-light);
-    margin: 0 0 22px;
-    line-height: 1.55;
-    font-weight: 500;
+    margin-bottom: 32px;
+    line-height: 1.5;
+    font-weight: 400;
 }
 
 .sol-hero-root .warning-box {
     display: flex;
     align-items: center;
     background-color: var(--color-white);
-    border: 2px solid var(--color-black);
-    border-radius: 14px;
-    padding: 13px 16px;
-    gap: 12px;
-    box-shadow: 3px 3px 0 #111111;
-    margin-bottom: 10px;
-    max-width: 460px;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    padding: 16px 20px;
+    gap: 16px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.04);
+    margin-bottom: 12px;
+    width: fit-content;
 }
 
 .sol-hero-root .warning-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
 }
 
 .sol-hero-root .warning-text {
-    font-size: 13.5px;
+    font-size: 14px;
     color: var(--color-text-light);
     line-height: 1.4;
-    margin: 0;
 }
 
 .sol-hero-root .warning-text strong {
@@ -247,449 +192,584 @@
 
 .sol-hero-root .small-disclaimer {
     font-size: 12px;
-    color: #71717A;
-    margin: 0 0 26px;
+    color: #999;
+    margin-bottom: 40px;
     padding-left: 2px;
 }
 
 .sol-hero-root .cta-group {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
+    gap: 16px;
 }
 
-/* Interactive 21 -> 1 Ritual Preview Stage */
+/* Hero Visual — Two Hands Holding Smartphone + In-Bezel Promo Video Stage */
 .sol-hero-root .hero-visual {
-    width: 100%;
+    flex: 1.25;
+    position: relative;
+    min-height: 540px;
     display: flex;
+    align-items: center;
     justify-content: flex-end;
 }
 
-.sol-hero-root .ritual-stage {
-    width: 100%;
-    max-width: 580px;
-    background: var(--color-white);
-    border: 2.5px solid #171717;
-    border-radius: 22px;
-    padding: 20px;
-    box-shadow: 6px 6px 0 #171717;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+.sol-hero-root .hero-boxes-bg {
+    display: none;
+    pointer-events: none;
 }
 
-.sol-hero-root .ritual-stage-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
+/* Shared wrapper for hands.png + floating blocks + in-phone demo video screen */
+.sol-hero-root .hero-phone-stage {
+    position: absolute;
+    top: -54px;
+    right: -10.5vw;
+    z-index: 10;
+    width: clamp(680px, 66.5vw, 1080px);
+    aspect-ratio: 2500 / 1395;
+    pointer-events: none;
+    transform-origin: top right;
 }
 
-.sol-hero-root .ritual-stage-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: #171717;
-    color: #FFFFFF;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.sol-hero-root .ritual-stage-pulse {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: #2ECC71;
-    box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.25);
-}
-
-.sol-hero-root .ritual-stage-hint {
-    font-size: 12px;
-    font-weight: 700;
-    color: #52525B;
-}
-
-.sol-hero-root .ritual-pills-grid {
-    display: grid;
-    grid-template-columns: repeat(9, minmax(0, 1fr));
-    gap: 6px;
-}
-
-.sol-hero-root .ritual-pill {
+.sol-hero-root .hero-hands {
     position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 44px;
-    padding: 4px 2px;
-    border-radius: 11px;
-    border: 2px solid #171717;
-    background: #FAFAFA;
-    color: #171717;
-    font-family: var(--font-roboto-slab), Georgia, serif;
-    font-size: 15px;
-    font-weight: 900;
-    line-height: 1;
-    cursor: pointer;
-    box-shadow: 0 2px 0 #171717;
-    transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+    z-index: 5;
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 2500 / 1395;
+    object-fit: contain;
+    filter: drop-shadow(-10px 20px 36px rgba(0,0,0,0.14));
+    -webkit-mask-image: linear-gradient(to bottom, #000000 0%, #000000 86%, rgba(0, 0, 0, 0.5) 94%, transparent 99.5%);
+    mask-image: linear-gradient(to bottom, #000000 0%, #000000 86%, rgba(0, 0, 0, 0.5) 94%, transparent 99.5%);
+    pointer-events: none;
     user-select: none;
 }
 
-.sol-hero-root .ritual-pill:hover {
-    transform: translateY(-1.5px);
-    box-shadow: 0 4px 0 #171717;
-    background: #FFFDF0;
-}
-
-.sol-hero-root .ritual-pill.is-active {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 0 #171717;
-    background: var(--pill-accent, #F9D423);
-    color: #111111;
-}
-
-.sol-hero-root .ritual-pill-hash {
-    font-size: 9px;
-    font-weight: 800;
-    opacity: 0.65;
-    margin-bottom: 1px;
-}
-
-.sol-hero-root .ritual-pill-solved-dot {
+/* Hero Demo Video Container — locked inside the phone screen bezel of hands.png */
+.sol-hero-root .hero-demo-container {
     position: absolute;
-    top: -4px;
-    right: -4px;
-    width: 13px;
-    height: 13px;
-    border-radius: 999px;
-    background: #2ECC71;
-    border: 1.5px solid #171717;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 8px;
-    font-weight: 900;
-    color: #111111;
-}
-
-.sol-hero-root .ritual-spotlight {
-    border: 2px solid #171717;
-    border-radius: 16px;
-    padding: 18px;
-    background: #FCFCFD;
+    left: 29.95%;
+    top: 19.95%;
+    width: 46.35%;
+    height: 39.05%;
+    transform: rotate(-0.75deg);
+    transform-origin: center center;
+    z-index: 14;
+    border-radius: 7.8% / 15.5%;
+    border: 3px solid #111111;
+    outline: 2px solid #111111;
+    background: #FFFFFF;
+    box-shadow: inset 0 0 0 1px rgba(17, 17, 17, 0.08), 0 4px 16px rgba(17, 17, 17, 0.14);
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    pointer-events: auto;
 }
 
-.sol-hero-root .ritual-spotlight-main {
+.sol-hero-root .hero-demo-surface {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
     display: flex;
-    align-items: flex-start;
-    gap: 16px;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(6px, 0.65vw, 9px) clamp(8px, 0.9vw, 13px) clamp(8px, 0.75vw, 10px);
+    background:
+        radial-gradient(circle at 85% 15%, rgba(255, 192, 0, 0.18), transparent 45%),
+        radial-gradient(circle at 15% 85%, rgba(200, 85, 203, 0.18), transparent 50%),
+        linear-gradient(180deg, #FFFFFF 0%, #F9F8FF 100%);
 }
 
-.sol-hero-root .ritual-logo-frame {
-    flex-shrink: 0;
-    width: 96px;
-    height: 96px;
-    border-radius: 16px;
-    border: 2px solid #171717;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 3px 3px 0 #171717;
+/* Subtle promo shimmer sweep inside the phone screen */
+.sol-hero-root .hero-demo-surface::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        115deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.65) 48%,
+        transparent 66%
+    );
+    transform: translateX(-120%);
+    animation: heroPromoShimmer 5.2s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 1;
 }
 
-.sol-hero-root .ritual-spotlight-body {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
+.sol-hero-root .hero-demo-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
-.sol-hero-root .ritual-meta-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 6px;
-}
-
-.sol-hero-root .ritual-num-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
-    border: 1.5px solid #171717;
-    background: #171717;
-    color: #F9D423;
-    font-family: var(--font-roboto-slab), Georgia, serif;
-    font-size: 12px;
-    font-weight: 900;
-}
-
-.sol-hero-root .ritual-vibe-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
-    border: 1.5px solid #171717;
-    background: #FFFFFF;
-    color: #171717;
-    font-size: 11px;
-    font-weight: 700;
-}
-
-.sol-hero-root .ritual-game-title {
-    font-family: var(--font-roboto-slab), Georgia, serif;
-    font-size: 24px;
-    font-weight: 900;
-    line-height: 1.12;
-    color: #111111;
-    margin: 0 0 4px;
-}
-
-.sol-hero-root .ritual-game-tagline {
-    font-size: 13px;
-    font-weight: 800;
-    color: #3F3F46;
-    margin: 0 0 5px;
-}
-
-.sol-hero-root .ritual-game-desc {
-    font-size: 13px;
-    line-height: 1.45;
-    color: #52525B;
-    margin: 0;
-}
-
-.sol-hero-root .ritual-spotlight-footer {
+.sol-hero-root .hero-demo-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    padding-top: 12px;
-    border-top: 1.5px dashed rgba(23, 23, 23, 0.16);
-}
-
-.sol-hero-root .ritual-step-controls {
-    display: flex;
-    align-items: center;
     gap: 6px;
+    z-index: 2;
 }
 
-.sol-hero-root .ritual-step-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    border: 2px solid #171717;
-    background: #FFFFFF;
-    color: #171717;
+.sol-hero-root .hero-demo-badge {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    font-weight: 900;
-    cursor: pointer;
-    box-shadow: 0 2px 0 #171717;
-    transition: background-color 0.15s ease, transform 0.15s ease;
-}
-
-.sol-hero-root .ritual-step-btn:hover {
-    background: #F4F4F5;
-    transform: translateY(-1px);
-}
-
-.sol-hero-root .ritual-step-label {
-    font-size: 11.5px;
-    font-weight: 700;
-    color: #52525B;
-    margin-left: 4px;
-}
-
-.sol-hero-root .ritual-play-cta {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 10px 18px;
+    gap: 5px;
+    padding: 2.5px 7px;
     border-radius: 999px;
-    border: 2px solid #171717;
-    background: #171717;
+    background: #111111;
     color: #FFFFFF;
-    font-family: var(--font-roboto-slab), Georgia, serif;
-    font-size: 14px;
-    font-weight: 900;
-    text-decoration: none;
-    box-shadow: 0 3px 0 #171717;
-    transition: transform 0.15s ease, background-color 0.15s ease;
+    font-size: clamp(8px, 0.68vw, 9.5px);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     white-space: nowrap;
 }
 
-.sol-hero-root .ritual-play-cta:hover {
-    background: #27272A;
-    transform: translateY(-1px);
+.sol-hero-root .hero-demo-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #439C30;
+    box-shadow: 0 0 0 3px rgba(67, 156, 48, 0.25);
+    animation: demoPulse 2s infinite;
 }
 
-/* Features Bar */
-.sol-hero-root .features {
+.sol-hero-root .hero-demo-status {
+    font-size: clamp(8.5px, 0.7vw, 10px);
+    font-weight: 600;
+    color: #555555;
+    background: rgba(255,255,255,0.88);
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(0,0,0,0.08);
+    white-space: nowrap;
+}
+
+.sol-hero-root .hero-demo-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 2px;
+    z-index: 2;
+    margin: auto 0;
+    padding-bottom: clamp(18px, 1.7vw, 24px);
+}
+
+.sol-hero-root .hero-demo-tiles {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(5, clamp(10px, 0.92vw, 13px));
+    gap: clamp(2px, 0.22vw, 3px);
+    margin-bottom: 3px;
+}
+
+.sol-hero-root .hero-demo-tile {
+    width: clamp(10px, 0.92vw, 13px);
+    height: clamp(10px, 0.92vw, 13px);
+    border-radius: 3px;
+    border: 1.5px solid #111111;
+    animation: heroTilePop 3.2s ease-in-out infinite;
+}
+
+.sol-hero-root .tile-yellow { background: #FFC000; }
+.sol-hero-root .tile-green { background: #439C30; }
+.sol-hero-root .tile-purple { background: #C855CB; }
+.sol-hero-root .tile-white { background: #FFFFFF; }
+
+.sol-hero-root .hero-demo-title {
+    font-size: clamp(11.5px, 1.15vw, 17px);
+    font-weight: 800;
+    color: #111111;
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.15;
+}
+
+.sol-hero-root .hero-demo-caption {
+    font-size: clamp(9px, 0.8vw, 11.5px);
+    font-weight: 500;
+    color: #555555;
+    margin: 0;
+    line-height: 1.2;
+}
+
+.sol-hero-root .hero-demo-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(0,0,0,0.06);
+    overflow: hidden;
+    z-index: 2;
+}
+
+.sol-hero-root .hero-demo-progress-bar {
+    height: 100%;
+    width: 45%;
+    background: linear-gradient(90deg, #FFC000, #439C30, #C855CB);
+    animation: demoProgressSlide 4s ease-in-out infinite;
+}
+
+.sol-hero-root .hero-video-unmute-btn {
+    position: absolute;
+    bottom: clamp(5px, 0.55vw, 8px);
+    right: clamp(6px, 0.65vw, 10px);
+    z-index: 20;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: clamp(3.5px, 0.38vw, 5px) clamp(8px, 0.78vw, 11px);
+    border-radius: 999px;
+    background: rgba(17, 17, 17, 0.92);
+    color: #FFFFFF;
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    font-size: clamp(9px, 0.76vw, 11.5px);
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(6px);
+    transition: transform 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.sol-hero-root .hero-video-unmute-btn:hover {
+    transform: translateY(-1.5px);
+    background: #000000;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.28);
+}
+
+.sol-hero-root .hero-video-unmute-btn:active {
+    transform: translateY(0);
+}
+
+/* Floating Geometric Color Blocks — anchored in percentages inside .hero-phone-stage */
+.sol-hero-root .hblock {
+    position: absolute;
+    display: block;
+    border-radius: 0;
+    pointer-events: none;
+}
+
+.sol-hero-root .hero-blocks-left {
+    position: absolute;
+    top: 32%;
+    left: 9.5%;
+    width: 22%;
+    height: 36%;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.sol-hero-root .hblock-l-purple {
+    width: 28%;
+    height: 46%;
+    background: #C855CB;
+    bottom: 34%;
+    left: 6%;
+}
+
+.sol-hero-root .hblock-l-yellow-lg {
+    width: 36%;
+    height: 14%;
+    background: #FFC000;
+    bottom: 24%;
+    left: 20%;
+}
+
+.sol-hero-root .hblock-l-green {
+    width: 44%;
+    height: 26%;
+    background: #439C30;
+    bottom: 2%;
+    left: 13%;
+}
+
+.sol-hero-root .hblock-l-yellow-sm {
+    width: 18%;
+    height: 19%;
+    background: #FFC000;
+    bottom: 62%;
+    left: 29%;
+}
+
+.sol-hero-root .hero-blocks-topright {
+    position: absolute;
+    top: 2%;
+    right: 6%;
+    width: 24%;
+    height: 40%;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.sol-hero-root .hblock-tr-green {
+    width: 37%;
+    height: 23%;
+    background: #439C30;
+    top: 6%;
+    right: 18%;
+}
+
+.sol-hero-root .hblock-tr-yellow {
+    width: 29%;
+    height: 12%;
+    background: #FFC000;
+    top: 24%;
+    right: 5%;
+}
+
+.sol-hero-root .hblock-tr-purple {
+    width: 24%;
+    height: 38%;
+    background: #C855CB;
+    top: 32%;
+    right: 11%;
+}
+
+.sol-hero-root .hblock-tr-yellow-sm {
+    width: 14%;
+    height: 15%;
+    background: #FFC000;
+    top: 2%;
+    right: 2%;
+}
+
+.sol-hero-root .hero-dot-matrix {
+    position: absolute;
+    display: grid;
+    grid-template-columns: repeat(5, 7px);
+    gap: 4px;
+    pointer-events: none;
+}
+
+.sol-hero-root .hero-dots-left {
+    bottom: 56%;
+    left: -2%;
+}
+
+.sol-hero-root .hero-dots-topright {
+    top: 9%;
+    right: 46%;
+}
+
+.sol-hero-root .hero-dot-cell {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(178, 101, 230, 0.42);
+}
+
+@keyframes demoPulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 3px rgba(67, 156, 48, 0.25);
+    }
+    50% {
+        transform: scale(1.15);
+        box-shadow: 0 0 0 6px rgba(67, 156, 48, 0.12);
+    }
+}
+
+@keyframes demoProgressSlide {
+    0% {
+        transform: translateX(-100%);
+    }
+    50% {
+        transform: translateX(60%);
+    }
+    100% {
+        transform: translateX(225%);
+    }
+}
+
+@keyframes heroPromoShimmer {
+    0%, 20% {
+        transform: translateX(-120%);
+    }
+    55%, 100% {
+        transform: translateX(130%);
+    }
+}
+
+@keyframes heroTilePop {
+    0%, 100% {
+        transform: translateY(0) scale(1);
+    }
+    50% {
+        transform: translateY(-2px) scale(1.06);
+    }
+}
+
+/* Features Section */
+.sol-hero-root .features {
+    display: flex;
+    justify-content: space-between;
     background-color: var(--color-white);
-    border: 2px solid #171717;
-    border-radius: 18px;
-    padding: 22px 28px;
-    margin-top: 6px;
-    margin-bottom: 36px;
-    box-shadow: 4px 4px 0 #171717;
+    border-radius: 20px;
+    padding: 35px 50px;
+    margin-top: 12px;
+    margin-bottom: 60px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.03);
+    position: relative;
+    z-index: 20;
 }
 
 .sol-hero-root .feature-item {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
+    transition: transform 0.2s ease;
+}
+
+.sol-hero-root .feature-item:hover {
+    transform: translateY(-3px);
 }
 
 .sol-hero-root .feature-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    border: 2px solid #171717;
-    flex-shrink: 0;
 }
 
-.sol-hero-root .icon-green {
-    background: rgba(46, 204, 113, 0.2);
-    color: #171717;
-}
-
-.sol-hero-root .icon-purple {
-    background: rgba(157, 80, 187, 0.18);
-    color: #171717;
-}
-
-.sol-hero-root .icon-yellow {
-    background: rgba(249, 212, 35, 0.35);
-    color: #171717;
-}
-
-.sol-hero-root .icon-green-outline {
-    background: #F4F4F5;
-    color: #171717;
-}
+.sol-hero-root .icon-green { color: var(--color-green); }
+.sol-hero-root .icon-purple { color: var(--color-purple); }
+.sol-hero-root .icon-yellow { color: var(--color-yellow); }
+.sol-hero-root .icon-green-outline { color: var(--color-green); }
 
 .sol-hero-root .feature-text h3 {
-    font-size: 15px;
-    font-weight: 800;
-    margin: 0 0 2px;
-    color: #111111;
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
 }
 
 .sol-hero-root .feature-text p {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--color-text-light);
-    line-height: 1.35;
-    margin: 0;
+    line-height: 1.4;
 }
 
-/* Responsive Breakpoints */
+/* Responsiveness */
 @media (max-width: 1024px) {
     .sol-hero-root .container {
-        padding: 0 24px;
+        padding: 0 28px;
     }
-
+    .sol-hero-root .navbar {
+        gap: 14px;
+    }
+    .sol-hero-root .navbar-logo,
+    .sol-hero-root .navbar-logo-img {
+        height: 38px;
+        margin: 0;
+    }
     .sol-hero-root .nav-links {
         gap: 18px;
     }
-
     .sol-hero-root .nav-link {
         font-size: 13.5px;
         white-space: nowrap;
     }
-
-    .sol-hero-root .hero {
-        grid-template-columns: minmax(0, 1fr);
-        text-align: center;
-        gap: 28px;
+    .sol-hero-root .navbar-actions {
+        gap: 8px;
     }
-
+    .sol-hero-root .navbar-actions .btn-primary {
+        white-space: nowrap;
+        padding: 9px 18px;
+        font-size: 14px;
+    }
+    .sol-hero-root .hero {
+        flex-direction: column;
+        text-align: center;
+        gap: 24px;
+    }
     .sol-hero-root .hero-content {
+        flex: none;
         max-width: 640px;
-        margin: 0 auto;
         display: flex;
         flex-direction: column;
         align-items: center;
     }
-
+    .sol-hero-root .hero-title {
+        font-size: clamp(46px, 7.2vw, 68px);
+    }
     .sol-hero-root .warning-box {
         text-align: left;
     }
-
-    .sol-hero-root .cta-group {
-        justify-content: center;
-    }
-
-    .sol-hero-root .hero-visual {
-        justify-content: center;
-    }
-
-    .sol-hero-root .ritual-stage {
-        max-width: 640px;
-    }
-
     .sol-hero-root .features {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        padding: 20px;
+        flex-wrap: wrap;
+        gap: 40px;
+        justify-content: center;
+    }
+    .sol-hero-root .hero-visual {
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        margin-top: 8px;
+        overflow: hidden;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+    }
+    .sol-hero-root .hero-phone-stage {
+        position: relative;
+        top: auto;
+        bottom: auto;
+        right: auto;
+        width: min(100%, 780px);
+        margin: 0 auto -32px;
+    }
+    .sol-hero-root .hero-demo-tiles {
+        grid-template-columns: repeat(5, 11px);
+        gap: 2.5px;
+    }
+    .sol-hero-root .hero-demo-tile {
+        width: 11px;
+        height: 11px;
+    }
+    .sol-hero-root .hero-demo-center {
+        padding-bottom: 20px;
+        gap: 2px;
     }
 }
 
 @media (max-width: 768px) {
     .sol-hero-root .container {
         padding: 0 16px;
+        min-height: auto;
     }
-
     .sol-hero-root .navbar {
         padding: 14px 0 10px;
         margin-bottom: 6px;
         gap: 8px;
     }
-
-    .sol-hero-root .navbar-logo {
+    .sol-hero-root .navbar-logo,
+    .sol-hero-root .navbar-logo-img {
         height: 32px;
+        margin: 0;
     }
-
     .sol-hero-root .nav-links {
         display: none;
     }
-
     .sol-hero-root .navbar-actions {
-        gap: 6px;
+        gap: 8px;
     }
-
     .sol-hero-root .navbar-actions .btn-primary {
-        padding: 7px 13px;
-        font-size: 12.5px;
+        padding: 8px 14px;
+        font-size: 13px;
+        white-space: nowrap;
     }
-
     .sol-hero-root .mobile-quick-nav {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 6px;
         flex-wrap: wrap;
-        margin-bottom: 10px;
+        margin-bottom: 14px;
     }
-
     .sol-hero-root .mobile-quick-nav-pill {
         display: inline-flex;
         align-items: center;
@@ -703,147 +783,201 @@
         font-weight: 700;
         text-decoration: none;
         box-shadow: 0 2px 0 #111111;
+        cursor: pointer;
+        transition: transform 0.15s ease, background-color 0.15s ease;
     }
-
+    .sol-hero-root .mobile-quick-nav-pill:active {
+        transform: translateY(1px);
+    }
     .sol-hero-root .hero {
         padding: 8px 0 20px;
-        gap: 22px;
+        gap: 16px;
     }
-
     .sol-hero-root .hero-title {
-        font-size: clamp(34px, 9vw, 48px);
-        letter-spacing: -1.4px;
-        margin-bottom: 12px;
+        font-size: clamp(34px, 9.2vw, 48px);
+        line-height: 1.06;
+        letter-spacing: -1.5px;
+        margin-bottom: 14px;
     }
-
     .sol-hero-root .hero-subtitle {
-        font-size: 15px;
-        margin-bottom: 16px;
+        font-size: 15.5px;
+        margin-bottom: 18px;
     }
-
     .sol-hero-root .hero-subtitle br,
-    .sol-hero-root .warning-text br {
+    .sol-hero-root .warning-text br,
+    .sol-hero-root .feature-text br {
         display: none;
     }
-
     .sol-hero-root .warning-box {
         width: 100%;
-        padding: 11px 13px;
+        max-width: 400px;
+        padding: 12px 14px;
+        gap: 12px;
+        margin-bottom: 8px;
     }
-
     .sol-hero-root .small-disclaimer {
         margin-bottom: 18px;
     }
-
-    .sol-hero-root .ritual-stage {
-        padding: 14px;
-        border-radius: 18px;
-        box-shadow: 4px 4px 0 #171717;
-        gap: 12px;
+    .sol-hero-root .cta-group {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
     }
-
-    .sol-hero-root .ritual-pills-grid {
+    .sol-hero-root .cta-group .btn-lg {
+        padding: 12px 22px;
+        font-size: 15px;
+    }
+    .sol-hero-root .hero-visual {
+        width: calc(100% + 32px);
+        margin-left: -16px;
+        margin-right: -16px;
+        min-height: auto;
+        height: auto;
+        margin-top: 2px;
+        padding: 0;
+        overflow: hidden;
+        display: block;
+    }
+    .sol-hero-root .hero-phone-stage {
+        position: relative;
+        top: auto;
+        bottom: auto;
+        right: auto;
+        left: 50%;
+        transform: translateX(-53.1%);
+        width: clamp(540px, 168vw, 760px);
+        margin: -18px 0 -42px;
+    }
+    .sol-hero-root .hero-demo-surface {
+        padding: 6px 8px 8px;
+    }
+    .sol-hero-root .hero-demo-topbar {
         gap: 4px;
     }
-
-    .sol-hero-root .ritual-pill {
-        min-height: 38px;
-        font-size: 13px;
-        border-radius: 9px;
+    .sol-hero-root .hero-demo-badge {
+        font-size: 7.5px;
+        padding: 2px 6px;
+        gap: 4px;
     }
-
-    .sol-hero-root .ritual-pill-hash {
+    .sol-hero-root .hero-demo-dot {
+        width: 5px;
+        height: 5px;
+    }
+    .sol-hero-root .hero-demo-status {
         font-size: 8px;
+        padding: 1.5px 5px;
     }
-
-    .sol-hero-root .ritual-spotlight {
-        padding: 14px;
+    .sol-hero-root .hero-demo-tiles {
+        grid-template-columns: repeat(5, 9px);
+        gap: 2px;
+        margin-bottom: 1px;
     }
-
-    .sol-hero-root .ritual-spotlight-main {
-        gap: 12px;
+    .sol-hero-root .hero-demo-tile {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        border-width: 1.2px;
     }
-
-    .sol-hero-root .ritual-logo-frame {
-        width: 76px;
-        height: 76px;
-        border-radius: 13px;
+    .sol-hero-root .hero-demo-center {
+        padding-bottom: 16px;
+        gap: 1.5px;
     }
-
-    .sol-hero-root .ritual-game-title {
-        font-size: 20px;
+    .sol-hero-root .hero-demo-title {
+        font-size: 11.5px;
     }
-
-    .sol-hero-root .ritual-spotlight-footer {
-        flex-direction: column;
-        align-items: stretch;
+    .sol-hero-root .hero-demo-caption {
+        font-size: 9px;
     }
-
-    .sol-hero-root .ritual-step-controls {
-        justify-content: space-between;
+    .sol-hero-root .hero-video-unmute-btn {
+        bottom: 4px;
+        right: 6px;
+        padding: 3px 7px;
+        font-size: 8.5px;
+        gap: 3.5px;
     }
-
-    .sol-hero-root .ritual-play-cta {
-        width: 100%;
+    .sol-hero-root .hero-video-unmute-btn svg {
+        width: 11px;
+        height: 11px;
     }
-
     .sol-hero-root .features {
+        display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        padding: 14px;
-        margin-bottom: 24px;
+        gap: 14px 12px;
+        padding: 18px 14px;
+        margin-top: 4px;
+        margin-bottom: 28px;
+        border-radius: 16px;
     }
-
     .sol-hero-root .feature-item {
         align-items: flex-start;
-        gap: 9px;
+        gap: 10px;
+        text-align: left;
     }
-
-    .sol-hero-root .feature-icon {
-        width: 34px;
-        height: 34px;
-        border-radius: 9px;
-    }
-
     .sol-hero-root .feature-text h3 {
-        font-size: 13px;
+        font-size: 13.5px;
     }
-
     .sol-hero-root .feature-text p {
-        font-size: 11.5px;
+        font-size: 12px;
+        line-height: 1.35;
     }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 380px) {
     .sol-hero-root .container {
         padding: 0 12px;
     }
-
-    .sol-hero-root .navbar-logo {
+    .sol-hero-root .navbar-logo,
+    .sol-hero-root .navbar-logo-img {
         height: 28px;
+        margin: 0;
     }
-
-    .sol-hero-root .ritual-pills-grid {
-        gap: 3px;
+    .sol-hero-root .navbar-actions {
+        gap: 6px;
     }
-
-    .sol-hero-root .ritual-pill {
-        min-height: 36px;
-        font-size: 12px;
-        padding: 3px 1px;
+    .sol-hero-root .navbar-actions .btn-primary {
+        padding: 6px 10px;
+        font-size: 11.5px;
     }
-
-    .sol-hero-root .ritual-spotlight-main {
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
+    .sol-hero-root .hero-visual {
+        width: calc(100% + 24px);
+        margin-left: -12px;
+        margin-right: -12px;
     }
-
-    .sol-hero-root .ritual-spotlight-body {
-        text-align: center;
+    .sol-hero-root .hero-demo-surface {
+        padding: 5px 7px 6px;
     }
-
-    .sol-hero-root .ritual-meta-row {
-        justify-content: center;
+    .sol-hero-root .hero-demo-badge {
+        font-size: 7px;
+        padding: 1.5px 5px;
+    }
+    .sol-hero-root .hero-demo-status {
+        font-size: 7.5px;
+        padding: 1px 4px;
+    }
+    .sol-hero-root .hero-demo-tiles {
+        grid-template-columns: repeat(5, 8px);
+        gap: 1.5px;
+        margin-bottom: 1px;
+    }
+    .sol-hero-root .hero-demo-tile {
+        width: 8px;
+        height: 8px;
+    }
+    .sol-hero-root .hero-demo-center {
+        padding-bottom: 18px;
+        gap: 1px;
+    }
+    .sol-hero-root .hero-demo-title {
+        font-size: 10.5px;
+    }
+    .sol-hero-root .hero-demo-caption {
+        font-size: 8px;
+    }
+    .sol-hero-root .hero-video-unmute-btn {
+        bottom: 3px;
+        right: 5px;
+        padding: 2.5px 6px;
+        font-size: 8px;
     }
 }
