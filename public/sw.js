@@ -1,4 +1,4 @@
-const CACHE_NAME = "21games-static-v2";
+const CACHE_NAME = "21games-static-v3";
 
 const ICON_PATHS = new Set([
   "/apple-touch-icon.png",
@@ -74,7 +74,7 @@ self.addEventListener("fetch", (event) => {
   const accept = request.headers.get("accept") || "";
   if (request.mode === "navigate" || accept.includes("text/html")) {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-cache" })
         .then((response) => {
           if (response && response.ok && response.status === 200) {
             const copy = response.clone();

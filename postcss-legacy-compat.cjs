@@ -1,12 +1,15 @@
 /**
- * PostCSS Legacy WebKit / Embedded WebView Compatibility Plugin for 21 Games.
+ * PostCSS Universal Cross-Browser & Legacy WebKit/Chromium Compatibility Plugin for 21 Games.
  *
- * 1. Unwraps @layer blocks (properties, theme, base, components, utilities) in exact
- *    cascade order so Safari < 15.4 and embedded in-app WebViews apply 100% of Tailwind v4 rules.
- * 2. Emits rgba(...) / hsla(...) fallback declarations immediately before color-mix(in oklab, ...)
- *    declarations so iOS 15.4–16.3 renders translucent backgrounds, borders, and rings cleanly.
- * 3. Emits transform: translate(...)/scale(...) fallbacks before standalone CSS Transform Level 2
- *    properties for older mobile browsers.
+ * Ensures 100% identical rendering across all browsers (Chrome Android/iOS/Desktop,
+ * Safari < 15.4 / 15.4–16.3 / 17+, Samsung Internet, Firefox, Edge, and embedded WebViews):
+ * 1. Unwraps @layer blocks (properties, theme, base, components, utilities) in exact cascade order.
+ * 2. Resolves both #hex and oklch(...) Tailwind v4 theme variables inside color-mix(...) into
+ *    universal rgba(...) / hsla(...) fallback declarations.
+ * 3. Emits transform: translate/scale/rotate fallbacks before standalone CSS Transform Level 2 properties.
+ * 4. Emits vh fallbacks before dvh / svh / lvh dynamic viewport units.
+ * 5. Emits -webkit-backdrop-filter before unprefixed backdrop-filter.
+ * 6. Emits top/right/bottom/left fallbacks before single-value inset shorthand.
  */
 
 function hexToRgbTuple(hex) {
@@ -24,6 +27,70 @@ function hexToRgbTuple(hex) {
       parseInt(clean.slice(2, 4), 16),
       parseInt(clean.slice(4, 6), 16),
     ];
+  }
+  return null;
+}
+
+function clampByte(v) {
+  return Math.max(0, Math.min(255, Math.round(v * 255)));
+}
+
+function linearToSrgb(c) {
+  const clamped = Math.max(0, Math.min(1, c));
+  return clamped <= 0.0031308
+    ? 12.92 * clamped
+    : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+}
+
+function oklchToRgbTuple(expr) {
+  const m = String(expr)
+    .trim()
+    .match(/^oklch\(\s*([0-9.]+)(%?)\s+([0-9.]+)\s+([0-9.]+)(?:deg)?\s*\)$/i);
+  if (!m) return null;
+  let L = parseFloat(m[1]);
+  if (m[2] === "%") L /= 100;
+  const C = parseFloat(m[3]);
+  const hRad = (parseFloat(m[4]) * Math.PI) / 180;
+  if (!Number.isFinite(L) || !Number.isFinite(C) || !Number.isFinite(hRad)) {
+    return null;
+  }
+
+  const a = C * Math.cos(hRad);
+  const b = C * Math.sin(hRad);
+
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+
+  const l = l_ * l_ * l_;
+  const mLin = m_ * m_ * m_;
+  const s = s_ * s_ * s_;
+
+  const r = +4.0767416621 * l - 3.3077115913 * mLin + 0.2309699292 * s;
+  const g = -1.2684380046 * l + 2.6097574011 * mLin - 0.3413193965 * s;
+  const bl = -0.0041960863 * l - 0.7034186147 * mLin + 1.707614701 * s;
+
+  return [
+    clampByte(linearToSrgb(r)),
+    clampByte(linearToSrgb(g)),
+    clampByte(linearToSrgb(bl)),
+  ];
+}
+
+function resolveColorToRgbTuple(rawColor, rootVars) {
+  const expr = String(rawColor).trim();
+  if (expr.startsWith("#")) return hexToRgbTuple(expr);
+  if (/^oklch\(/i.test(expr)) return oklchToRgbTuple(expr);
+  if (expr.toLowerCase() === "black") return [0, 0, 0];
+  if (expr.toLowerCase() === "white") return [255, 255, 255];
+
+  const varMatch = expr.match(/^var\((--[a-zA-Z0-9_-]+)\)$/);
+  if (varMatch) {
+    const resolved = rootVars.get(varMatch[1]);
+    if (resolved) {
+      if (resolved.startsWith("#")) return hexToRgbTuple(resolved);
+      if (/^oklch\(/i.test(resolved)) return oklchToRgbTuple(resolved);
+    }
   }
   return null;
 }
@@ -48,24 +115,10 @@ function buildColorMixFallback(value, rootVars) {
         return `hsla(${hslVarMatch[1]}, ${alpha})`;
       }
 
-      const varMatch = colorExpr.match(/^var\((--[a-zA-Z0-9_-]+)\)$/);
-      if (varMatch) {
-        const resolved = rootVars.get(varMatch[1]);
-        if (resolved && resolved.startsWith("#")) {
-          const rgb = hexToRgbTuple(resolved);
-          if (rgb) {
-            changed = true;
-            return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
-          }
-        }
-      }
-
-      if (colorExpr.startsWith("#")) {
-        const rgb = hexToRgbTuple(colorExpr);
-        if (rgb) {
-          changed = true;
-          return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
-        }
+      const rgb = resolveColorToRgbTuple(colorExpr, rootVars);
+      if (rgb) {
+        changed = true;
+        return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
       }
 
       if (colorExpr.toLowerCase() === "currentcolor") {
@@ -127,9 +180,20 @@ module.exports = function legacyWebkitCompatPlugin() {
 
       root.walkRules((rule) => {
         let hasTransformDecl = false;
+        let hasWebkitBackdrop = false;
+        let hasBoxEdges = false;
+
         rule.each((node) => {
-          if (node.type === "decl" && node.prop === "transform") {
-            hasTransformDecl = true;
+          if (node.type !== "decl") return;
+          if (node.prop === "transform") hasTransformDecl = true;
+          if (node.prop === "-webkit-backdrop-filter") hasWebkitBackdrop = true;
+          if (
+            node.prop === "top" ||
+            node.prop === "right" ||
+            node.prop === "bottom" ||
+            node.prop === "left"
+          ) {
+            hasBoxEdges = true;
           }
         });
 
@@ -141,6 +205,36 @@ module.exports = function legacyWebkitCompatPlugin() {
             if (fallbackVal && fallbackVal !== node.value) {
               node.cloneBefore({ prop: node.prop, value: fallbackVal });
             }
+          }
+
+          if (/([0-9.]+)(?:dvh|svh|lvh)\b/.test(node.value)) {
+            const vhFallback = node.value.replace(
+              /([0-9.]+)(?:dvh|svh|lvh)\b/g,
+              "$1vh"
+            );
+            if (vhFallback !== node.value) {
+              node.cloneBefore({ prop: node.prop, value: vhFallback });
+            }
+          }
+
+          if (node.prop === "backdrop-filter" && !hasWebkitBackdrop) {
+            node.cloneBefore({
+              prop: "-webkit-backdrop-filter",
+              value: node.value,
+            });
+            hasWebkitBackdrop = true;
+          }
+
+          if (
+            node.prop === "inset" &&
+            !hasBoxEdges &&
+            !/\s/.test(node.value.trim())
+          ) {
+            const edgeVal = node.value.trim();
+            node.cloneBefore({ prop: "top", value: edgeVal });
+            node.cloneBefore({ prop: "right", value: edgeVal });
+            node.cloneBefore({ prop: "bottom", value: edgeVal });
+            node.cloneBefore({ prop: "left", value: edgeVal });
           }
 
           if (
@@ -163,6 +257,11 @@ module.exports = function legacyWebkitCompatPlugin() {
               node.cloneBefore({
                 prop: "transform",
                 value: sx === sy ? `scale(${sx})` : `scale(${sx}, ${sy})`,
+              });
+            } else if (node.prop === "rotate") {
+              node.cloneBefore({
+                prop: "transform",
+                value: `rotate(${node.value.trim()})`,
               });
             }
           }

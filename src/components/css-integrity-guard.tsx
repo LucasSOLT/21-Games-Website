@@ -39,7 +39,9 @@ export function CssIntegrityGuard() {
 
   useEffect(() => {
     if ("serviceWorker" in navigator && window.location.protocol === "https:") {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
+      navigator.serviceWorker
+        .register("/sw.js", { updateViaCache: "none" })
+        .catch(() => {});
     }
 
     const handleResourceError = (event: Event) => {

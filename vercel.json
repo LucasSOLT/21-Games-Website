@@ -11,6 +11,11 @@
       "permanent": true
     },
     {
+      "source": "/solgames/index.html",
+      "destination": "/",
+      "permanent": true
+    },
+    {
       "source": "/solgames/:path*",
       "destination": "/:path*",
       "permanent": true
